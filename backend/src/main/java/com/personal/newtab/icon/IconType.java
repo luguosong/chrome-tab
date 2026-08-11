@@ -9,5 +9,10 @@ package com.personal.newtab.icon;
 public enum IconType {
     NAV,
     STOCK,
-    CHANGELOG
+    CHANGELOG;
+
+    /** 单例类型（CONTEXT.md）：该 user 全局仅允许一个实例。后端单一事实源，POST /api/icons 校验用。 */
+    public boolean isSingleton() {
+        return this == CHANGELOG;
+    }
 }

@@ -13,6 +13,12 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    /** Icon/Page 写操作的容量/单例/越权/非空页等业务约束冲突 → 按异常携带的 status 返回。 */
+    @ExceptionHandler(OperationConflictException.class)
+    public ResponseEntity<ErrorResponse> operationConflict(OperationConflictException e) {
+        return ResponseEntity.status(e.getStatus()).body(new ErrorResponse(e.getStatus(), e.getMessage()));
+    }
+
     @ExceptionHandler(BadCredentialsException.class)
     public ResponseEntity<ErrorResponse> badCredentials(BadCredentialsException e) {
         return ResponseEntity.status(401).body(new ErrorResponse(401, "用户名或密码错误"));
