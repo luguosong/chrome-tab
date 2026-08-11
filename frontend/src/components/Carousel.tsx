@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { useDndContext, useDroppable } from '@dnd-kit/core'
 import PageTabs from './PageTabs'
 
 /**
@@ -19,15 +20,28 @@ import PageTabs from './PageTabs'
  * - 尊重 prefers-reduced-motion（关闭 smooth）
  */
 
+/**
+ * 边缘翻页 droppable 的 id(07)。EdgeDropZone 在此定义,DashboardPage 的 onDragOver
+ * 据此识别"落在边缘"并放行(边缘翻页由 EdgeDropZone 自管计时器,不走跨页移动逻辑)。
+ * 集中常量避免两处字面量漂移。
+ */
+export const EDGE_DROP_ID = {
+  left: 'edge-left',
+  right: 'edge-right',
+} as const
+
 interface CarouselApi {
   /** 当前激活页索引(供 PageTabs 高亮等读取) */
   active: number
+  /** 总页数(issue 07:边缘自动翻页需要判断是否到边界) */
+  count: number
   /** 翻到第 i 页(自动夹到 [0, count-1]) */
   goTo: (i: number) => void
 }
 
 const CarouselApiContext = createContext<CarouselApi>({
   active: 0,
+  count: 0,
   goTo: () => {},
 })
 
@@ -140,7 +154,7 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
     'dark:text-white/90 dark:hover:bg-white/20 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent'
 
   return (
-    <CarouselApiContext.Provider value={{ active, goTo }}>
+    <CarouselApiContext.Provider value={{ active, count: labels.length, goTo }}>
       <div className="relative w-full">
         {/* 翻页区 */}
         <div
@@ -185,7 +199,55 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
 
         {/* 常驻页签条:切换/重排/增删改页面(替换原圆点指示器,页签条信息更丰富) */}
         <PageTabs />
+
+        {/* 拖拽到屏幕左右边缘自动翻页(issue 07 / spec user story 31)。
+            仅在 DnD 拖拽进行中挂载,避免无拖拽时占据边缘点击区。停留 400ms 翻到相邻页,
+            持续停留则每 400ms 连续翻页(走马灯连续跨页体验)。 */}
+        <EdgeDropZone side="left" />
+        <EdgeDropZone side="right" />
       </div>
     </CarouselApiContext.Provider>
+  )
+}
+
+/**
+ * 拖拽时的左右边缘翻页区(issue 07)。挂在 Carousel 内部(可读 useCarousel)。
+ *
+ * 工作流(spec user story 31/32):
+ *   1. 编辑模式下拖起图标 → DnD `active` 置位 → 本组件挂载并注册为 droppable。
+ *   2. 光标拖到左/右边缘 → `isOver=true` → 启动 400ms 计时器。
+ *   3. 计时器到点 → `goTo(active ± 1)` 翻到相邻页;翻页后 activeIndex 变化,effect 重跑,
+ *      持续停留则每 400ms 再翻一页(连续翻页)。
+ *   4. 光标离开边缘 → `isOver=false` → effect 清理函数清掉计时器。
+ *
+ * 边界已到(第一页左边缘 / 末页右边缘)时不翻(target 越界,直接 return)。
+ * 区域 z-10,低于左右箭头(z-20),箭头可点击不受影响;且仅拖拽中挂载,无拖拽时不占边缘。
+ */
+function EdgeDropZone({ side }: { side: 'left' | 'right' }) {
+  const { active: activeIndex, count, goTo } = useCarousel()
+  const { active } = useDndContext()
+  const { isOver, setNodeRef } = useDroppable({
+    id: side === 'left' ? EDGE_DROP_ID.left : EDGE_DROP_ID.right,
+  })
+
+  useEffect(() => {
+    if (!isOver) return
+    const dir = side === 'left' ? -1 : 1
+    const target = activeIndex + dir
+    if (target < 0 || target > count - 1) return // 已到边界,不翻
+    const timer = window.setTimeout(() => goTo(target), 400)
+    return () => window.clearTimeout(timer)
+  }, [isOver, side, activeIndex, count, goTo])
+
+  // 无拖拽时不渲染(不占边缘点击区)。active 由 DndContext 提供,拖拽中为非空。
+  if (!active) return null
+  return (
+    <div
+      ref={setNodeRef}
+      aria-hidden
+      className={
+        'absolute top-0 bottom-0 z-10 w-12 ' + (side === 'left' ? 'left-0' : 'right-0')
+      }
+    />
   )
 }
