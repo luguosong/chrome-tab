@@ -12,7 +12,15 @@ import IconView from './Icon'
  * 自动流策略:用 grid-auto-flow:dense 让小图标填充大图标之间的空隙,迁移后默认页布局
  * (12 small + 1 large + 13 medium)在 6×4 视口下视觉紧凑。
  */
-export default function IconGrid({ page, icons }: { page: Page; icons: Icon[] }) {
+export default function IconGrid({
+  page,
+  icons,
+  onOpenDetail,
+}: {
+  page: Page
+  icons: Icon[]
+  onOpenDetail?: (icon: Icon) => void
+}) {
   if (icons.length === 0) {
     return (
       <section className="glass-panel rounded-3xl p-6 mx-auto max-w-3xl">
@@ -37,7 +45,7 @@ export default function IconGrid({ page, icons }: { page: Page; icons: Icon[] })
       </h2>
       <div className="grid gap-3" style={style} role="grid">
         {icons.map((icon) => (
-          <IconView key={icon.id} icon={icon} />
+          <IconView key={icon.id} icon={icon} onOpenDetail={onOpenDetail} />
         ))}
       </div>
     </section>

@@ -3,7 +3,9 @@ import { get, type Summary, type SummaryInput } from '../lib/iconTypeRegistry'
 import { inline } from '../lib/changelogParser'
 import type { Icon as IconModel, IconSize } from '../lib/types'
 import { useIconData } from '../context/IconDataContext'
+import { useEditMode } from '../context/EditModeContext'
 import { SIZE_CELLS } from '../lib/iconLayout'
+import { extractString } from '../lib/iconData'
 
 /**
  * 单个图标渲染(见 CONTEXT.md「图标」/ spec §前端架构 IconGrid)。
@@ -13,8 +15,11 @@ import { SIZE_CELLS } from '../lib/iconLayout'
  *   - medium (2×2):favicon + 名称
  *   - large  (3×2):favicon + 名称 + 实时摘要(调用类型注册表 summarize)
  *
- * 类型分发:nav 在非编辑模式下是 <a>(新标签打开);stock/changelog 的点击行为(详情 Modal/
- * Drawer)是 10 ticket 的范围,此处静态渲染。
+ * 点击行为(10 ticket,按 detail 字段派发 —— ADR-0001 契约:容器形态由类型定义声明,
+ * 新增复用 modal/drawer 的类型无需改本组件):
+ *   - 编辑模式:不触发任何详情/跳转(角标操作优先,spec user story 29)
+ *   - detail='none':nav 渲染为 <a>(新标签打开目标 URL,spec user story 13)
+ *   - detail='modal'/'drawer':查看态点击 → onOpenDetail(icon),父组件按 detail 渲染面板
  *
  * 刷新失败降级:summarize 返回 null → 摘要行显示灰色 "--"(spec user story 14)。
  */
@@ -24,9 +29,16 @@ const SIZE_STYLE: Record<IconSize, { pad: string; favicon: string }> = {
   large: { pad: 'p-4', favicon: 'w-12 h-12' },
 }
 
-export default function Icon({ icon }: { icon: IconModel }) {
+export default function Icon({
+  icon,
+  onOpenDetail,
+}: {
+  icon: IconModel
+  onOpenDetail?: (icon: IconModel) => void
+}) {
   const def = get(icon.type)
   const { quotes, changelog } = useIconData()
+  const { editing } = useEditMode()
 
   // 实时摘要(只在大尺寸时计算)
   const summary = useMemo<Summary | null>(() => {
@@ -46,22 +58,29 @@ export default function Icon({ icon }: { icon: IconModel }) {
   const url = icon.type === 'nav' ? extractString(icon.data, 'url') : ''
   const favicon = url ? faviconUrl(url) : ''
 
-  // nav 是链接(新标签打开);其它类型本阶段无点击行为(10 ticket)
-  const isLink = icon.type === 'nav'
-  const Tag = isLink ? 'a' : 'div'
-  const linkProps = isLink
+  // 点击派发:编辑模式一律不触发;查看模式按 detail 字段(ADR-0001 契约:容器形态由类型定义声明)
+  //   - detail='none':nav 渲染为 <a target=_blank> 新标签打开(保留原生中键/右键菜单)
+  //   - detail='modal'/'drawer':点击 → onOpenDetail,由父组件按 detail 渲染对应面板
+  const isNavLink = icon.type === 'nav' && !editing
+  const Tag = isNavLink ? 'a' : 'div'
+  const linkProps = isNavLink
     ? { href: url, target: '_blank' as const, rel: 'noreferrer' }
     : {}
+  const hasPanel = def?.detail === 'modal' || def?.detail === 'drawer'
+  const onClick = !editing && hasPanel && onOpenDetail ? () => onOpenDetail(icon) : undefined
+
+  const interactive = !editing && (isNavLink || onClick !== undefined)
 
   return (
     <Tag
       style={style}
       {...linkProps}
+      onClick={onClick}
       title={def?.label}
       className={
         'relative flex flex-col items-center justify-center gap-2 rounded-2xl ' +
         'bg-white/15 hover:bg-white/30 transition ' +
-        (isLink ? 'cursor-pointer' : 'cursor-default') +
+        (interactive ? 'cursor-pointer' : 'cursor-default') +
         ' ' + sz.pad
       }
     >
@@ -113,11 +132,6 @@ function SummaryLine({ summary }: { summary: Summary | null }) {
 }
 
 // ── 辅助 ──────────────────────────────────────────────────────────────────
-function extractString(data: Record<string, unknown> | null, key: string): string {
-  if (!data) return ''
-  const v = data[key]
-  return typeof v === 'string' ? v : ''
-}
 
 /** 各类型的显示名(nav/stock 用 data.name,changelog 用类型 label)。 */
 function extractName(icon: IconModel): string {
