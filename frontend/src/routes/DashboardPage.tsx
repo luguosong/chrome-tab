@@ -12,8 +12,9 @@ import Carousel from '../components/Carousel'
 import IconGrid from '../components/IconGrid'
 import StockModal from '../components/StockModal'
 import ChangelogDrawer from '../components/ChangelogDrawer'
+import AddDrawer from '../components/AddDrawer'
 import { get } from '../lib/iconTypeRegistry'
-import type { Icon, Page } from '../lib/types'
+import type { Icon, IconTypeId, Page } from '../lib/types'
 
 /**
  * 走马灯每屏的内容:取该页的图标,按 sortOrder 升序,交给 IconGrid 渲染。
@@ -45,18 +46,40 @@ function Dashboard() {
   // stock → Modal、changelog → 底部 Drawer、nav 不经此(其详情=新标签打开)。
   const [detail, setDetail] = useState<Icon | null>(null)
 
-  // 编辑态进入时关闭已开的详情,避免编辑/详情态并存(spec user story 29)。
+  // 新增抽屉开关(issue 09):右上角 "+" 唤起,与编辑模式职责分离。
+  const [addDrawerOpen, setAddDrawerOpen] = useState(false)
+
+  // 当前激活页索引:Carousel 滚动停稳后向上通知,用于新增抽屉把新图标落到"当前页"。
+  const [activeIndex, setActiveIndex] = useState(0)
+
+  // 编辑态进入时关闭已开的详情与新增抽屉,避免编辑/详情/新增态并存(spec user story 29)。
   useEffect(() => {
-    if (editing) setDetail(null)
+    if (editing) {
+      setDetail(null)
+      setAddDrawerOpen(false)
+    }
   }, [editing])
 
   // 新模型:pages 按 sortOrder 升序,icons 分组进各页。
   const pages = data?.pages ?? []
   const icons = data?.icons ?? []
 
+  // 已存在的图标类型集合——新增抽屉用此判断单例类型置灰(单例=全局唯一,跨页)。
+  const existingTypeIds = useMemo<IconTypeId[]>(
+    () => [...new Set(icons.map((i) => i.type))],
+    [icons],
+  )
+
+  // 当前激活页 id——给新增抽屉决定新图标落到哪页。
+  // activeIndex 由 Carousel 滚动停稳时向上通知;但删页/重排(issue 08)后 Carousel 内部
+  // 会夹住自身 active,若未触发滚动则此处的 activeIndex 可能短暂越界,故读取时再夹一次。
+  const activePageId = pages[Math.min(activeIndex, Math.max(0, pages.length - 1))]?.id
+
   return (
+    // 固定画布(ADR-0002 / CONTEXT.md「页面」):h-screen + overflow-hidden,
+    // 页面内容必须在视口内完整呈现,不产生纵向滚动条(滚轮用于翻页,见 Carousel)。
     <div
-      className="min-h-screen flex flex-col"
+      className="h-screen overflow-hidden flex flex-col"
       onContextMenu={(e) => {
         e.preventDefault()
         toggle()
@@ -74,6 +97,15 @@ function Dashboard() {
       {/* 右上角固定控件 */}
       <div className="absolute top-4 right-4 z-30 flex items-center gap-3">
         <ThemeToggle />
+        {/* 新增图标入口(issue 09):与编辑模式分离,点开侧抽屉选类型即填即加 */}
+        <button
+          type="button"
+          onClick={() => setAddDrawerOpen(true)}
+          aria-label="新增图标"
+          className="glass-panel text-white/90 w-8 h-8 rounded-full hover:bg-white/40 flex items-center justify-center text-lg leading-none"
+        >
+          +
+        </button>
         <span className="text-sm text-white/90 drop-shadow">{user?.username}</span>
         <button
           onClick={logout}
@@ -98,7 +130,10 @@ function Dashboard() {
       <div className="flex-1 px-2 pb-6">
         {pages.length > 0 ? (
           <IconDataProvider icons={icons}>
-            <Carousel labels={pages.map((p) => p.name)}>
+            <Carousel
+              labels={pages.map((p) => p.name)}
+              onActiveChange={setActiveIndex}
+            >
               {pages.map((p) => (
                 <PageSlide key={p.id} page={p} icons={icons} onOpenDetail={setDetail} />
               ))}
@@ -116,6 +151,16 @@ function Dashboard() {
           <div className="text-white/60 text-sm text-center py-8">加载中…</div>
         )}
       </div>
+
+      {/* 新增抽屉(issue 09):fixed 侧抽屉,新图标落到当前激活页末尾。
+          existingTypeIds 用于单例置灰;pageId 取当前激活页(无页则禁用提交)。 */}
+      {addDrawerOpen && (
+        <AddDrawer
+          pageId={activePageId}
+          existingTypeIds={existingTypeIds}
+          onClose={() => setAddDrawerOpen(false)}
+        />
+      )}
     </div>
   )
 }
