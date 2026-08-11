@@ -1,0 +1,26 @@
+# 测试 profile：H2 内存库，绝不连开发库（localhost:19002/newtab）。
+# 关 Flyway（现有迁移脚本为 MySQL 方言，不兼容 H2），改用 ddl-auto=create-drop 从 JPA 实体生成 schema。
+# 这要求新实体不依赖 MySQL 专有特性——icons.data 用 TEXT + AttributeConverter 而非 JSON 类型，正是为此。
+spring:
+  datasource:
+    url: jdbc:h2:mem:newtab;MODE=MySQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        format_sql: true
+  flyway:
+    enabled: false
+
+admin:
+  username: admin
+  password: 12345678   # DataBootstrap 要求非空
+
+logging:
+  level:
+    com.personal.newtab: DEBUG

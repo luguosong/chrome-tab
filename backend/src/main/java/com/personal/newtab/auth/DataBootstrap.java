@@ -14,6 +14,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.List;
@@ -61,6 +63,7 @@ public class DataBootstrap {
             new String[]{"sz300750", "宁德时代"});
 
     @Bean
+    @Order(Ordered.HIGHEST_PRECEDENCE)   // 必须先于 IconModelMigrationRunner（后者读取本 runner seed 的源表）
     public ApplicationRunner dataBootstrapRunner(
             @Value("${admin.username:admin}") String username,
             @Value("${admin.password:}") String password) {
