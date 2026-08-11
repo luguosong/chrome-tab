@@ -83,6 +83,14 @@ export function sizesFor(typeId: IconTypeId): IconSize[] {
   return registry.get(typeId)?.sizes ?? []
 }
 
+/**
+ * 全部已登记类型定义,按登记顺序(基础类型先于扩展类型,内置 nav/stock/changelog 顺序稳定)。
+ * issue 09 新增抽屉按基础/扩展分区渲染卡片时遍历用。
+ */
+export function listTypes(): IconTypeDefinition[] {
+  return [...registry.values()]
+}
+
 // ── 三个内置类型定义 ──────────────────────────────────────────────────────
 /** 网站链接:基础类型,data={name,url}。点击直接在新标签打开,无详情容器,无实时摘要。 */
 export const NAV_DEF: IconTypeDefinition = {

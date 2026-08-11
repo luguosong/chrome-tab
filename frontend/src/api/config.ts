@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from './client'
 import type { Config, Icon, IconSize, IconTypeId, Page, Setting } from '../lib/types'
+import { moveIcon, type MoveAction } from '../lib/iconReducer'
 
 /** Page 重排请求项(对齐后端 PageService.ReorderItem)。 */
 export type ReorderItem = { id: number; sortOrder: number }
@@ -223,5 +224,40 @@ export function useCreateIcon() {
         }),
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['config'] }),
+  })
+}
+
+// ── Icon 移动/重排（issue 06 同页拖拽排序）─────────────────────────────────
+
+/**
+ * 移动/重排图标(spec §后端 API 契约 / issue 06)。body=`{id, toPageId, toIndex}`,
+ * 同页与跨页统一端点;本票仅消费同页(toPageId === 图标当前 pageId)。
+ *
+ * 乐观更新复用纯 reducer {@link moveIcon}:onMutate 即把 ['config'].icons 推到目标态,
+ * 拖拽视觉即时跟随;失败回滚快照,完成后 invalidate 兜底。容量约束由服务端在跨页
+ * 场景把关(同页纯重排不触发容量校验,占用不变)。
+ */
+export function useMoveIcon() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: MoveAction) =>
+      apiFetch<void>('/api/icons/move', {
+        method: 'PATCH',
+        body: JSON.stringify(vars),
+      }),
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: ['config'] })
+      const prev = qc.getQueryData<Config>(['config'])
+      if (prev) {
+        qc.setQueryData<Config>(['config'], { ...prev, icons: moveIcon(prev.icons, vars) })
+      }
+      return { prev }
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData<Config>(['config'], ctx.prev)
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['config'] })
+    },
   })
 }

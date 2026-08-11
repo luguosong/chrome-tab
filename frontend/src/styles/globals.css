@@ -20,3 +20,51 @@ code {
 .dark code {
   background: #0e1014;
 }
+
+/* 毛玻璃面板：inftab 风格的玻璃浮层，叠在壁纸背景上 */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+.dark .glass-panel {
+  background: rgba(24, 24, 27, 0.5); /* zinc-900/50 */
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* 走马灯横向滚动条隐藏 */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* 编辑模式：磁贴轻微抖动，提示当前可增删；reduced-motion 下不动 */
+@media (prefers-reduced-motion: no-preference) {
+  .editing-jiggle {
+    animation: jiggle 1.2s ease-in-out infinite;
+  }
+  .animate-slide-in-right {
+    animation: slide-in-right 0.22s ease-out;
+  }
+}
+@keyframes jiggle {
+  0%,
+  100% {
+    transform: rotate(-0.4deg);
+  }
+  50% {
+    transform: rotate(0.4deg);
+  }
+}
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
