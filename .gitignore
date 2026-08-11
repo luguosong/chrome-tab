@@ -4,8 +4,11 @@ dist/
 target/
 *.log
 
-# secrets
+# secrets（含所有 .env 变体，仅保留 example）
 .env
+.env.*
+!.env.example
+!.env.prod.example
 
 # IDE
 .idea/

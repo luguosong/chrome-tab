@@ -32,8 +32,8 @@ export default function NavTileGroup() {
   }
 
   return (
-    <section className="bg-white border border-gray-200 rounded-2xl p-5">
-      <h2 className="text-xs uppercase tracking-wider text-gray-500 mb-3">快速导航</h2>
+    <section className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl p-5">
+      <h2 className="text-xs uppercase tracking-wider text-gray-500 dark:text-zinc-400 mb-3">快速导航</h2>
       <div
         className="grid gap-2.5"
         style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))' }}
@@ -44,17 +44,12 @@ export default function NavTileGroup() {
             href={n.url}
             target="_blank"
             rel="noreferrer"
-            className="group relative flex flex-col items-center gap-1.5 p-3 border border-gray-200 rounded-lg hover:border-accent hover:bg-gray-50 transition"
+            className="group relative flex flex-col items-center gap-1.5 p-3 border border-gray-200 dark:border-zinc-800 rounded-lg hover:border-accent hover:bg-gray-50 dark:hover:bg-zinc-800 transition"
           >
             {favicon(n.url) && (
-              <img
-                src={favicon(n.url)}
-                alt=""
-                className="w-5 h-5 rounded"
-                referrerPolicy="no-referrer"
-              />
+              <img src={favicon(n.url)} alt="" className="w-5 h-5 rounded" referrerPolicy="no-referrer" />
             )}
-            <span className="text-xs text-gray-700 max-w-full truncate">{n.name}</span>
+            <span className="text-xs text-gray-700 dark:text-zinc-200 max-w-full truncate">{n.name}</span>
             <button
               type="button"
               title="删除"
@@ -62,7 +57,7 @@ export default function NavTileGroup() {
                 e.preventDefault()
                 del.mutate(n.id)
               }}
-              className="absolute top-1 right-1.5 text-gray-400 opacity-0 group-hover:opacity-100 hover:text-red-500 leading-none"
+              className="absolute top-1 right-1.5 text-gray-400 dark:text-zinc-500 opacity-0 group-hover:opacity-100 hover:text-red-500 leading-none"
             >
               ×
             </button>
@@ -75,13 +70,13 @@ export default function NavTileGroup() {
           onChange={(e) => setName(e.target.value)}
           placeholder="名称"
           maxLength={12}
-          className="flex-1 px-2.5 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-accent"
+          className="flex-1 px-2.5 py-2 border border-gray-200 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 rounded-lg text-sm outline-none focus:border-accent"
         />
         <input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="https://…"
-          className="flex-[2] px-2.5 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-accent"
+          className="flex-[2] px-2.5 py-2 border border-gray-200 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 rounded-lg text-sm outline-none focus:border-accent"
         />
         <button
           type="submit"

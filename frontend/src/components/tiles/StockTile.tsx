@@ -43,32 +43,27 @@ export default function StockTile() {
     setName('')
   }
 
+  const btnCls =
+    'border border-gray-200 dark:border-zinc-700 text-gray-500 dark:text-zinc-400 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent'
+
   return (
-    <section className="bg-white border border-gray-200 rounded-2xl p-5">
-      <h2 className="flex items-center justify-between text-xs uppercase tracking-wider text-gray-500 mb-3">
+    <section className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl p-5">
+      <h2 className="flex items-center justify-between text-xs uppercase tracking-wider text-gray-500 dark:text-zinc-400 mb-3">
         <span>行情</span>
         <span className="flex items-center gap-2 normal-case tracking-normal">
-          {updated && <span className="text-[11px] text-gray-400 font-mono">更新于 {updated}</span>}
-          <button
-            onClick={() => quotesQ.refetch()}
-            className="border border-gray-200 text-gray-500 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent"
-          >
-            刷新
-          </button>
-          <button
-            onClick={() => setExpanded((v) => !v)}
-            className="border border-gray-200 text-gray-500 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent"
-          >
+          {updated && <span className="text-[11px] text-gray-400 dark:text-zinc-500 font-mono">更新于 {updated}</span>}
+          <button onClick={() => quotesQ.refetch()} className={btnCls}>刷新</button>
+          <button onClick={() => setExpanded((v) => !v)} className={btnCls}>
             {expanded ? '收起' : '展开'}
           </button>
           {expanded && (
             <button
               onClick={() => setEditing((v) => !v)}
-              className={`border rounded-md px-2 py-0.5 text-xs ${
+              className={
                 editing
-                  ? 'border-accent text-accent'
-                  : 'border-gray-200 text-gray-500 hover:border-accent hover:text-accent'
-              }`}
+                  ? 'border border-accent text-accent rounded-md px-2 py-0.5 text-xs'
+                  : btnCls
+              }
             >
               编辑
             </button>
@@ -76,60 +71,48 @@ export default function StockTile() {
         </span>
       </h2>
 
-      {quotesQ.isLoading && <div className="text-gray-400 text-sm">加载中…</div>}
+      {quotesQ.isLoading && <div className="text-gray-400 dark:text-zinc-500 text-sm">加载中…</div>}
       {quotesQ.isError && (
-        <div className="text-gray-400 text-sm">{(quotesQ.error as Error).message}</div>
+        <div className="text-gray-400 dark:text-zinc-500 text-sm">{(quotesQ.error as Error).message}</div>
       )}
 
       {!expanded ? (
-        // 概述：前 6 条 mini-card
-        <div
-          className="grid gap-2"
-          style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(116px, 1fr))' }}
-        >
+        <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(116px, 1fr))' }}>
           {watches.slice(0, 6).map((w) => {
             const q = quotes[w.symbol]
             if (!q) {
               return (
-                <div key={w.id} className="border border-gray-200 rounded-lg px-3 py-2">
-                  <div className="text-xs text-gray-600 truncate">{w.name}</div>
-                  <div className="text-gray-300 font-mono text-sm">--</div>
+                <div key={w.id} className="border border-gray-200 dark:border-zinc-800 rounded-lg px-3 py-2">
+                  <div className="text-xs text-gray-600 dark:text-zinc-300 truncate">{w.name}</div>
+                  <div className="text-gray-300 dark:text-zinc-600 font-mono text-sm">--</div>
                 </div>
               )
             }
             const f = fmt(q)
             return (
-              <div key={w.id} className="border border-gray-200 rounded-lg px-3 py-2">
-                <div className="text-xs text-gray-600 truncate">{w.name}</div>
+              <div key={w.id} className="border border-gray-200 dark:border-zinc-800 rounded-lg px-3 py-2">
+                <div className="text-xs text-gray-600 dark:text-zinc-300 truncate">{w.name}</div>
                 <div className={`font-mono text-sm ${f.cls}`}>{f.price}</div>
-                <div className={`font-mono text-[11px] ${f.cls}`}>
-                  {f.arr} {f.pct}%
-                </div>
+                <div className={`font-mono text-[11px] ${f.cls}`}>{f.arr} {f.pct}%</div>
               </div>
             )
           })}
         </div>
       ) : (
-        // 展开：分组完整列表
         <div>
           {groupNames.map((g) => (
             <div key={g}>
-              <div className="text-[11px] text-gray-400 tracking-wider mt-3 mb-1 first:mt-0">
-                {g}
-              </div>
+              <div className="text-[11px] text-gray-400 dark:text-zinc-500 tracking-wider mt-3 mb-1 first:mt-0">{g}</div>
               {watches
                 .filter((w) => w.groupName === g)
                 .map((w) => {
                   const q = quotes[w.symbol]
                   const code = w.symbol.replace(/^(us|sh|sz)/, '')
                   return (
-                    <div
-                      key={w.id}
-                      className="grid grid-cols-[1fr_auto] gap-1 py-1.5 border-b border-gray-100 last:border-0"
-                    >
+                    <div key={w.id} className="grid grid-cols-[1fr_auto] gap-1 py-1.5 border-b border-gray-100 dark:border-zinc-800 last:border-0">
                       <div>
-                        <div className="text-[13px] text-gray-700">{w.name}</div>
-                        <div className="text-[11px] text-gray-400 font-mono">{code}</div>
+                        <div className="text-[13px] text-gray-700 dark:text-zinc-200">{w.name}</div>
+                        <div className="text-[11px] text-gray-400 dark:text-zinc-500 font-mono">{code}</div>
                       </div>
                       {q ? (
                         (() => {
@@ -137,14 +120,12 @@ export default function StockTile() {
                           return (
                             <div className="text-right">
                               <div className={`font-mono text-sm ${f.cls}`}>{f.price}</div>
-                              <div className={`font-mono text-xs ${f.cls}`}>
-                                {f.arr} {f.chg} ({f.pct}%)
-                              </div>
+                              <div className={`font-mono text-xs ${f.cls}`}>{f.arr} {f.chg} ({f.pct}%)</div>
                             </div>
                           )
                         })()
                       ) : (
-                        <div className="text-right text-gray-300 text-xs self-center">—</div>
+                        <div className="text-right text-gray-300 dark:text-zinc-600 text-xs self-center">—</div>
                       )}
                       {editing && (
                         <button
@@ -165,19 +146,15 @@ export default function StockTile() {
                 value={sym}
                 onChange={(e) => setSym(e.target.value)}
                 placeholder="符号 如 usAAPL"
-                className="flex-1 px-2.5 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-accent"
+                className="flex-1 px-2.5 py-2 border border-gray-200 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 rounded-lg text-sm outline-none focus:border-accent"
               />
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="名称"
-                className="flex-1 px-2.5 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-accent"
+                className="flex-1 px-2.5 py-2 border border-gray-200 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 rounded-lg text-sm outline-none focus:border-accent"
               />
-              <button
-                type="submit"
-                disabled={add.isPending}
-                className="px-3.5 rounded-lg bg-accent text-white text-sm disabled:opacity-50"
-              >
+              <button type="submit" disabled={add.isPending} className="px-3.5 rounded-lg bg-accent text-white text-sm disabled:opacity-50">
                 添加
               </button>
             </form>

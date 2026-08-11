@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from './client'
-import type { Config, NavLink, StockWatch } from '../lib/types'
+import type { Config, NavLink, Setting, StockWatch } from '../lib/types'
 
 /** 配置聚合：首屏一次取齐 nav/stock/setting；mutation 后 invalidate 重拉 */
 export function useConfig() {
@@ -48,6 +48,18 @@ export function useDeleteStockWatch() {
   return useMutation({
     mutationFn: (id: number) =>
       apiFetch<void>(`/api/stock-watches/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['config'] }),
+  })
+}
+
+export function useUpdateSetting() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (theme: string) =>
+      apiFetch<Setting>('/api/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ theme }),
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['config'] }),
   })
 }

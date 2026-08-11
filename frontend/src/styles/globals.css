@@ -1,8 +1,22 @@
 @import "tailwindcss";
 
-/* 主题 token（M6 补全浅/深双套 + .dark 覆盖） */
+/* class-based 深色模式：.dark 加在 <html> 上 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* 主题 token */
 @theme {
   --color-accent: #d97151;
   --color-up: #ff5c5c;
   --color-down: #3ddc97;
+}
+
+/* 行内代码（changelog 渲染等） */
+code {
+  background: #f3f4f6;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.dark code {
+  background: #0e1014;
 }

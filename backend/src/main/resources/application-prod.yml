@@ -1,0 +1,13 @@
+# 生产 profile：容器内 8080、cookie secure（HTTPS）、datasource 走容器网络。
+server:
+  port: 8080
+  servlet:
+    session:
+      cookie:
+        secure: true
+
+spring:
+  datasource:
+    url: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:newtab}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    username: ${DB_USER:newtab}
+    password: ${DB_PASSWORD}
