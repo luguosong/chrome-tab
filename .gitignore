@@ -1,0 +1,13 @@
+# deps & build
+node_modules/
+dist/
+target/
+*.log
+
+# secrets
+.env
+
+# IDE
+.idea/
+.vscode/
+*.iml

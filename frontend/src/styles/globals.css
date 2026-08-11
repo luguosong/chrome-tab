@@ -1,0 +1,8 @@
+@import "tailwindcss";
+
+/* 主题 token（M6 补全浅/深双套 + .dark 覆盖） */
+@theme {
+  --color-accent: #d97151;
+  --color-up: #ff5c5c;
+  --color-down: #3ddc97;
+}
