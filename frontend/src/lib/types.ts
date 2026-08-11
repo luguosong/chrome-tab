@@ -1,15 +1,5 @@
 export type Me = { id: number; username: string }
 
-export type NavLink = { id: number; name: string; url: string; sortOrder: number }
-
-export type StockWatch = {
-  id: number
-  symbol: string
-  name: string
-  groupName: string
-  sortOrder: number
-}
-
 export type Setting = { theme: string }
 
 // ── 新模型（Icon/Page,见 CONTEXT.md / ADR-0001）──────────────────────────
@@ -39,11 +29,9 @@ export type Icon = {
   data: Record<string, unknown> | null
 }
 
-/** GET /api/config 聚合响应。expand 阶段:旧字段保留(03 ticket 删除),新字段已就绪。
+/** GET /api/config 聚合响应。03 ticket 后:旧字段 navLinks/stockWatches 已删除,只剩 pages/icons/setting。
  *  后端返回大写枚举,这里声明的是归一化后的形态(见 config.ts 的 transform)。 */
 export type Config = {
-  navLinks: NavLink[]
-  stockWatches: StockWatch[]
   pages: Page[]
   icons: Icon[]
   setting: Setting

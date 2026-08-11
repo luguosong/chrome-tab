@@ -1,5 +1,6 @@
 package com.personal.newtab.icon;
 
+import com.personal.newtab.auth.DataBootstrap;
 import com.personal.newtab.common.OperationConflictException;
 import com.personal.newtab.page.Page;
 import com.personal.newtab.page.PageRepository;
@@ -15,7 +16,7 @@ import java.util.Map;
 /**
  * Icon 写操作的业务层（见 issue 04）。承载两个核心约束：
  * <ul>
- *   <li>页面容量（ADR-0002）：目标页 {@code sum(size.cells)} + 新增格子 &gt; {@link IconModelMigration#DEFAULT_CAPACITY_CELLS}
+ *   <li>页面容量（ADR-0002）：目标页 {@code sum(size.cells)} + 新增格子 &gt; {@link DataBootstrap#DEFAULT_CAPACITY_CELLS}
  *       → 409，message 带剩余格数。</li>
  *   <li>单例类型（CONTEXT.md）：{@link IconType#isSingleton()} 且该 user 已有实例 → 409。</li>
  * </ul>
@@ -131,11 +132,11 @@ public class IconService {
     }
 
     /**
-     * 容量校验：若页内已用格子 + {@code needed} 超过 {@link IconModelMigration#DEFAULT_CAPACITY_CELLS}，
+     * 容量校验：若页内已用格子 + {@code needed} 超过 {@link DataBootstrap#DEFAULT_CAPACITY_CELLS}，
      * 抛 409，message 带剩余格数。{@code subject} 用于消息前缀（"页面"/"目标页面"）。
      */
     private void requireCapacity(Long userId, Long pageId, int needed, String subject) {
-        int remaining = IconModelMigration.DEFAULT_CAPACITY_CELLS - cellsUsed(userId, pageId);
+        int remaining = DataBootstrap.DEFAULT_CAPACITY_CELLS - cellsUsed(userId, pageId);
         if (needed > remaining) {
             throw new OperationConflictException(409, subject + "容量不足，剩余 " + remaining + " 格");
         }

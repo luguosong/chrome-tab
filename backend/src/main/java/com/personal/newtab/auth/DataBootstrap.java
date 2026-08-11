@@ -1,11 +1,13 @@
 package com.personal.newtab.auth;
 
-import com.personal.newtab.navlink.NavLink;
-import com.personal.newtab.navlink.NavLinkRepository;
+import com.personal.newtab.icon.Icon;
+import com.personal.newtab.icon.IconRepository;
+import com.personal.newtab.icon.IconType;
+import com.personal.newtab.icon.Size;
+import com.personal.newtab.page.Page;
+import com.personal.newtab.page.PageRepository;
 import com.personal.newtab.setting.Setting;
 import com.personal.newtab.setting.SettingRepository;
-import com.personal.newtab.stockwatch.StockWatch;
-import com.personal.newtab.stockwatch.StockWatchRepository;
 import com.personal.newtab.user.User;
 import com.personal.newtab.user.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -18,24 +20,30 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 首启建管理员 + 业务默认数据（导航/观察清单/设置）。
- * 每张表按自身 count==0 判断，互不依赖、可断点续 seed：
- * V1 注释已说明业务 seed 必须走代码（依赖 admin.id，且密码来自环境变量无法写 SQL）。
+ * 首启建管理员 + 业务默认数据（默认页 / 默认图标 / 设置）。
+ * 每张表按自身 count==0 判断，互不依赖、可断点续 seed。
+ *
+ * <p>03 ticket 起：旧的 nav_links/stock_watches 已删除，默认数据直接以 Icon 模型 seed
+ * （3 个默认页 + 12 nav small + 1 changelog large + 13 stock medium，超容量股票溢出到"行情(续)"页）。
+ * 03 之前由 IconModelMigration 把 nav_links/stock_watches 转换成 icons，删除旧表后该迁移逻辑不再需要。</p>
  */
 @Slf4j
 @Configuration
 @RequiredArgsConstructor
 public class DataBootstrap {
 
-    private final UserRepository userRepository;
-    private final NavLinkRepository navLinkRepository;
-    private final StockWatchRepository stockWatchRepository;
-    private final SettingRepository settingRepository;
-    private final PasswordEncoder passwordEncoder;
+    /** 固定默认容量兜底（6 列 × 4 行 = 24 格）；前端按实际视口即时反馈。 */
+    public static final int DEFAULT_CAPACITY_CELLS = 24;
+    public static final String PAGE_NAV = "快速导航";
+    public static final String PAGE_CHANGELOG = "日志更新";
+    public static final String PAGE_STOCK = "行情";
+    public static final String PAGE_STOCK_OVERFLOW_PREFIX = "行情(续)";
 
     /** 搬自 prototype/index.html 的 DEFAULT_NAV（12 条） */
     private static final List<Map.Entry<String, String>> DEFAULT_NAV = List.of(
@@ -52,7 +60,7 @@ public class DataBootstrap {
             Map.entry("B站", "https://www.bilibili.com"),
             Map.entry("HN", "https://news.ycombinator.com"));
 
-    /** 搬自 prototype/index.html 的 STOCKS（13 条），分组按前缀 us→美股/指数，sh/sz→A 股 */
+    /** 搬自 prototype/index.html 的 STOCKS（13 条） */
     private static final List<String[]> DEFAULT_STOCKS = List.of(
             new String[]{"usAAPL", "苹果"}, new String[]{"usMSFT", "微软"},
             new String[]{"usNVDA", "英伟达"}, new String[]{"usTSLA", "特斯拉"},
@@ -62,15 +70,20 @@ public class DataBootstrap {
             new String[]{"sz399006", "创业板指"}, new String[]{"sh600519", "贵州茅台"},
             new String[]{"sz300750", "宁德时代"});
 
+    private final UserRepository userRepository;
+    private final PageRepository pageRepository;
+    private final IconRepository iconRepository;
+    private final SettingRepository settingRepository;
+    private final PasswordEncoder passwordEncoder;
+
     @Bean
-    @Order(Ordered.HIGHEST_PRECEDENCE)   // 必须先于 IconModelMigrationRunner（后者读取本 runner seed 的源表）
+    @Order(Ordered.HIGHEST_PRECEDENCE)
     public ApplicationRunner dataBootstrapRunner(
             @Value("${admin.username:admin}") String username,
             @Value("${admin.password:}") String password) {
         return args -> {
             User admin = ensureAdmin(username, password);
-            seedNav(admin);
-            seedStocks(admin);
+            seedPagesAndIcons(admin);
             seedSetting(admin);
         };
     }
@@ -91,32 +104,53 @@ public class DataBootstrap {
         return userRepository.findAll().get(0);
     }
 
-    private void seedNav(User admin) {
-        if (navLinkRepository.count() > 0) return;
-        for (int i = 0; i < DEFAULT_NAV.size(); i++) {
-            NavLink n = new NavLink();
-            n.setUserId(admin.getId());
-            n.setName(DEFAULT_NAV.get(i).getKey());
-            n.setUrl(DEFAULT_NAV.get(i).getValue());
-            n.setSortOrder(i);
-            navLinkRepository.save(n);
-        }
-        log.info("已 seed {} 条默认导航", DEFAULT_NAV.size());
-    }
+    /**
+     * 直接 seed Icon 模型默认数据。幂等：pages.count()==0 时才执行。
+     * 03 之前由 IconModelMigration 从 nav_links/stock_watches 转换而来；删除旧表后改为直接 seed。
+     */
+    private void seedPagesAndIcons(User admin) {
+        if (pageRepository.count() > 0) return;
+        Long uid = admin.getId();
 
-    private void seedStocks(User admin) {
-        if (stockWatchRepository.count() > 0) return;
-        for (int i = 0; i < DEFAULT_STOCKS.size(); i++) {
-            String[] s = DEFAULT_STOCKS.get(i);
-            StockWatch w = new StockWatch();
-            w.setUserId(admin.getId());
-            w.setSymbol(s[0]);
-            w.setName(s[1]);
-            w.setGroupName(StockWatch.groupOf(s[0]));
-            w.setSortOrder(i);
-            stockWatchRepository.save(w);
+        // 1. 默认 3 页
+        Page navPage = pageRepository.save(makePage(uid, PAGE_NAV, 0));
+        Page changelogPage = pageRepository.save(makePage(uid, PAGE_CHANGELOG, 1));
+        Page stockPage = pageRepository.save(makePage(uid, PAGE_STOCK, 2));
+        List<Page> pages = new ArrayList<>(List.of(navPage, changelogPage, stockPage));
+
+        // 2. nav → icons(small)
+        int so = 0;
+        for (Map.Entry<String, String> n : DEFAULT_NAV) {
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("name", n.getKey());
+            data.put("url", n.getValue());
+            iconRepository.save(makeIcon(uid, navPage.getId(), IconType.NAV, Size.SMALL, so++, data));
         }
-        log.info("已 seed {} 条默认观察清单", DEFAULT_STOCKS.size());
+
+        // 3. changelog → 1 个 large 单例 icon
+        iconRepository.save(makeIcon(uid, changelogPage.getId(), IconType.CHANGELOG, Size.LARGE, 0, null));
+
+        // 4. stocks → icons(medium)，超容量溢出到追加页
+        int perPage = DEFAULT_CAPACITY_CELLS / Size.MEDIUM.cells();   // 24 / 4 = 6
+        Page current = stockPage;
+        int currentIdx = 0;
+        int pageOrder = 3;
+        so = 0;
+        for (String[] s : DEFAULT_STOCKS) {
+            if (currentIdx >= perPage) {
+                current = pageRepository.save(makePage(uid, PAGE_STOCK_OVERFLOW_PREFIX, pageOrder++));
+                pages.add(current);
+                currentIdx = 0;
+                so = 0;
+            }
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("symbol", s[0]);
+            data.put("name", s[1]);
+            iconRepository.save(makeIcon(uid, current.getId(), IconType.STOCK, Size.MEDIUM, so++, data));
+            currentIdx++;
+        }
+        log.info("已 seed {} 页 / {} 图标", pages.size(),
+                DEFAULT_NAV.size() + 1 + DEFAULT_STOCKS.size());
     }
 
     private void seedSetting(User admin) {
@@ -125,5 +159,24 @@ public class DataBootstrap {
         st.setUserId(admin.getId());
         st.setTheme("system");
         settingRepository.save(st);
+    }
+
+    private Page makePage(Long userId, String name, int sortOrder) {
+        Page p = new Page();
+        p.setUserId(userId);
+        p.setName(name);
+        p.setSortOrder(sortOrder);
+        return p;
+    }
+
+    private Icon makeIcon(Long userId, Long pageId, IconType type, Size size, int sortOrder, Map<String, Object> data) {
+        Icon i = new Icon();
+        i.setUserId(userId);
+        i.setPageId(pageId);
+        i.setType(type);
+        i.setSize(size);
+        i.setSortOrder(sortOrder);
+        i.setData(data);
+        return i;
     }
 }

@@ -8,6 +8,7 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @Slf4j
 @RestControllerAdvice
@@ -36,6 +37,12 @@ public class GlobalExceptionHandler {
                 .reduce((a, b) -> a + "; " + b)
                 .orElse("参数校验失败");
         return ResponseEntity.status(400).body(new ErrorResponse(400, msg));
+    }
+
+    /** 未映射的路径（含已删除的旧端点 /api/nav-links、/api/stock-watches）→ 404，不进 fallback 500。 */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> notFound(NoResourceFoundException e) {
+        return ResponseEntity.status(404).body(new ErrorResponse(404, "资源不存在"));
     }
 
     @ExceptionHandler(Exception.class)

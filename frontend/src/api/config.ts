@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from './client'
-import type { Config, Icon, IconSize, IconTypeId, NavLink, Setting, StockWatch } from '../lib/types'
+import type { Config, Icon, IconSize, IconTypeId, Setting } from '../lib/types'
 
 /**
  * 后端返回的原始聚合(JSON)。与 Config 不同处:icons 的 type/size 是大写枚举串
@@ -26,7 +26,7 @@ function normalizeIcon(i: RawConfig['icons'][number]): Icon {
   }
 }
 
-/** 配置聚合：首屏一次取齐 pages/icons/setting(nav/stock 旧字段仍在,03 删除);mutation 后 invalidate 重拉 */
+/** 配置聚合：首屏一次取齐 pages/icons/setting;mutation 后 invalidate 重拉。 */
 export function useConfig() {
   return useQuery<Config>({
     queryKey: ['config'],
@@ -34,48 +34,6 @@ export function useConfig() {
       const raw = await apiFetch<RawConfig>('/api/config')
       return { ...raw, icons: raw.icons.map(normalizeIcon) }
     },
-  })
-}
-
-export function useAddNavLink() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (body: { name: string; url: string }) =>
-      apiFetch<NavLink>('/api/nav-links', {
-        method: 'POST',
-        body: JSON.stringify(body),
-      }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['config'] }),
-  })
-}
-
-export function useDeleteNavLink() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (id: number) =>
-      apiFetch<void>(`/api/nav-links/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['config'] }),
-  })
-}
-
-export function useAddStockWatch() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (body: { symbol: string; name: string }) =>
-      apiFetch<StockWatch>('/api/stock-watches', {
-        method: 'POST',
-        body: JSON.stringify(body),
-      }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['config'] }),
-  })
-}
-
-export function useDeleteStockWatch() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (id: number) =>
-      apiFetch<void>(`/api/stock-watches/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['config'] }),
   })
 }
 
