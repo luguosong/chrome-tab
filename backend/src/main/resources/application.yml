@@ -1,5 +1,5 @@
 server:
-  port: 8081  # 8080 在本机被占用，改用 8081
+  port: 8082  # 8080 在本机被占用，改用 8081
   servlet:
     session:
       cookie:
@@ -14,7 +14,7 @@ spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:19002/newtab?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
     username: ${SPRING_DATASOURCE_USERNAME:root}
-    password: ${SPRING_DATASOURCE_PASSWORD:}   # 开发复用本地 docker uocs-mysql，密码走环境变量
+    password: ${SPRING_DATASOURCE_PASSWORD:uocs_dev_2024}   # 开发复用本地 docker uocs-mysql，密码走环境变量
   jpa:
     open-in-view: false
     hibernate:
@@ -25,10 +25,21 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false   # LocalDateTime → ISO 字符串(config_version.updatedAt 跨端比较,见 ADR-0006)
 
 admin:
   username: ${ADMIN_USERNAME:admin}
   password: ${ADMIN_PASSWORD:12345678}   # 必填，空则首启报错
+
+newtab:
+  changelog:
+    translate-recent: 5                  # 只译最近 N 版（见 ADR 0005：164K token 约束下的强制截断）
+    llm:
+      base-url: https://aihubmix.com/v1  # OpenAI 兼容网关
+      model: gpt-5-nano                  # GPT-5 系推理模型，temperature 被网关忽略，确定性靠系统提示
+      api-key: ${AIHUBMIX_API_KEY:}      # 留空则跳过译制、透传英文原文；部署期注入，不入库
 
 logging:
   level:

@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
+import { ConfigSyncProvider } from './context/ConfigSyncProvider'
 import RequireAuth from './components/RequireAuth'
 import LoginPage from './routes/LoginPage'
 import DashboardPage from './routes/DashboardPage'
@@ -13,7 +14,9 @@ export default function App() {
           path="/"
           element={
             <RequireAuth>
-              <DashboardPage />
+              <ConfigSyncProvider>
+                <DashboardPage />
+              </ConfigSyncProvider>
             </RequireAuth>
           }
         />

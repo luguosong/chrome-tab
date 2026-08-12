@@ -2,6 +2,7 @@ package com.personal.newtab.icon;
 
 import com.personal.newtab.auth.DataBootstrap;
 import com.personal.newtab.common.OperationConflictException;
+import com.personal.newtab.configversion.ConfigVersionService;
 import com.personal.newtab.page.Page;
 import com.personal.newtab.page.PageRepository;
 import jakarta.validation.constraints.NotNull;
@@ -22,7 +23,8 @@ import java.util.Map;
  * </ul>
  *
  * <p>跨页与同页移动走同一 {@link #move} 逻辑：目标页重新排序，源页（若不同）补齐连续序号。
- * 所有读/写按 {@code userId} 隔离（单 admin 项目，仍防越权）。</p>
+ * 所有读/写按 {@code userId} 隔离（单 admin 项目，仍防越权）。
+ * 任意写都在事务末尾 bump config_version(ADR-0006)，使前端镜像能据 updatedAt 和解。</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -30,6 +32,7 @@ public class IconService {
 
     private final IconRepository iconRepository;
     private final PageRepository pageRepository;
+    private final ConfigVersionService configVersionService;
 
     @Transactional
     public Icon create(Long userId, CreateRequest req) {
@@ -56,7 +59,9 @@ public class IconService {
         icon.setSize(req.size());
         icon.setSortOrder(nextOrder);
         icon.setData(req.data());
-        return iconRepository.save(icon);
+        Icon saved = iconRepository.save(icon);
+        configVersionService.touch(userId);
+        return saved;
     }
 
     @Transactional
@@ -76,7 +81,9 @@ public class IconService {
         if (req.data() != null) {
             icon.setData(req.data());
         }
-        return iconRepository.save(icon);
+        Icon updated = iconRepository.save(icon);
+        configVersionService.touch(userId);
+        return updated;
     }
 
     @Transactional
@@ -87,6 +94,7 @@ public class IconService {
         iconRepository.delete(icon);
         // 源页补齐连续序号（删除后中间不再留洞）
         renumber(userId, pageId);
+        configVersionService.touch(userId);
     }
 
     /**
@@ -122,6 +130,7 @@ public class IconService {
         if (crossPage) {
             renumber(userId, fromPageId);
         }
+        configVersionService.touch(userId);
         return icon;
     }
 

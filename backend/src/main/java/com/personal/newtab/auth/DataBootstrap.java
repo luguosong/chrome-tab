@@ -1,13 +1,12 @@
 package com.personal.newtab.auth;
 
+import com.personal.newtab.configversion.ConfigVersionService;
 import com.personal.newtab.icon.Icon;
 import com.personal.newtab.icon.IconRepository;
 import com.personal.newtab.icon.IconType;
 import com.personal.newtab.icon.Size;
 import com.personal.newtab.page.Page;
 import com.personal.newtab.page.PageRepository;
-import com.personal.newtab.setting.Setting;
-import com.personal.newtab.setting.SettingRepository;
 import com.personal.newtab.user.User;
 import com.personal.newtab.user.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -26,20 +25,20 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 首启建管理员 + 业务默认数据（默认页 / 默认图标 / 设置）。
- * 每张表按自身 count==0 判断，互不依赖、可断点续 seed。
+ * 首启建管理员 + 业务默认数据（默认页 / 默认图标）。每张表按自身 count==0 判断，互不依赖、可断点续 seed。
  *
  * <p>03 ticket 起：旧的 nav_links/stock_watches 已删除，默认数据直接以 Icon 模型 seed
- * （3 个默认页 + 12 nav small + 1 changelog large + 13 stock medium，超容量股票溢出到"行情(续)"页）。
- * 03 之前由 IconModelMigration 把 nav_links/stock_watches 转换成 icons，删除旧表后该迁移逻辑不再需要。</p>
+ * （3 个默认页 + 12 nav small + 1 changelog large + 13 stock medium）。容量 8×8=64 格下
+ * 13 只 medium(52 格) 单页可容纳，不再溢出；超 16 只时仍会溢出到"行情(续)"页（见 seedStocks 逻辑）。
+ * seed 完成后给 config_version 一个初始时间戳(ADR-0006),使种子数据对前端镜像可比、首拉即确定版本。</p>
  */
 @Slf4j
 @Configuration
 @RequiredArgsConstructor
 public class DataBootstrap {
 
-    /** 固定默认容量兜底（6 列 × 4 行 = 24 格）；前端按实际视口即时反馈。 */
-    public static final int DEFAULT_CAPACITY_CELLS = 24;
+    /** 固定默认容量兜底（8 列 × 8 行 = 64 格）；前端镜像同值（DEFAULT_PAGE_CAPACITY）。 */
+    public static final int DEFAULT_CAPACITY_CELLS = 64;
     public static final String PAGE_NAV = "快速导航";
     public static final String PAGE_CHANGELOG = "日志更新";
     public static final String PAGE_STOCK = "行情";
@@ -73,8 +72,8 @@ public class DataBootstrap {
     private final UserRepository userRepository;
     private final PageRepository pageRepository;
     private final IconRepository iconRepository;
-    private final SettingRepository settingRepository;
     private final PasswordEncoder passwordEncoder;
+    private final ConfigVersionService configVersionService;
 
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -84,7 +83,6 @@ public class DataBootstrap {
         return args -> {
             User admin = ensureAdmin(username, password);
             seedPagesAndIcons(admin);
-            seedSetting(admin);
         };
     }
 
@@ -131,7 +129,7 @@ public class DataBootstrap {
         iconRepository.save(makeIcon(uid, changelogPage.getId(), IconType.CHANGELOG, Size.LARGE, 0, null));
 
         // 4. stocks → icons(medium)，超容量溢出到追加页
-        int perPage = DEFAULT_CAPACITY_CELLS / Size.MEDIUM.cells();   // 24 / 4 = 6
+        int perPage = DEFAULT_CAPACITY_CELLS / Size.MEDIUM.cells();   // 64 / 4 = 16
         Page current = stockPage;
         int currentIdx = 0;
         int pageOrder = 3;
@@ -149,16 +147,10 @@ public class DataBootstrap {
             iconRepository.save(makeIcon(uid, current.getId(), IconType.STOCK, Size.MEDIUM, so++, data));
             currentIdx++;
         }
+        // 种子数据落一个初始 config_version 时间戳:首拉即有确定版本,前端镜像可比(ADR-0006)。
+        configVersionService.touch(uid);
         log.info("已 seed {} 页 / {} 图标", pages.size(),
                 DEFAULT_NAV.size() + 1 + DEFAULT_STOCKS.size());
-    }
-
-    private void seedSetting(User admin) {
-        if (settingRepository.count() > 0) return;
-        Setting st = new Setting();
-        st.setUserId(admin.getId());
-        st.setTheme("system");
-        settingRepository.save(st);
     }
 
     private Page makePage(Long userId, String name, int sortOrder) {

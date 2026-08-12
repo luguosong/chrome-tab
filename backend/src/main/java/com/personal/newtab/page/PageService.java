@@ -1,6 +1,7 @@
 package com.personal.newtab.page;
 
 import com.personal.newtab.common.OperationConflictException;
+import com.personal.newtab.configversion.ConfigVersionService;
 import com.personal.newtab.icon.IconRepository;
 import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
@@ -12,6 +13,7 @@ import java.util.List;
 /**
  * Page 写操作的业务层（见 issue 04）。页面是一等公民：增/改名/排序/删。
  * 删除策略遵循 spec 暂定：非空页返回 409，提示先清空或移走图标。
+ * 任意写都在事务末尾 bump config_version(ADR-0006)。
  */
 @Service
 @RequiredArgsConstructor
@@ -19,6 +21,7 @@ public class PageService {
 
     private final PageRepository pageRepository;
     private final IconRepository iconRepository;
+    private final ConfigVersionService configVersionService;
 
     @Transactional
     public Page create(Long userId, String name) {
@@ -28,7 +31,9 @@ public class PageService {
         p.setUserId(userId);
         p.setName(name);
         p.setSortOrder(nextOrder);
-        return pageRepository.save(p);
+        Page saved = pageRepository.save(p);
+        configVersionService.touch(userId);
+        return saved;
     }
 
     @Transactional
@@ -36,7 +41,9 @@ public class PageService {
         Page p = pageRepository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new OperationConflictException(404, "页面不存在"));
         p.setName(name);
-        return pageRepository.save(p);
+        Page saved = pageRepository.save(p);
+        configVersionService.touch(userId);
+        return saved;
     }
 
     @Transactional
@@ -47,6 +54,7 @@ public class PageService {
             throw new OperationConflictException(409, "该页非空，请先移动或删除页内图标");
         }
         pageRepository.delete(p);
+        configVersionService.touch(userId);
     }
 
     /** 批量重排。仅本 user 的 page 会被更新；不存在的 id 静默跳过（前端始终基于最新列表提交）。 */
@@ -57,7 +65,9 @@ public class PageService {
             items.stream().filter(it -> it.id().equals(p.getId())).findFirst()
                     .ifPresent(it -> p.setSortOrder(it.sortOrder()));
         }
-        return pageRepository.saveAll(pages);
+        List<Page> saved = pageRepository.saveAll(pages);
+        configVersionService.touch(userId);
+        return saved;
     }
 
     public record ReorderItem(

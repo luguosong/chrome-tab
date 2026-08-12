@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from './client'
-import type { Config, Icon, IconSize, IconTypeId, Page, Setting } from '../lib/types'
+import type { Config, Icon, IconSize, IconTypeId, LayoutSettings, Page } from '../lib/types'
 import { moveIcon, type MoveAction } from '../lib/iconReducer'
+import type { WireConfig } from '../lib/mirror/backup'
 
 /** Page 重排请求项(对齐后端 PageService.ReorderItem)。 */
 export type ReorderItem = { id: number; sortOrder: number }
@@ -30,24 +31,52 @@ function normalizeIcon(i: RawConfig['icons'][number]): Icon {
   }
 }
 
-/** 配置聚合：首屏一次取齐 pages/icons/setting;mutation 后 invalidate 重拉。 */
+/** 后端原始聚合(大写枚举)→ 归一化 Config(小写)。useConfig 与 fetchConfigOnce 共用。 */
+function normalizeConfig(raw: RawConfig): Config {
+  return { ...raw, icons: raw.icons.map(normalizeIcon) }
+}
+
+/** 配置聚合：首屏一次取齐 pages/icons/layoutSettings;mutation 后 invalidate 重拉。 */
 export function useConfig() {
   return useQuery<Config>({
     queryKey: ['config'],
-    queryFn: async () => {
-      const raw = await apiFetch<RawConfig>('/api/config')
-      return { ...raw, icons: raw.icons.map(normalizeIcon) }
-    },
+    queryFn: async () => normalizeConfig(await apiFetch<RawConfig>('/api/config')),
   })
 }
 
-export function useUpdateSetting() {
+/** 一次性拉取并归一化(GET /api/config),不经 React Query。镜像和解 / 推送后回填用。 */
+export async function fetchConfigOnce(): Promise<Config> {
+  return normalizeConfig(await apiFetch<RawConfig>('/api/config'))
+}
+
+/**
+ * 布局设置写:PUT /api/layout-settings body={gridWidth,gridGap,iconScale}。
+ * 成功后 invalidate 聚合查询拉回权威值(跨设备共享语义)。实时预览由调用方乐观写
+ * ['config'] 缓存实现(见 SettingsDrawer),本 hook 仅负责持久化。
+ */
+export function useUpdateLayoutSettings() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (theme: string) =>
-      apiFetch<Setting>('/api/settings', {
+    mutationFn: (vars: LayoutSettings) =>
+      apiFetch<LayoutSettings>('/api/layout-settings', {
         method: 'PUT',
-        body: JSON.stringify({ theme }),
+        body: JSON.stringify(vars),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['config'] }),
+  })
+}
+
+/**
+ * PUT /api/config 全量替换(ADR-0006):离线推送、导入「完全替换」与「合并」共用此端点。
+ * 服务端整体重建并重排 id;成功后 invalidate 拉回权威数据。容量/单例/孤儿引用由服务端 409 把关。
+ */
+export function useReplaceConfig() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: WireConfig) =>
+      apiFetch<{ updatedAt?: string }>('/api/config', {
+        method: 'PUT',
+        body: JSON.stringify(body),
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['config'] }),
   })
@@ -104,6 +133,39 @@ export function useUpdateIconSize() {
         qc.setQueryData<Config>(['config'], {
           ...prev,
           icons: prev.icons.map((i) => (i.id === id ? { ...i, size } : i)),
+        })
+      }
+      return { prev }
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData<Config>(['config'], ctx.prev)
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['config'] })
+    },
+  })
+}
+
+/**
+ * 改图标配置(data):乐观更新 icons[i].data,失败回滚。对齐 {@link useUpdateIconSize}
+ * 的 onMutate 模式。后端 PATCH /api/icons/{id} body={data}(部分更新:size 不传则不动)。
+ * 编辑模式 ✎ 入口用。data 归一化(url 补 https://)由调用方经 buildIconData 完成。
+ */
+export function useUpdateIconData() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { id: number; data: Record<string, unknown> | null }) =>
+      apiFetch<void>(`/api/icons/${vars.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ data: vars.data }),
+      }),
+    onMutate: async ({ id, data }) => {
+      await qc.cancelQueries({ queryKey: ['config'] })
+      const prev = qc.getQueryData<Config>(['config'])
+      if (prev) {
+        qc.setQueryData<Config>(['config'], {
+          ...prev,
+          icons: prev.icons.map((i) => (i.id === id ? { ...i, data } : i)),
         })
       }
       return { prev }
