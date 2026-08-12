@@ -2,6 +2,8 @@ import { useEffect } from 'react'
 import { useIconData } from '../context/IconDataContext'
 import { useCompanyProfile } from '../hooks/useCompanyProfile'
 import { useFundamentals } from '../hooks/useFundamentals'
+import { useKlines } from '../hooks/useKlines'
+import KlineChart from './KlineChart'
 import { formatMarketCap, isIndexSymbol, symbolToSecid, symbolToSecucode } from '../lib/companyOverview'
 import { extractString } from '../lib/iconData'
 import type { Icon } from '../lib/types'
@@ -11,7 +13,7 @@ import type { Quote } from '../lib/quoteParser'
  * 股票详情 Modal(spec user story 11)。
  *
  * 内容:名称/符号、价格、涨跌(▲/▼ 绝对值 + 百分比)、公司概述(公司档案 + 随价估值,东财双端点
- * 纯前端取数,见 ADR-0004)、K 线区域占位(K 线真实数据接入是 spec Out of Scope)。
+ * 纯前端取数,见 ADR-0004)、K 线(收盘价折线,东财 push2his JSONP,spec 原 Out of Scope 已落地)。
  *
  * 刷新失败降级(spec user story 15):quotesError 非空 → 行情区显示「刷新失败,重试」按钮,
  * 点击重拉 quotes(关联查询,与 useQuotes 批拉粒度一致)。单 symbol null(查询成功但无该
@@ -44,6 +46,10 @@ export default function StockModal({
   const fundamentals = fundamentalsQ.data ?? null
   const overviewLoading = profileQ.isLoading || fundamentalsQ.isLoading
   const showOverview = !isIndex && (overviewLoading || !!profile || !!fundamentals)
+
+  // K 线(收盘序列,东财 push2his):secid 对指数也成立(sh000001→1.000001),故不随 isIndex 置 null。
+  const klinesQ = useKlines(symbolToSecid(symbol))
+  const klines = klinesQ.data ?? []
 
   // Esc 关闭
   useEffect(() => {
@@ -155,13 +161,23 @@ export default function StockModal({
           </div>
         )}
 
-        {/* K 线占位(数据接入 Out of Scope) */}
+        {/* K 线(收盘价折线,东财 push2his,见 ADR-0004 / CONTEXT「公司概述」) */}
         <div>
           <div className="text-[11px] uppercase tracking-wider text-white/50 mb-2">
             K 线
           </div>
-          <div className="h-32 rounded-xl border border-dashed border-white/25 flex items-center justify-center text-xs text-white/40">
-            K 线数据接入中
+          <div className="h-32 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+            {klinesQ.isLoading ? (
+              <div className="flex h-full items-center justify-center text-xs text-white/40">
+                K 线加载中…
+              </div>
+            ) : klines.length > 0 ? (
+              <KlineChart klines={klines} />
+            ) : (
+              <div className="flex h-full items-center justify-center text-xs text-white/40">
+                暂无数据
+              </div>
+            )}
           </div>
         </div>
       </div>

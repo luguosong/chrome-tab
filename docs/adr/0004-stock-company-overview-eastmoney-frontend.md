@@ -5,3 +5,7 @@
 刻意的反直觉取舍:**不复制 `WallpaperController` 的后端代理范式**。壁纸走后端代理,只因 Bing 既不发 CORS 头、又不支持 JSONP,浏览器无法直连;东方财富两端点一个 CORS 开放、一个 JSONP 友好,浏览器都能直连,故与现有"行情报价"保持同一架构姿态(纯前端、react-query 缓存)。亦否决了"继续用腾讯取概述"——腾讯的 F10 JSONP 端点已失效(返回 `code:11`),腾讯仅保留承担现有报价。代价是耦合东财字段编码(`f162` 等需 ÷100 解析)与厂商分裂(腾讯报价 + 东财概述),耦合点收敛在各自的 parser。
 
 范围边界:`公司概述` 仅适用于**公司型**标的;**指数型**标的(上证指数、纳指等)无公司概述,Modal 只复用现有点位/涨跌(`实时摘要`),渲染期区分、不拆分 `IconType.STOCK` 子类型。美/港静态 report 名未验证,拿不到时优雅降级为仅显示随价派生量;静态数据 react-query 长缓存(24h 量级),随价数据并入现有 60s 轮询,一律不入库 `icon.data`。
+
+## 附注:K 线(收盘价折线)同源落地
+
+本 ADR 原 spec(`spec.md` Out of Scope)将「股票详情里的真实 K 线数据源」列为范围外、先用占位。后已落地,沿用同一架构姿态:浏览器直连东财 **`push2his.eastmoney.com/api/qt/stock/kline/get`**,JSONP(`cb=`)绕 CORS,react-query 缓存(`staleTime` 60s、不轮询——Modal 短生命周期 + 120 根 payload 较大,重开超 60s 才重取)。取 `fields2=f51,f53`(日期+收盘)、`klt=101` 日线、`fqt=1` 前复权、`lmt=120`。公司与指数均适用(secid 对指数成立,如 `sh000001`→`1.000001`);美股指数 secid 未必命中,优雅降级为「暂无数据」。parser(`parseKlines`)收敛逗号串解析,与 `parseFundamentals` 同接缝、同 Vitest 覆盖。渲染为手写 SVG 收盘折线(无第三方图表库,`vector-effect` 保描边、CSS 变量取涨跌色)。
