@@ -1,15 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
 import { parseChangelog, type ChangelogVersion } from '../lib/changelogParser'
 
-const CL_URL = 'https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md'
-
-/** 拉取 + 解析 CHANGELOG.md。raw.githubusercontent.com 带 ACAO:*，浏览器可直连。
- *  1h staleTime：changelog 更新不频繁，避免每次进页面都打 GitHub。 */
+/** 经后端 /api/changelog 代理：拉取 GitHub 原文 → 译制最近 5 版为中文（旧版保留英文）→ 返回 markdown。
+ *  credentials 同 apiFetch，带会话 cookie 通过 /api/** 鉴权。
+ *  1h staleTime + 后端哈希缓存共同避免频繁打 GitHub/LLM（见 ADR 0005）。 */
 export function useChangelog() {
   return useQuery<ChangelogVersion[]>({
     queryKey: ['changelog'],
     queryFn: async () => {
-      const r = await fetch(CL_URL, { cache: 'no-store' })
+      const r = await fetch('/api/changelog', { credentials: 'include' })
       if (!r.ok) throw new Error(`拉取失败 (${r.status})`)
       return parseChangelog(await r.text())
     },
