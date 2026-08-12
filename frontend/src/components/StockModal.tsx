@@ -1,5 +1,8 @@
 import { useEffect } from 'react'
 import { useIconData } from '../context/IconDataContext'
+import { useCompanyProfile } from '../hooks/useCompanyProfile'
+import { useFundamentals } from '../hooks/useFundamentals'
+import { formatMarketCap, isIndexSymbol, symbolToSecid, symbolToSecucode } from '../lib/companyOverview'
 import { extractString } from '../lib/iconData'
 import type { Icon } from '../lib/types'
 import type { Quote } from '../lib/quoteParser'
@@ -7,8 +10,8 @@ import type { Quote } from '../lib/quoteParser'
 /**
  * 股票详情 Modal(spec user story 11)。
  *
- * 内容:名称/符号、价格、涨跌(▲/▼ 绝对值 + 百分比)、基本面字段占位、K 线区域占位
- * (K 线真实数据接入是 spec Out of Scope)。
+ * 内容:名称/符号、价格、涨跌(▲/▼ 绝对值 + 百分比)、公司概述(公司档案 + 随价估值,东财双端点
+ * 纯前端取数,见 ADR-0004)、K 线区域占位(K 线真实数据接入是 spec Out of Scope)。
  *
  * 刷新失败降级(spec user story 15):quotesError 非空 → 行情区显示「刷新失败,重试」按钮,
  * 点击重拉 quotes(关联查询,与 useQuotes 批拉粒度一致)。单 symbol null(查询成功但无该
@@ -30,6 +33,17 @@ export default function StockModal({
   const name = extractString(icon.data, 'name') || symbol
   const code = symbol.replace(/^(us|sh|sz)/, '')
   const q = symbol ? quotes[symbol] ?? null : null
+
+  // 公司概述(仅公司型;指数不渲染,见 ADR-0004)。secid/secucode 为 null 时 hook 自动禁用。
+  const isIndex = isIndexSymbol(symbol)
+  const secid = isIndex ? null : symbolToSecid(symbol)
+  const secucode = isIndex ? null : symbolToSecucode(symbol)
+  const profileQ = useCompanyProfile(secucode)
+  const fundamentalsQ = useFundamentals(secid)
+  const profile = profileQ.data ?? null
+  const fundamentals = fundamentalsQ.data ?? null
+  const overviewLoading = profileQ.isLoading || fundamentalsQ.isLoading
+  const showOverview = !isIndex && (overviewLoading || !!profile || !!fundamentals)
 
   // Esc 关闭
   useEffect(() => {
@@ -90,18 +104,56 @@ export default function StockModal({
           )}
         </div>
 
-        {/* 基本面占位(真实字段 Out of Scope) */}
-        <div className="mb-5">
-          <div className="text-[11px] uppercase tracking-wider text-white/50 mb-2">
-            基本面
+        {/* 公司概述(仅公司型;指数只显示行情,见 ADR-0004) */}
+        {showOverview && (
+          <div className="mb-5">
+            <div className="text-[11px] uppercase tracking-wider text-white/50 mb-2">
+              公司概述
+            </div>
+
+            {/* 估值:总市值 / 市盈率(随价,push2) */}
+            {fundamentals ? (
+              <div className="grid grid-cols-2 gap-2 text-sm mb-2">
+                <StatCell
+                  label="总市值"
+                  value={formatMarketCap(fundamentals.marketCap) ?? '—'}
+                />
+                <StatCell
+                  label="市盈率"
+                  value={fundamentals.pe != null ? fundamentals.pe.toFixed(2) : '—'}
+                />
+              </div>
+            ) : overviewLoading ? (
+              <div className="text-xs text-white/40 mb-2">估值加载中…</div>
+            ) : null}
+
+            {/* 公司档案:行业 + 主营 + 官网(静态,datacenter-web) */}
+            {profile ? (
+              <div className="rounded-xl bg-white/5 p-3 space-y-1.5 text-sm">
+                {profile.industry && (
+                  <div className="text-white/80">{profile.industry}</div>
+                )}
+                {profile.businessScope && (
+                  <p className="text-white/60 text-xs leading-relaxed line-clamp-3">
+                    {profile.businessScope}
+                  </p>
+                )}
+                {profile.website && (
+                  <a
+                    href={withHttps(profile.website)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block text-xs text-accent hover:underline"
+                  >
+                    {profile.website}
+                  </a>
+                )}
+              </div>
+            ) : overviewLoading && !fundamentals ? (
+              <div className="text-xs text-white/40">公司档案加载中…</div>
+            ) : null}
           </div>
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <PlaceholderField label="市值" />
-            <PlaceholderField label="市盈率" />
-            <PlaceholderField label="市净率" />
-            <PlaceholderField label="股息率" />
-          </div>
-        </div>
+        )}
 
         {/* K 线占位(数据接入 Out of Scope) */}
         <div>
@@ -134,11 +186,16 @@ function QuoteBody({ q }: { q: Quote }) {
   )
 }
 
-function PlaceholderField({ label }: { label: string }) {
+function StatCell({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between rounded-lg bg-white/10 px-3 py-1.5">
       <span className="text-white/50">{label}</span>
-      <span className="font-mono text-white/30">--</span>
+      <span className="font-mono text-white/80">{value}</span>
     </div>
   )
+}
+
+/** ORG_WEB 为裸域名(如 www.x.com)时补 https:// 前缀;已有协议则原样返回。 */
+function withHttps(url: string): string {
+  return /^https?:\/\//.test(url) ? url : `https://${url}`
 }
