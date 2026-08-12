@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { ApiError } from '../api/client'
-import { useApplyTheme } from '../hooks/useTheme'
+import Background from '../components/Background'
 
 export default function LoginPage() {
   const { user, login } = useAuth()
@@ -11,8 +11,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-
-  useApplyTheme('system') // 登录前跟随系统主题
 
   if (user) return <Navigate to="/" replace />
 
@@ -31,32 +29,37 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-zinc-950">
-      <form onSubmit={submit} className="w-72 flex flex-col gap-3 bg-white dark:bg-zinc-900 p-6 rounded-xl shadow">
-        <h1 className="text-2xl text-center mb-2 text-gray-800 dark:text-zinc-100">登录</h1>
-        <input
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder="用户名"
-          className="border border-gray-300 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 p-2 rounded outline-none focus:border-accent"
-          autoComplete="username"
-        />
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="密码"
-          className="border border-gray-300 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 p-2 rounded outline-none focus:border-accent"
-          autoComplete="current-password"
-        />
-        {err && <div className="text-red-500 text-sm">{err}</div>}
-        <button
-          disabled={busy}
-          className="bg-accent text-white p-2 rounded disabled:opacity-50 hover:opacity-90"
-        >
-          {busy ? '登录中…' : '登录'}
-        </button>
-      </form>
+    // 与 Dashboard 同语言:壁纸背景 + 居中半透明玻璃登录卡。
+    // 登录表单天然居中,这里用 glass-panel 卡(非旧版 opaque 白卡)承袭整体玻璃风格。
+    <div className="relative min-h-screen flex items-center justify-center">
+      <Background />
+      <main className="glass-panel relative z-10 w-full max-w-sm mx-4 rounded-3xl p-8">
+        <h1 className="text-2xl font-semibold text-center text-white/90 mb-5">登录</h1>
+        <form onSubmit={submit} className="flex flex-col gap-3">
+          <input
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="用户名"
+            autoComplete="username"
+            className="bg-white/15 border border-white/25 text-white placeholder-white/50 px-3.5 py-2.5 rounded-xl outline-none transition focus:border-white/40 focus:ring-2 focus:ring-accent/60"
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="密码"
+            autoComplete="current-password"
+            className="bg-white/15 border border-white/25 text-white placeholder-white/50 px-3.5 py-2.5 rounded-xl outline-none transition focus:border-white/40 focus:ring-2 focus:ring-accent/60"
+          />
+          {err && <div className="text-down text-sm text-center">{err}</div>}
+          <button
+            disabled={busy}
+            className="bg-accent text-white py-2.5 rounded-xl font-medium transition disabled:opacity-50 hover:bg-accent/90"
+          >
+            {busy ? '登录中…' : '登录'}
+          </button>
+        </form>
+      </main>
     </div>
   )
 }

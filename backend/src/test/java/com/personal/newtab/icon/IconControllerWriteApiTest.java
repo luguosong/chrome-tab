@@ -13,6 +13,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -22,8 +23,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Icon 写 API 测试（见 issue 04 / spec §接缝1）。
  *
  * <p>沿用 ConfigControllerTest 的接缝约定：{@code @Transactional} 每测回滚；
- * 上下文启动时已 seed（12 nav small + 1 changelog large + 13 stock medium，分布在 5 页）。
- * 种子页占用：nav=12 格、changelog=6 格、stock 各页 6/6/1 只 medium=24/24/4 格。</p>
+ * 上下文启动时已 seed（12 nav small + 1 changelog large + 13 stock medium，分布在 3 页）。
+ * 种子页占用：nav=12 格、changelog=6 格、stock 行情页 13 只 medium=52 格（8×8=64 容量，未满）。
+ * 满页拒绝类测试用 {@link #addMediumFillers} 把目标页补到 64 格后再断言 409。</p>
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -38,6 +40,26 @@ class IconControllerWriteApiTest {
     private Page pageByName(String name) {
         return pageRepository.findAll().stream()
                 .filter(p -> p.getName().equals(name)).findFirst().orElseThrow();
+    }
+
+    /**
+     * 直接经仓库向 page 追加 n 个 medium 填充图标（绕过容量校验），
+     * 把种子页补到满容量以测 409。容量由 24→64 后种子页不再自然满，需显式补满。
+     */
+    private void addMediumFillers(Page page, int n) {
+        Long uid = page.getUserId();
+        List<Icon> existing = iconRepository.findByUserIdAndPageIdOrderBySortOrderAscIdAsc(uid, page.getId());
+        int nextOrder = existing.isEmpty() ? 0 : existing.get(existing.size() - 1).getSortOrder() + 1;
+        for (int i = 0; i < n; i++) {
+            Icon f = new Icon();
+            f.setUserId(uid);
+            f.setPageId(page.getId());
+            f.setType(IconType.STOCK);
+            f.setSize(Size.MEDIUM);
+            f.setSortOrder(nextOrder + i);
+            f.setData(Map.of("symbol", "fill" + i, "name", "填充" + i));
+            iconRepository.save(f);
+        }
     }
 
     // ---------- POST /api/icons 成功路径 ----------
@@ -62,7 +84,7 @@ class IconControllerWriteApiTest {
     @Test
     @WithUserDetails("admin")
     void createMediumIconOnChangelogPageSucceeds() throws Exception {
-        // changelog 页仅 1 个 large(6 格)，余 18 格，medium(4) 能放
+        // changelog 页仅 1 个 large(6 格)，余 58 格（64-6），medium(4) 能放
         Page cl = pageByName("日志更新");
         String body = """
                 {"pageId":%d,"type":"STOCK","size":"MEDIUM","data":{"symbol":"usTEST","name":"测试"}}
@@ -78,8 +100,9 @@ class IconControllerWriteApiTest {
     @Test
     @WithUserDetails("admin")
     void createIconOnFullPageReturns409WithRemainingCells() throws Exception {
-        // 行情页：6 只 medium = 24 格，已满
+        // 行情页种子 13 只 medium=52 格；补 3 只 medium 到 64 格（满）→ 再 POST 应 409
         Page stock = pageByName("行情");
+        addMediumFillers(stock, 3);
         String body = """
                 {"pageId":%d,"type":"STOCK","size":"MEDIUM","data":{"symbol":"usNEW","name":"新"}}
                 """.formatted(stock.getId());
@@ -92,17 +115,11 @@ class IconControllerWriteApiTest {
     @Test
     @WithUserDetails("admin")
     void createLargeIconWhenNotEnoughRemainingReturns409() throws Exception {
-        // nav 页 12 small = 12 格占用，余 12 格。加 2 个 large(各 6 格) → 余 0，第 3 个 large(6) 需 > 0 → 409
+        // nav 页种子 12 small=12 格；补 13 只 medium(52 格) 到 64 格（满，余 0）→ 再 POST large(需 6) → 409
         Page nav = pageByName("快速导航");
-        for (int i = 0; i < 2; i++) {
-            String b = """
-                    {"pageId":%d,"type":"NAV","size":"LARGE","data":{"name":"L%d","url":"https://x.com"}}
-                    """.formatted(nav.getId(), i);
-            mvc.perform(post("/api/icons").contentType(MediaType.APPLICATION_JSON).content(b))
-                    .andExpect(status().isOk());
-        }
+        addMediumFillers(nav, 13);
         String over = """
-                {"pageId":%d,"type":"NAV","size":"LARGE","data":{"name":"L2","url":"https://x.com"}}
+                {"pageId":%d,"type":"NAV","size":"LARGE","data":{"name":"L","url":"https://x.com"}}
                 """.formatted(nav.getId());
         mvc.perform(post("/api/icons").contentType(MediaType.APPLICATION_JSON).content(over))
                 .andExpect(status().isConflict())
@@ -155,7 +172,7 @@ class IconControllerWriteApiTest {
     @Test
     @WithUserDetails("admin")
     void updateIconSizeGrowSucceedsWhenCapacityAllows() throws Exception {
-        // nav 页 12 small = 12 格占用，余 12。把其中一只 small→medium(+3) → 仍余 9，放得下
+        // nav 页 12 small = 12 格占用，余 52。把其中一只 small→medium(+3) → 仍余 49，放得下
         Icon nav0 = iconRepository.findAll().stream()
                 .filter(i -> i.getType() == IconType.NAV).findFirst().orElseThrow();
         mvc.perform(patch("/api/icons/" + nav0.getId()).contentType(MediaType.APPLICATION_JSON).content("""
@@ -168,8 +185,9 @@ class IconControllerWriteApiTest {
     @Test
     @WithUserDetails("admin")
     void updateIconSizeGrowRejectWhenOverCapacity() throws Exception {
-        // 行情页已满（24 格）。把其中一只 medium 改 large（+2 格）→ 409
+        // 行情页补满到 64 格。把其中一只 medium(4) 改 large(6)（+2 > 余 0）→ 409
         Page stock = pageByName("行情");
+        addMediumFillers(stock, 3);
         Icon first = iconRepository.findByPageIdOrderBySortOrderAscIdAsc(stock.getId()).get(0);
         String body = """
                 {"size":"LARGE"}
@@ -254,7 +272,7 @@ class IconControllerWriteApiTest {
     @Test
     @WithUserDetails("admin")
     void moveIconCrossPageSucceedsWhenCapacityAllows() throws Exception {
-        // changelog 页（余 18 格）能容纳从 nav 页移过来的 1 个 small
+        // changelog 页（余 58 格）能容纳从 nav 页移过来的 1 个 small
         Page nav = pageByName("快速导航");
         Page cl = pageByName("日志更新");
         Icon mover = iconRepository.findByPageIdOrderBySortOrderAscIdAsc(nav.getId()).get(0);
@@ -278,8 +296,9 @@ class IconControllerWriteApiTest {
     @Test
     @WithUserDetails("admin")
     void moveIconCrossPageRejectWhenTargetFull() throws Exception {
-        // 试图把 changelog(large,6 格) 移到已满的 stock 页（余 0）→ 409
+        // 试图把 changelog(large,6 格) 移到补满（64 格）的 stock 页（余 0）→ 409
         Page stock = pageByName("行情");
+        addMediumFillers(stock, 3);
         Icon changelog = iconRepository.findAll().stream()
                 .filter(i -> i.getType() == IconType.CHANGELOG).findFirst().orElseThrow();
         String body = """

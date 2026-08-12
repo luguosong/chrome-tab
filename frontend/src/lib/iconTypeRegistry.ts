@@ -1,6 +1,7 @@
 import type { ChangelogVersion } from './changelogParser'
 import type { Quote } from './quoteParser'
 import type { IconSize, IconTypeId } from './types'
+import { locationKey, readWeatherLocation, type WeatherBundle } from './weather'
 
 /**
  * 图标类型注册表(见 CONTEXT.md「图标类型」/ ADR-0001)。
@@ -19,11 +20,12 @@ export type EditorField =
   | { name: 'name'; label: string; placeholder: string }
   | { name: 'url'; label: string; placeholder: string }
   | { name: 'symbol'; label: string; placeholder: string }
+  | { name: 'location'; label: string; placeholder: string }
 
 /** 刷新配置(spec §刷新策略):hook key + 间隔(ms)。0 = 不刷新。 */
 export type RefreshConfig = {
-  /** 'quotes' = useQuotes 轮询(60s); 'changelog' = useChangelog staleTime(1h); 'none' = 不刷新。 */
-  kind: 'quotes' | 'changelog' | 'none'
+  /** 'quotes' = useQuotes 轮询(60s); 'changelog' = useChangelog staleTime(1h); 'weather' = useWeather(后端缓存 10/30/5min); 'none' = 不刷新。 */
+  kind: 'quotes' | 'changelog' | 'weather' | 'none'
 }
 
 /** 实时摘要数据(由 IconDataContext 统一拉取后传入,见 components/Icon)。 */
@@ -31,6 +33,8 @@ export type SummaryInput = {
   quotes?: Record<string, Quote | null>
   /** 更新日志的最新版本(changelog 单例只看最新一条)。 */
   changelog?: ChangelogVersion | null
+  /** 各天气图标的 bundle,键为 locationKey(lat,lon)。 */
+  weather?: Record<string, WeatherBundle | null>
 }
 
 /** summarize 返回:大尺寸图标展示在 favicon+名称 之下的实时摘要行。null = 无摘要/降级。 */
@@ -109,13 +113,13 @@ export const NAV_DEF: IconTypeDefinition = {
   summarize: () => null, // nav 无实时摘要
 }
 
-/** 自选股:扩展类型,data={symbol,name}。详情=Modal(K线占位,10 ticket)。 */
+/** 自选股:扩展类型,data={symbol,name}。三档各有专属信息密度(见 ADR-0007 / StockIcon)。详情=Modal。 */
 export const STOCK_DEF: IconTypeDefinition = {
   id: 'stock',
   label: '自选股',
   kind: 'extension',
   singleton: false,
-  sizes: ['medium', 'large'],
+  sizes: ['small', 'medium', 'large'],
   defaultSize: 'medium',
   refresh: { kind: 'quotes' },
   detail: 'modal',
@@ -155,7 +159,29 @@ export const CHANGELOG_DEF: IconTypeDefinition = {
   },
 }
 
-// 模块加载时登记内置三类型。
+/** 天气:扩展类型,非单例,data={location:{name,adm1,adm2,lat,lon}}。取数走后端代理(ADR-0009),详情=Modal。
+ *  多实例 → 取数在 IconDataContext 集中批量;网格渲染走专属 WeatherIconBody(三档密度,见 ADR-0009)。 */
+export const WEATHER_DEF: IconTypeDefinition = {
+  id: 'weather',
+  label: '天气',
+  kind: 'extension',
+  singleton: false,
+  sizes: ['small', 'medium', 'large'],
+  defaultSize: 'medium',
+  refresh: { kind: 'weather' },
+  detail: 'modal',
+  editor: [{ name: 'location', label: '城市', placeholder: '搜索城市' }],
+  summarize: (data, live) => {
+    const loc = readWeatherLocation(data)
+    if (!loc) return null
+    const now = live.weather?.[locationKey(loc)]?.now
+    if (!now) return null
+    return { title: loc.name, text: `${now.temp}° ${now.text}`, tone: 'neutral' }
+  },
+}
+
+// 模块加载时登记内置类型。
 register('nav', NAV_DEF)
 register('stock', STOCK_DEF)
 register('changelog', CHANGELOG_DEF)
+register('weather', WEATHER_DEF)

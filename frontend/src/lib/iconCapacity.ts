@@ -21,8 +21,8 @@ export const CELLS_PER_SIZE: Record<IconSize, number> = {
 /** 类型定义用的尺寸字面量联合。 */
 export type SizeKey = keyof typeof CELLS_PER_SIZE
 
-/** 后端兜底默认容量（6 列 × 4 行 = 24 格）。角标以此为准：与服务端最终校验一致。 */
-export const DEFAULT_PAGE_CAPACITY = 24
+/** 后端兜底默认容量（固定 8 × 8 = 64 格）。角标以此为准：与服务端最终校验一致。 */
+export const DEFAULT_PAGE_CAPACITY = 64
 
 /** 只需 size 字段即可算容量，便于用最小对象/测试桩调用。 */
 export type SizedIcon = { size: IconSize }

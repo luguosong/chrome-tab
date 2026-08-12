@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   closestCorners,
@@ -18,19 +19,20 @@ import { useAuth } from '../context/AuthContext'
 import { useConfig, useMoveIcon } from '../api/config'
 import { moveIcon } from '../lib/iconReducer'
 import { canFit, DEFAULT_PAGE_CAPACITY } from '../lib/iconCapacity'
-import { useApplyTheme } from '../hooks/useTheme'
+import { withDefaults } from '../lib/layoutSettings'
 import { EditModeProvider, useEditMode } from '../context/EditModeContext'
 import { IconDataProvider } from '../context/IconDataContext'
-import Clock from '../components/Clock'
+import { LayoutSettingsProvider } from '../context/LayoutSettingsContext'
 import SearchBox from '../components/SearchBox'
-import ThemeToggle from '../components/ThemeToggle'
 import Background from '../components/Background'
 import Carousel, { EDGE_DROP_ID } from '../components/Carousel'
 import IconGrid from '../components/IconGrid'
 import IconView from '../components/Icon'
 import StockModal from '../components/StockModal'
+import WeatherModal from '../components/WeatherModal'
 import ChangelogDrawer from '../components/ChangelogDrawer'
 import AddDrawer from '../components/AddDrawer'
+import SettingsDrawer from '../components/SettingsDrawer'
 import { get } from '../lib/iconTypeRegistry'
 import type { Config, Icon, IconTypeId, Page } from '../lib/types'
 
@@ -41,6 +43,13 @@ import type { Config, Icon, IconTypeId, Page } from '../lib/types'
  */
 const collisionDetection: CollisionDetection = (args) => {
   const pointer = pointerWithin(args)
+  // 边缘翻页区(07)优先:光标落在左右 w-12 边缘条内时,让 EdgeDropZone 命中而非其下的
+  // 页/图标,保证「拖到边缘持续翻页」不被新增的空页 droppable 或图标遮挡打断
+  // (尤其修复空页场景下「穿过空页继续翻」被打断的问题)。
+  const edge = pointer.filter(
+    (d) => d.id === EDGE_DROP_ID.left || d.id === EDGE_DROP_ID.right,
+  )
+  if (edge.length > 0) return edge
   if (pointer.length > 0) return pointer
   const rect = rectIntersection(args)
   if (rect.length > 0) return rect
@@ -70,7 +79,7 @@ function PageSlide({
 function Dashboard() {
   const { user, logout } = useAuth()
   const { data } = useConfig()
-  useApplyTheme(data?.setting.theme ?? 'system')
+  const layout = withDefaults(data?.layoutSettings)
   const { editing, toggle } = useEditMode()
 
   // 详情面板状态集中在此(spec §详情容器:同一时刻只开一个详情)。
@@ -80,20 +89,28 @@ function Dashboard() {
   // 新增抽屉开关(issue 09):右上角 "+" 唤起,与编辑模式职责分离。
   const [addDrawerOpen, setAddDrawerOpen] = useState(false)
 
+  // 布局设置抽屉开关:右上角 ⚙ 唤起,三项显示几何随账号持久化、跨设备共享。
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
   // 当前激活页索引:Carousel 滚动停稳后向上通知,用于新增抽屉把新图标落到"当前页"。
   const [activeIndex, setActiveIndex] = useState(0)
 
-  // 同页拖拽排序(06):PointerSensor 长按 250ms + 5px 容差激活,避免与走马灯滑动翻页冲突
-  // (轮子翻页是 wheel 事件流,与 pointer 不冲突)。各图标 useSortable 在 !editing 时 disabled,
-  // 故查看模式下传感器虽常驻但不会启动任何拖拽。
+  // 同页拖拽排序(06):鼠标与触控分流,兼顾「直接拖」与点击/触控滑动翻页共存。
+  //   - MouseSensor distance:8 —— 鼠标按下后移动 >8px 立即拖拽(满足查看态「直接拖」的预期);
+  //     纯点击(位移 <8px)不触发拖拽,链接/详情照常打开。
+  //   - TouchSensor delay:250ms + tolerance:5 —— 触控需静止长按 250ms 才拖拽,让走马灯原生
+  //     scroll-snap 的「触控横滑翻页」(即时位移 >5px)在此取消拖拽,不抢走滑动手势。
+  //   单用 PointerSensor 的 delay 模式会让鼠标「按下即拖」的位移在 5px 容差内超限而 handleCancel,
+  //   导致拖拽无反应——故按输入类型拆成两个 sensor。查看模式与编辑模式均启用拖拽。
   const moveIconMut = useMoveIcon()
   const qc = useQueryClient()
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
   )
 
   // 拖拽中的图标 id:供 DragOverlay 渲染跟随光标的只读副本(spec user story 35 视觉反馈)。
-  // onDragStart 置位,onDragEnd/onDragCancel 清空。仅编辑模式下可能发生拖拽。
+  // onDragStart 置位,onDragEnd/onDragCancel 清空。查看/编辑模式拖拽期间均会置位。
   const [activeIconId, setActiveIconId] = useState<number | null>(null)
 
   // 拖拽起点聚合快照(07):记录 dragStart 时刻的 ['config'] 缓存。两个用途:
@@ -164,8 +181,28 @@ function Dashboard() {
     if (!cur) return
     const dragged = cur.icons.find((i) => i.id === activeId)
     if (!dragged) return
+
+    // 空页落点(07 限制修复):空页只有页级 useDroppable(见 IconGrid.PageDropArea),
+    // over.data.current.type==='page',无 sortable.containerId。命中即把图标移入空页位序 0。
+    const overData = over.data.current
+    if (overData?.type === 'page') {
+      const targetPageId = overData.pageId
+      if (targetPageId === dragged.pageId) return
+      const targetIcons = cur.icons.filter((i) => i.pageId === targetPageId)
+      if (!canFit(targetIcons, DEFAULT_PAGE_CAPACITY, dragged.size)) {
+        showNotice('目标页已满,无法移入')
+        return
+      }
+      qc.setQueryData<Config>(['config'], (prev) =>
+        prev
+          ? { ...prev, icons: moveIcon(prev.icons, { id: activeId, toPageId: targetPageId, toIndex: 0 }) }
+          : prev,
+      )
+      return
+    }
+
     // over 所在容器(页)id —— IconGrid 的 SortableContext id=String(page.id)
-    const containerId = over.data.current?.sortable?.containerId
+    const containerId = overData?.sortable?.containerId
     if (containerId == null) return
     const targetPageId = Number(containerId)
     if (Number.isNaN(targetPageId) || targetPageId === dragged.pageId) return // 同页:交给落点提交
@@ -248,81 +285,104 @@ function Dashboard() {
         </div>
       )}
 
-      {/* 右上角固定控件 */}
-      <div className="absolute top-4 right-4 z-30 flex items-center gap-3">
-        <ThemeToggle />
+      {/* 右上角固定控件:归组进一条玻璃胶囊,统一视觉权重(+/⚙/用户名/登出)。
+          容器自身是 glass-panel,内部按钮不再各自带玻璃底,改 hover 轻晕。 */}
+      <div className="absolute top-4 right-4 z-30 glass-panel rounded-full flex items-center gap-0.5 pl-1 pr-1 py-1">
         {/* 新增图标入口(issue 09):与编辑模式分离,点开侧抽屉选类型即填即加 */}
         <button
           type="button"
           onClick={() => setAddDrawerOpen(true)}
           aria-label="新增图标"
-          className="glass-panel text-white/90 w-8 h-8 rounded-full hover:bg-white/40 flex items-center justify-center text-lg leading-none"
+          className="w-8 h-8 rounded-full text-white/90 hover:bg-white/25 flex items-center justify-center text-lg leading-none transition"
         >
           +
         </button>
-        <span className="text-sm text-white/90 drop-shadow">{user?.username}</span>
+        {/* 布局设置入口:整体宽度 / 图标间距 / 图标缩放 */}
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          aria-label="布局设置"
+          title="布局设置"
+          className="w-8 h-8 rounded-full text-white/90 hover:bg-white/25 flex items-center justify-center text-base leading-none transition"
+        >
+          ⚙
+        </button>
+        <span className="mx-1 h-4 w-px bg-white/20" />
+        <span className="text-sm text-white/85 px-1 select-none">{user?.username}</span>
         <button
           onClick={logout}
-          className="glass-panel text-white/90 px-3 py-1 rounded hover:bg-white/40"
+          className="px-2.5 py-1 rounded-full text-sm text-white/85 hover:bg-white/25 transition"
         >
           登出
         </button>
       </div>
 
-      {/* 顶部常驻:时钟 + 搜索框 */}
-      <div className="flex flex-col items-center pt-16 pb-6 px-4">
-        <Clock />
-        <div className="mt-6 w-full max-w-xl">
-          <SearchBox />
+      {/* 整体半透明面板(简约大气风格):铺满整个视口、100% 遮蔽、四边零留白,
+          统一承载搜索框 + 走马灯 + 页签。用 page-panel(轻模糊+轻着色)而非 glass-panel,
+          既能看清壁纸、又压住亮度保证图标可读;overflow-hidden 裁住内部滚动;无圆角避免边角露白。 */}
+      <LayoutSettingsProvider value={layout}>
+      <main className="relative z-10 flex-1 min-h-0 flex flex-col page-panel overflow-hidden">
+        {/* 顶部常驻:仅搜索框(时钟已移除)。
+            pt-16:搜索框整体下移,与底部 pb-16 对称,让搜索框 + 图标区向视口中部聚拢,
+            而非搜索贴顶、图标铺到底边。 */}
+        <div className="px-4 pt-16 pb-4">
+          <div className="w-full max-w-xl mx-auto">
+            <SearchBox />
+          </div>
         </div>
-      </div>
 
-      {/* 走马灯:从 useConfig().pages 动态渲染,每页一个 IconGrid。
-          DndContext 包裹整条走马灯(issue 06):根传感器 + 碰撞 + onDragEnd;每页 IconGrid
-          内自建 SortableContext,每图标 useSortable。所有页经 Carousel 的 scroll-snap 常驻
-          挂载(非 display:none),droppable 均有有效 rect,满足 ADR-0003 约束。
-          IconDataProvider 在此层包裹,使所有 stock 图标共用一次 useQuotes、
-          changelog 图标共用一次 useChangelog(见 context/IconDataContext)。
-          详情面板(Modal/Drawer)也在此层渲染:它们消费 useIconData 的 error/refetch。*/}
-      <div className="flex-1 px-2 pb-6">
-        {pages.length > 0 ? (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={collisionDetection}
-            onDragStart={handleDragStart}
-            onDragOver={handleDragOver}
-            onDragEnd={handleDragEnd}
-            onDragCancel={handleDragCancel}
-          >
-            <IconDataProvider icons={icons}>
-              <Carousel
-                labels={pages.map((p) => p.name)}
-                onActiveChange={setActiveIndex}
-              >
-                {pages.map((p) => (
-                  <PageSlide key={p.id} page={p} icons={icons} onOpenDetail={setDetail} />
-                ))}
-              </Carousel>
-              {/* 详情面板按 detail 字段渲染(ADR-0001 契约),不按 type 字符串 ——
-                  新增复用 modal/drawer 的类型无需改此处。 */}
-              {detail && get(detail.type)?.detail === 'modal' && (
-                <StockModal icon={detail} onClose={() => setDetail(null)} />
-              )}
-              {detail && get(detail.type)?.detail === 'drawer' && (
-                <ChangelogDrawer onClose={() => setDetail(null)} />
-              )}
-              {/* 拖拽幽灵(06):只读副本跟随光标,原位降级为占位;复用 <Icon overlay> 保持视觉一致。
-                  置于 IconDataProvider 内以拿到 quotes/changelog 上下文(React 上下文随 React 树,
-                  不随 portal DOM)。dropAnimation=null 让落定即隐藏,避免与乐观重排动画叠加抖动。 */}
-              <DragOverlay dropAnimation={null}>
-                {activeIcon && <IconView icon={activeIcon} overlay />}
-              </DragOverlay>
-            </IconDataProvider>
-          </DndContext>
-        ) : (
-          <div className="text-white/60 text-sm text-center py-8">加载中…</div>
-        )}
-      </div>
+        {/* 走马灯:从 useConfig().pages 动态渲染,每页一个 IconGrid。
+            DndContext 包裹整条走马灯(issue 06):根传感器 + 碰撞 + onDragEnd;每页 IconGrid
+            内自建 SortableContext,每图标 useSortable。所有页经 Carousel 的 scroll-snap 常驻
+            挂载(非 display:none),droppable 均有有效 rect,满足 ADR-0003 约束。
+            IconDataProvider 在此层包裹,使所有 stock 图标共用一次 useQuotes、
+            changelog 图标共用一次 useChangelog(见 context/IconDataContext)。
+            详情面板(Modal/Drawer)也在此层渲染:它们消费 useIconData 的 error/refetch。*/}
+        <div className="flex-1 min-h-0 px-2 pb-16">
+          {pages.length > 0 ? (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={collisionDetection}
+              autoScroll={false}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDragEnd={handleDragEnd}
+              onDragCancel={handleDragCancel}
+            >
+              <IconDataProvider icons={icons}>
+                <Carousel
+                  labels={pages.map((p) => p.name)}
+                  onActiveChange={setActiveIndex}
+                >
+                  {pages.map((p) => (
+                    <PageSlide key={p.id} page={p} icons={icons} onOpenDetail={setDetail} />
+                  ))}
+                </Carousel>
+                {/* 详情面板按 detail 字段渲染(ADR-0001 契约),不按 type 字符串 ——
+                    新增复用 modal/drawer 的类型无需改此处。 */}
+                {detail && get(detail.type)?.detail === 'modal' &&
+                  (detail.type === 'weather' ? (
+                    <WeatherModal icon={detail} onClose={() => setDetail(null)} />
+                  ) : (
+                    <StockModal icon={detail} onClose={() => setDetail(null)} />
+                  ))}
+                {detail && get(detail.type)?.detail === 'drawer' && (
+                  <ChangelogDrawer onClose={() => setDetail(null)} />
+                )}
+                {/* 拖拽幽灵(06):只读副本跟随光标,原位降级为占位;复用 <Icon overlay> 保持视觉一致。
+                    置于 IconDataProvider 内以拿到 quotes/changelog 上下文(React 上下文随 React 树,
+                    不随 portal DOM)。dropAnimation=null 让落定即隐藏,避免与乐观重排动画叠加抖动。 */}
+                <DragOverlay dropAnimation={null}>
+                  {activeIcon && <IconView icon={activeIcon} overlay />}
+                </DragOverlay>
+              </IconDataProvider>
+            </DndContext>
+          ) : (
+            <div className="text-white/60 text-sm text-center py-8">加载中…</div>
+          )}
+        </div>
+      </main>
+      </LayoutSettingsProvider>
 
       {/* 容量拒绝等短暂提示(07):底部居中浮层,pointer-events-none 不挡交互 */}
       {notice && (
@@ -341,6 +401,12 @@ function Dashboard() {
           existingTypeIds={existingTypeIds}
           onClose={() => setAddDrawerOpen(false)}
         />
+      )}
+
+      {/* 布局设置抽屉(见 CONTEXT.md「布局设置」):三项显示几何随账号持久化、跨设备共享。
+          layout 由聚合接口得出(叠加抽屉内乐观预览);抽屉自管 draft/预览/PUT。 */}
+      {settingsOpen && (
+        <SettingsDrawer layout={layout} onClose={() => setSettingsOpen(false)} />
       )}
     </div>
   )

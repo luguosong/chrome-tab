@@ -9,11 +9,11 @@ export default function Clock() {
   const time = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
   const w = '日一二三四五六'[now.getDay()]
   return (
-    <div>
-      <div className="text-4xl font-bold tracking-tight leading-none text-gray-800 dark:text-zinc-100">
+    <div className="text-center text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.5)]">
+      <div className="text-7xl font-light tracking-tight leading-none tabular-nums">
         {time}
       </div>
-      <small className="block text-sm text-gray-500 dark:text-zinc-400 mt-1">
+      <small className="block text-base font-light mt-2 opacity-90">
         {now.getFullYear()}年{now.getMonth() + 1}月{now.getDate()}日 周{w}
       </small>
     </div>

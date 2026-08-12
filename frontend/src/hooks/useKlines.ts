@@ -15,6 +15,9 @@ export function useKlines(secid: string | null) {
     queryKey: ['klines', secid],
     enabled: !!secid,
     staleTime: 60_000,
+    // 不重试:无效 secid(如美股指数 105.INX)会 ERR_EMPTY_RESPONSE,重试也不恢复,
+    // 默认 3 次重试只会刷 3 条控制台报错。Modal 短生命周期,重开即自然重取。
+    retry: false,
     queryFn: async () => parseKlines(await loadPush2his(secid!, LIMIT)),
   })
 }

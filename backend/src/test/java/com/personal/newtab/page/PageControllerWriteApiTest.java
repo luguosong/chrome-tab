@@ -20,7 +20,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Page 写 API 测试（见 issue 04 / spec §接缝1）。
  *
- * <p>种子 5 页（sortOrder 0..4）。非空页删除由 PageService 阻止（409）；
+ * <p>种子 3 页（sortOrder 0..2）。非空页删除由 PageService 阻止（409）；
  * 新建页 sortOrder 末尾追加。每测 @Transactional 回滚。</p>
  */
 @SpringBootTest
@@ -42,7 +42,7 @@ class PageControllerWriteApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").exists())
                 .andExpect(jsonPath("$.name").value("新页"))
-                .andExpect(jsonPath("$.sortOrder").value(5));   // 已有 5 页(0..4)，追加到 5
+                .andExpect(jsonPath("$.sortOrder").value(3));   // 已有 3 页(0..2)，追加到 3
     }
 
     @Test

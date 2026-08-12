@@ -5,7 +5,7 @@ export type Me = { id: number; username: string }
  * 图标类型 id,对齐后端 IconType 枚举(小写串)。后端 Jackson 默认序列化为大写
  * ("NAV"/"STOCK"/"CHANGELOG"),前端在 config.ts 解析时归一化为小写,使注册表查询干净。
  */
-export type IconTypeId = 'nav' | 'stock' | 'changelog'
+export type IconTypeId = 'nav' | 'stock' | 'changelog' | 'weather'
 
 /**
  * 三档尺寸,对齐后端 Size 枚举(小写)。后端 Jackson 默认序列化为大写

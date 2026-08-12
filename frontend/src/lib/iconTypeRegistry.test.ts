@@ -5,6 +5,7 @@ import {
   register,
   sizesFor,
   type IconTypeDefinition,
+  type SummaryInput,
 } from './iconTypeRegistry'
 import type { Quote } from './quoteParser'
 import type { IconTypeId } from './types'
@@ -47,8 +48,8 @@ describe('sizesFor — 尺寸档查询', () => {
     expect(sizesFor('nav')).toEqual(['small', 'medium', 'large'])
   })
 
-  it('stock 仅 medium/large', () => {
-    expect(sizesFor('stock')).toEqual(['medium', 'large'])
+  it('stock 为 small/medium/large 三档(专属分档信息密度,见 ADR-0007)', () => {
+    expect(sizesFor('stock')).toEqual(['small', 'medium', 'large'])
   })
 
   it('changelog 仅 large(单尺寸)', () => {
@@ -107,6 +108,55 @@ describe('summarize — 纯数据提取(无需 DOM)', () => {
 
   it('nav 无实时摘要:恒返回 null', () => {
     expect(get('nav')!.summarize({ name: 'x', url: 'https://a.com' }, {})).toBeNull()
+  })
+})
+
+describe('天气类型 weather(ADR-0009)', () => {
+  it('登记为扩展、非单例、三档、detail=modal', () => {
+    expect(get('weather')?.label).toBe('天气')
+    expect(get('weather')?.kind).toBe('extension')
+    expect(get('weather')?.singleton).toBe(false)
+    expect(sizesFor('weather')).toEqual(['small', 'medium', 'large'])
+    expect(get('weather')?.detail).toBe('modal')
+  })
+
+  it('非单例:已有也允许新增(canAdd)', () => {
+    expect(canAdd('weather', [])).toBe(true)
+    expect(canAdd('weather', ['weather'])).toBe(true)
+  })
+
+  it('editor 声明 location 字段(城市选择器)', () => {
+    const editor = get('weather')?.editor ?? []
+    expect(editor.some((f) => f.name === 'location')).toBe(true)
+  })
+
+  it('summarize 有实况:返回 城市名 + 温度/文字', () => {
+    const data = { location: { name: '北京', adm1: '北京市', adm2: '', lat: 39.92, lon: 116.41 } }
+    const live = {
+      weather: {
+        '39.92,116.41': {
+          location: '39.92,116.41',
+          now: { temp: 25, text: '多云', icon: '104', obsTime: '', feelsLike: 27, humidity: 60, windDir: '', windScale: '', windSpeed: '', pressure: 1010, vis: 10, precip: 0 },
+          air: null,
+          alerts: [],
+        },
+      },
+    } as unknown as SummaryInput
+    const s = get('weather')!.summarize(data, live)
+    expect(s!.title).toBe('北京')
+    expect(s!.text).toBe('25° 多云')
+    expect(s!.tone).toBe('neutral')
+  })
+
+  it('summarize 无 bundle/无 now:返回 null(组件降级)', () => {
+    const data = { location: { name: '北京', adm1: '', adm2: '', lat: 39.92, lon: 116.41 } }
+    expect(get('weather')!.summarize(data, {})).toBeNull()
+    expect(get('weather')!.summarize(data, { weather: { '39.92,116.41': null } })).toBeNull()
+  })
+
+  it('summarize 无位置(非法 data):返回 null', () => {
+    expect(get('weather')!.summarize(null, {})).toBeNull()
+    expect(get('weather')!.summarize({}, {})).toBeNull()
   })
 })
 

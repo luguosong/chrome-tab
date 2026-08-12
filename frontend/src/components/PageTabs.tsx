@@ -225,9 +225,10 @@ export default function PageTabs() {
           ))}
       </div>
 
-      {/* 错误提示(删非空页 409 等):行内小字,下一次操作清掉 */}
+      {/* 错误提示(删非空页 409 等):行内浮层,下一次操作清掉。
+          与 DashboardPage 容量提示同族(glass-panel rounded-full),统一提示样式。 */}
       {error && (
-        <div className="mt-2 text-center text-xs text-white bg-red-500/30 rounded-md py-1 px-3 mx-auto w-fit max-w-full">
+        <div className="mt-2 text-center text-xs text-white/90 glass-panel rounded-full py-1 px-3 mx-auto w-fit max-w-full">
           {error}
         </div>
       )}

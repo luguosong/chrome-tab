@@ -3,27 +3,33 @@ import { useIconData } from '../context/IconDataContext'
 import { inline } from '../lib/changelogParser'
 
 /**
- * 更新日志详情:底部 Drawer(spec user story 12)。
+ * 更新日志详情:居中 Dialog(由底部 Drawer 调整为居中浮层,消除「沉底」感)。
  *
  * 复用 useIconData 集中拉取的 changelog(由 useChangelog 维护,1h staleTime),展示完整版本
- * 列表(非摘要的前 20 条限制——本面板看完整历史,纵向滚动)。渲染沿用旧 ChangelogTile 的
- * inline() markdown 结构(top + sections)。
+ * 列表(纵向滚动)。真实 CHANGELOG 无日期、无 ### 小节,条目直接挂在版本下,故按「发布时间线」
+ * 呈现:左侧连续细轨 + 每版本一个节点,最新版 accent 高亮 + 「最新」药丸,旧版弱化。
  *
- * 刷新失败降级(spec user story 15):changelogError 非空 → 显示「刷新失败,重试」按钮,
- * 点击重拉 changelog(关联查询)。
+ * 刷新失败降级(spec user story 15):changelogError 非空 → 显示重试按钮,点击重拉。
  *
- * 容器:fixed 底部、玻璃面板、把手 + 关闭按钮;Esc / 点遮罩关闭。
- * 编辑态进入时由父组件(DashboardPage)onClose,不在本组件重复处理。
+ * 容器:fixed 居中、玻璃面板、关闭按钮;Esc / 点遮罩关闭。入场:fade-in 遮罩 + pop-in 面板
+ * (reduced-motion 下不动画)。编辑态进入时由父组件(DashboardPage)onClose。
  */
 export default function ChangelogDrawer({ onClose }: { onClose: () => void }) {
   const { changelog, changelogError, refetchChangelog } = useIconData()
   const [q, setQ] = useState('')
 
   const versions = changelog ?? []
+  const latest = versions[0]?.title
 
+  // 过滤:命中版本号 OR 任一条目文本(真实诉求是搜某个功能/改动,而非版本号)
   const shown = useMemo(() => {
     const kw = q.trim().toLowerCase()
-    return kw ? versions.filter((v) => v.title.toLowerCase().includes(kw)) : versions
+    if (!kw) return versions
+    return versions.filter((v) => {
+      if (v.title.toLowerCase().includes(kw)) return true
+      const items = [...v.top, ...v.sections.flatMap((s) => s.items)]
+      return items.some((it) => it.toLowerCase().includes(kw))
+    })
   }, [q, versions])
 
   // Esc 关闭
@@ -37,30 +43,28 @@ export default function ChangelogDrawer({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-end justify-center"
+      className="fixed inset-0 z-[60] flex items-center justify-center"
       role="dialog"
       aria-modal="true"
-      aria-label="更新日志"
+      aria-label="Claude Code 更新日志"
     >
       {/* 遮罩:点击关闭 */}
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
 
-      <div className="glass-panel relative w-full max-w-2xl rounded-t-3xl pb-4">
-        {/* 把手 */}
-        <div className="flex justify-center pt-2 pb-1">
-          <div className="h-1 w-10 rounded-full bg-white/30" />
-        </div>
-
-        {/* 顶栏:标题 + 关闭 */}
-        <div className="flex items-center justify-between px-6 py-2">
-          <h2 className="text-sm uppercase tracking-wider text-white/70">
-            Claude Code 更新日志
-          </h2>
+      <div className="glass-panel relative w-full max-w-2xl rounded-3xl pb-4 animate-pop-in">
+        {/* 顶栏:标题 + 副标题 + 关闭 */}
+        <div className="flex items-start justify-between px-6 pt-4 pb-2">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-white/90">Claude Code 更新日志</h2>
+            <p className="mt-0.5 text-xs text-white/50">
+              {latest ? `共 ${versions.length} 个版本 · 最新 ${latest}` : '加载中…'}
+            </p>
+          </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="关闭"
-            className="w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center"
+            className="ml-3 shrink-0 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center transition-colors"
           >
             ×
           </button>
@@ -76,51 +80,115 @@ export default function ChangelogDrawer({ onClose }: { onClose: () => void }) {
                 onClick={refetchChangelog}
                 className="border border-white/30 text-white/80 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent"
               >
-                刷新失败,重试
+                重试
               </button>
             </div>
           ) : (
             <>
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="过滤版本号…"
-                className="my-3 w-full px-3 py-2 rounded-lg bg-white/20 text-white placeholder-white/60 text-sm outline-none focus:ring-2 focus:ring-accent"
-              />
+              {/* 检索框 */}
+              <div className="relative my-3">
+                <svg
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/50"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m21 21-4.3-4.3" />
+                </svg>
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  autoFocus
+                  placeholder="过滤更新内容…"
+                  className="w-full pl-9 pr-9 py-2 rounded-lg bg-white/20 text-white placeholder-white/60 text-sm outline-none focus:ring-2 focus:ring-accent"
+                />
+                {q && (
+                  <button
+                    type="button"
+                    onClick={() => setQ('')}
+                    aria-label="清空"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white/25 text-white/80 hover:bg-white/45 flex items-center justify-center text-xs leading-none"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+
+              {q.trim() && <p className="mb-1.5 text-xs text-white/45">{shown.length} 个结果</p>}
 
               <div className="max-h-[60vh] overflow-auto pr-1.5">
                 {shown.length === 0 && (
                   <div className="text-white/60 text-sm py-4">
-                    {versions.length === 0 ? '加载中…' : '无匹配版本'}
+                    {versions.length === 0 ? '加载中…' : `没有匹配「${q.trim()}」的版本`}
                   </div>
                 )}
-                {shown.map((v, i) => {
-                  const secs = [
-                    ...(v.top.length ? [{ name: '更新', items: v.top }] : []),
-                    ...v.sections,
-                  ]
-                  return (
-                    <div key={i} className="mb-4 last:mb-0">
-                      <div
-                        className="font-mono text-[15px] text-accent mb-1.5"
-                        dangerouslySetInnerHTML={{ __html: inline(v.title) }}
-                      />
-                      {secs.map((s, j) => (
-                        <div key={j} className="mb-1.5">
-                          <div
-                            className="text-[13px] text-white/90 mb-0.5"
-                            dangerouslySetInnerHTML={{ __html: inline(s.name) }}
+
+                <ol className="relative pl-6 [&_a]:text-accent [&_a]:underline">
+                  {/* 时间线左轨 */}
+                  <span
+                    className="absolute left-[8px] top-0 bottom-0 w-px bg-white/15"
+                    aria-hidden="true"
+                  />
+                  {shown.map((v, i) => {
+                    const isLatest = !!latest && v.title === latest
+                    // top(无小节条目)在前;命名小节(若未来出现)按名渲染
+                    const groups: { name?: string; items: string[] }[] = []
+                    if (v.top.length) groups.push({ items: v.top })
+                    for (const s of v.sections) groups.push({ name: s.name, items: s.items })
+                    return (
+                      <li key={i} className="relative mb-4 last:mb-0">
+                        {/* 时间线节点:最新版实心 accent,旧版弱化 */}
+                        <span
+                          className={
+                            'absolute -left-[19px] top-[7px] h-1.5 w-1.5 rounded-full ' +
+                            (isLatest ? 'bg-accent' : 'bg-white/35')
+                          }
+                          aria-hidden="true"
+                        />
+                        <div className="flex items-center gap-2">
+                          <h3
+                            className={
+                              'font-mono text-[15px] ' +
+                              (isLatest ? 'text-accent font-semibold' : 'text-white/75')
+                            }
+                            dangerouslySetInnerHTML={{ __html: inline(v.title) }}
                           />
-                          <ul className="text-[13px] text-white/70 space-y-0.5">
-                            {s.items.map((it, k) => (
-                              <li key={k} dangerouslySetInnerHTML={{ __html: inline(it) }} />
-                            ))}
-                          </ul>
+                          {isLatest && (
+                            <span className="rounded-full bg-accent/20 px-2 py-0.5 text-[10px] font-medium leading-none text-accent">
+                              最新
+                            </span>
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  )
-                })}
+                        {groups.map((g, j) => (
+                          <div key={j} className="mt-1.5">
+                            {g.name && (
+                              <div
+                                className="mb-0.5 text-[12px] font-medium text-white/80"
+                                dangerouslySetInnerHTML={{ __html: inline(g.name) }}
+                              />
+                            )}
+                            <ul className="space-y-1">
+                              {g.items.map((it, k) => (
+                                <li key={k} className="flex gap-2 text-[13px] text-white/70">
+                                  <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-white/40" />
+                                  <span
+                                    className="min-w-0"
+                                    dangerouslySetInnerHTML={{ __html: inline(it) }}
+                                  />
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </li>
+                    )
+                  })}
+                </ol>
               </div>
             </>
           )}

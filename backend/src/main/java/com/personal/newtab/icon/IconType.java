@@ -5,11 +5,13 @@ package com.personal.newtab.icon;
  * nav  = 网站链接（基础类型，data={name,url}）
  * stock = 自选股（扩展类型，data={symbol,name}）
  * changelog = 更新日志流（扩展类型，单例，data=null）
+ * weather = 天气（扩展类型，非单例，data={location:{name,adm1,adm2,lat,lon}}，见 ADR-0009）
  */
 public enum IconType {
     NAV,
     STOCK,
-    CHANGELOG;
+    CHANGELOG,
+    WEATHER;
 
     /** 单例类型（CONTEXT.md）：该 user 全局仅允许一个实例。后端单一事实源，POST /api/icons 校验用。 */
     public boolean isSingleton() {

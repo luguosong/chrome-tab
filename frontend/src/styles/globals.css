@@ -33,6 +33,19 @@ code {
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+/* 整页面板:中度模糊 + 轻着色 + 顶部内高光。区别于 glass-panel(重模糊的小浮层),
+   这里做适度雾化(8px)既保留壁纸可辨、又压住亮度保证图标/文字可读,顶部 inset 高光
+   给玻璃面一丝厚度感。仅用于铺满视口的页面主面板。 */
+.page-panel {
+  background: rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+.dark .page-panel {
+  background: rgba(18, 18, 23, 0.36);
+}
+
 /* 走马灯横向滚动条隐藏 */
 .no-scrollbar {
   -ms-overflow-style: none;
@@ -50,6 +63,13 @@ code {
   .animate-slide-in-right {
     animation: slide-in-right 0.22s ease-out;
   }
+  /* 详情 Dialog 入场：遮罩淡入 + 面板轻微放大 */
+  .animate-fade-in {
+    animation: fade-in 0.2s ease-out;
+  }
+  .animate-pop-in {
+    animation: pop-in 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
 }
 @keyframes jiggle {
   0%,
@@ -66,5 +86,23 @@ code {
   }
   to {
     transform: translateX(0);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }

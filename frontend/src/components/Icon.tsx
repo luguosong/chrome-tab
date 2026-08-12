@@ -1,14 +1,19 @@
 import { useMemo, useState, type CSSProperties } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { get, sizesFor, type Summary, type SummaryInput } from '../lib/iconTypeRegistry'
+import { get, sizesFor, type EditorField, type IconTypeDefinition, type Summary, type SummaryInput } from '../lib/iconTypeRegistry'
 import { inline } from '../lib/changelogParser'
+import StockIconBody from './StockIcon'
+import WeatherIconBody from './WeatherIcon'
+import LocationPicker from './LocationPicker'
 import type { Icon as IconModel, IconSize } from '../lib/types'
 import { useIconData } from '../context/IconDataContext'
 import { useEditMode } from '../context/EditModeContext'
+import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import { SIZE_CELLS } from '../lib/iconLayout'
-import { extractString } from '../lib/iconData'
-import { useDeleteIcon, useUpdateIconSize } from '../api/config'
+import { extractString, buildIconData } from '../lib/iconData'
+import { readWeatherLocation, type WeatherLocation } from '../lib/weather'
+import { useDeleteIcon, useUpdateIconSize, useUpdateIconData } from '../api/config'
 
 /**
  * 单个图标渲染(见 CONTEXT.md「图标」/ spec §前端架构 IconGrid)。
@@ -27,15 +32,18 @@ import { useDeleteIcon, useUpdateIconSize } from '../api/config'
  * 刷新失败降级:summarize 返回 null → 摘要行显示灰色 "--"(spec user story 14)。
  *
  * 拖拽(06):本组件是网格画格(grid item,拥有 gridColumn/gridRow span),故 useSortable
- * 直接挂在此处——sortable 节点必须即画格节点,否则 grid 跨度会失效。仅编辑模式启用
- * (disabled: !editing);非编辑模式下不注入 attributes/listeners,保留 nav `<a>` 原生
- * 语义(role=link)与点击行为。data 带 pageId/size 供 DndContext handler 读取(跨页 07 用)。
+ * 直接挂在此处——sortable 节点必须即画格节点,否则 grid 跨度会失效。查看模式与编辑模式均可拖。
+ * 激活策略由 DashboardPage 的 Mouse/TouchSensor 决定(鼠标移动即拖、触控长按拖),点击(轻点)
+ * 因激活阈值/延迟与拖拽分流,链接/详情照常打开。attributes 仅在编辑模式注入(保留 nav `<a>`
+ * 原生 role=link 语义与无障碍行为),listeners 在两种模式都注入(实际驱动拖拽)。
+ * data 带 pageId/size 供 DndContext handler 读取(跨页 07 用)。
  * 编辑模式角标(EditActions)的交互按钮 onPointerDown stopPropagation,避免点角标误启拖拽。
  */
-const SIZE_STYLE: Record<IconSize, { pad: string; favicon: string }> = {
-  small: { pad: 'p-2', favicon: 'w-8 h-8' },
-  medium: { pad: 'p-3', favicon: 'w-10 h-10' },
-  large: { pad: 'p-4', favicon: 'w-12 h-12' },
+/** 各档基础像素(=改造前 Tailwind p-2/w-8… 的 px 值);乘以 iconScale 得实际尺寸。 */
+const SIZE_BASE_PX: Record<IconSize, { pad: number; fav: number }> = {
+  small: { pad: 8, fav: 32 },
+  medium: { pad: 12, fav: 40 },
+  large: { pad: 16, fav: 48 },
 }
 
 /** 编辑模式尺寸菜单与角标的中文标签(spec user story 28:大/中/小三档)。 */
@@ -62,29 +70,38 @@ export default function Icon({
   const def = get(icon.type)
   const { quotes, changelog } = useIconData()
   const { editing } = useEditMode()
+  const { iconScale } = useLayoutSettings()
   const delIcon = useDeleteIcon()
   const resizeIcon = useUpdateIconSize()
+  const editIcon = useUpdateIconData()
   const [menuOpen, setMenuOpen] = useState(false)
+  // 编辑配置 popover(✎):与尺寸菜单互斥,开一个关另一个。
+  const [editOpen, setEditOpen] = useState(false)
 
-  // 拖拽(06):仅编辑模式可拖;data 带 pageId/size 供 DndContext handler 读取(见 issue 06 checklist)。
+  // 拖拽(06):查看模式与编辑模式均启用;data 带 pageId/size 供 DndContext handler 读取(见 issue 06 checklist)。
   // overlay 副本强制 disabled,避免在 DragOverlay(脱离 SortableContext)里重复注册可拖节点。
+  // 点击与拖拽的分流由 DashboardPage 的 Mouse/TouchSensor 激活策略负责(鼠标移动即拖、触控长按)。
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: icon.id,
     data: { pageId: icon.pageId, size: icon.size },
-    disabled: !editing || overlay,
+    disabled: overlay,
   })
 
-  // 实时摘要(只在大尺寸时计算)
+  // 实时摘要(仅非 stock 的大尺寸;stock 走专属 StockIconBody,不进此路径)。
   const summary = useMemo<Summary | null>(() => {
-    if (icon.size !== 'large' || !def) return null
+    if (icon.type === 'stock' || icon.type === 'weather' || icon.size !== 'large' || !def) return null
     const live: SummaryInput = { quotes, changelog: changelog?.[0] ?? null }
     return def.summarize(icon.data, live)
   }, [icon.size, icon.data, def, quotes, changelog])
 
   const span = SIZE_CELLS[icon.size]
+  const base = SIZE_BASE_PX[icon.size]
+  const padPx = base.pad * iconScale
+  const favPx = base.fav * iconScale
   const style: CSSProperties = {
     gridColumn: `span ${span.cols}`,
     gridRow: `span ${span.rows}`,
+    padding: padPx,
     // 拖拽变换仅作用于网格内本体(06);overlay 幽灵由 DragOverlay 负责定位,不重复套 transform。
     ...(!overlay
       ? {
@@ -94,7 +111,6 @@ export default function Icon({
         }
       : null),
   }
-  const sz = SIZE_STYLE[icon.size]
 
   const name = extractName(icon)
   const url = icon.type === 'nav' ? extractString(icon.data, 'url') : ''
@@ -119,37 +135,52 @@ export default function Icon({
       style={style}
       {...linkProps}
       {...(editing && !overlay ? attributes : {})}
-      {...(editing && !overlay ? listeners : {})}
+      {...(overlay ? {} : listeners)}
       onClick={onClick}
       title={def?.label}
       className={
-        'relative flex flex-col items-center justify-center gap-2 rounded-2xl ' +
-        'bg-white/15 hover:bg-white/30 transition ' +
+        'relative flex flex-col rounded-2xl transition ' +
+        // stock 走左对齐 ticker 卡(见 StockIcon);其余类型保持居中堆叠。
+        (icon.type === 'stock' || icon.type === 'weather'
+          ? 'items-stretch justify-center gap-1 text-left '
+          : 'items-center justify-center gap-2 ') +
+        // nav 导航链接采用简约风格:无标签背景(裸 favicon + 下方文字),仅 hover 留一层轻晕
+        // 维持可点 affordance;其余类型(changelog=Claude Code / stock=股票 等带实时摘要)
+        // 保留并加深玻璃容器(比 nav 更实的框),用于承载富内容并形成视觉层级。
+        (icon.type === 'nav' ? 'hover:bg-white/10 ' : 'bg-white/25 hover:bg-white/40 ') +
         (interactive ? 'cursor-pointer' : 'cursor-default') +
         (editing && !overlay ? ' editing-jiggle cursor-grab active:cursor-grabbing' : '') +
         (isDragging && !overlay ? ' ring-2 ring-accent' : '') +
-        (overlay ? ' shadow-2xl ring-2 ring-accent cursor-grabbing' : '') +
-        ' ' + sz.pad
+        (overlay ? ' shadow-2xl ring-2 ring-accent cursor-grabbing' : '')
       }
     >
-      {favicon && (
-        <img
-          src={favicon}
-          alt=""
-          className={`${sz.favicon} rounded-lg`}
-          referrerPolicy="no-referrer"
-        />
-      )}
+      {icon.type === 'stock' ? (
+        <StockIconBody icon={icon} />
+      ) : icon.type === 'weather' ? (
+        <WeatherIconBody icon={icon} />
+      ) : (
+        <>
+          {favicon && (
+            <img
+              src={favicon}
+              alt=""
+              style={{ width: favPx, height: favPx }}
+              className="rounded-lg"
+              referrerPolicy="no-referrer"
+            />
+          )}
 
-      {/* small 仅 favicon;medium+ 显示名称 */}
-      {icon.size !== 'small' && name && (
-        <span className="text-xs text-white/90 max-w-full truncate text-center">
-          {name}
-        </span>
-      )}
+          {/* 名称:有则显示。见 CONTEXT.md「尺寸」。 */}
+          {name && (
+            <span className="text-xs text-white/90 max-w-full truncate text-center">
+              {name}
+            </span>
+          )}
 
-      {/* large:实时摘要行(失败降级 "--")*/}
-      {icon.size === 'large' && <SummaryLine summary={summary} />}
+          {/* large:实时摘要行(失败降级 "--")*/}
+          {icon.size === 'large' && <SummaryLine summary={summary} />}
+        </>
+      )}
 
       {/* 编辑模式角标:尺寸切换菜单 + 删除 ×(spec user story 27/28)。
           仅展示该类型支持的尺寸(sizesFor);点击 PATCH 改 size,× 点击 DELETE,
@@ -158,11 +189,15 @@ export default function Icon({
       {editing && !overlay && (
         <EditActions
           icon={icon}
+          def={def}
           menuOpen={menuOpen}
           setMenuOpen={setMenuOpen}
-          busy={delIcon.isPending || resizeIcon.isPending}
+          editOpen={editOpen}
+          setEditOpen={setEditOpen}
+          busy={delIcon.isPending || resizeIcon.isPending || editIcon.isPending}
           onDelete={() => delIcon.mutate(icon.id)}
           onResize={(size) => resizeIcon.mutate({ id: icon.id, size })}
+          onEdit={(data) => editIcon.mutate({ id: icon.id, data })}
         />
       )}
     </Tag>
@@ -222,28 +257,56 @@ function faviconUrl(url: string): string {
  */
 function EditActions({
   icon,
+  def,
   menuOpen,
   setMenuOpen,
+  editOpen,
+  setEditOpen,
   busy,
   onDelete,
   onResize,
+  onEdit,
 }: {
   icon: IconModel
+  def: IconTypeDefinition | undefined
   menuOpen: boolean
   setMenuOpen: (v: boolean) => void
+  editOpen: boolean
+  setEditOpen: (v: boolean) => void
   busy: boolean
   onDelete: () => void
   onResize: (size: IconSize) => void
+  onEdit: (data: Record<string, unknown> | null) => void
 }) {
   const allowed = sizesFor(icon.type)
   // 单尺寸类型(如 changelog 仅 large)无需切换,不渲染尺寸按钮,只留删除 ×。
   const showSizeMenu = allowed.length > 1
+  // 仅 editor 非空的类型(nav/stock)出现编辑配置 ✎;changelog(editor=[])无配置可改。
+  const editor = def?.editor ?? []
+  const showEdit = editor.length > 0
   return (
     <>
       <div
         className="absolute -top-2 -right-2 z-20 flex gap-1"
         onPointerDown={(e) => e.stopPropagation()}
       >
+        {/* 编辑配置 ✎:打开 popover(字段预填),与尺寸菜单互斥 */}
+        {showEdit && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={(e) => {
+              e.stopPropagation()
+              setMenuOpen(false)
+              setEditOpen(!editOpen)
+            }}
+            onContextMenu={(e) => e.stopPropagation()}
+            className="glass-panel w-6 h-6 rounded-full text-[11px] leading-none text-white/90 flex items-center justify-center hover:bg-white/40 disabled:opacity-50"
+            title="编辑"
+          >
+            ✎
+          </button>
+        )}
         {/* 尺寸切换:显示当前档位,点击展开菜单(仅多尺寸类型出现) */}
         {showSizeMenu && (
           <button
@@ -251,6 +314,7 @@ function EditActions({
             disabled={busy}
             onClick={(e) => {
               e.stopPropagation()
+              setEditOpen(false)
               setMenuOpen(!menuOpen)
             }}
             onContextMenu={(e) => e.stopPropagation()}
@@ -320,6 +384,120 @@ function EditActions({
           </div>
         </>
       )}
+
+      {/* 编辑配置 popover:仅 editor 非空的类型(nav/stock)打开时渲染 */}
+      {editOpen && (
+        <EditForm
+          fields={editor}
+          icon={icon}
+          busy={busy}
+          onCancel={() => setEditOpen(false)}
+          onSave={(data) => {
+            onEdit(data)
+            setEditOpen(false)
+          }}
+        />
+      )}
+    </>
+  )
+}
+
+/**
+ * 编辑配置 popover(见 CONTEXT.md「编辑模式」)。从图标当前 data 预填类型 editor 声明的字段
+ * (nav=name+url / stock=symbol+name),保存走 useUpdateIconData(PATCH /api/icons/{id} body={data}),
+ * 取消直接关闭。与 AddDrawer 共用 buildIconData 归一化 + 输入样式,使「新增」与「编辑」表单一致。
+ *
+ * 容器与尺寸菜单同模式:`fixed inset-0` 透明遮罩(z-30,click-outside 取消)+ absolute 面板(z-40)。
+ * onPointerDown stopPropagation 防止冒泡到 Tag 触发拖拽(同 EditActions 角标,见 06)。
+ */
+function EditForm({
+  fields,
+  icon,
+  busy,
+  onSave,
+  onCancel,
+}: {
+  fields: EditorField[]
+  icon: IconModel
+  busy: boolean
+  onSave: (data: Record<string, unknown> | null) => void
+  onCancel: () => void
+}) {
+  // 预填当前 data;组件仅在 editOpen 时挂载,故初值即打开瞬间的快照。
+  // location 字段(天气)是结构化对象,预填 readWeatherLocation;其余为字符串。
+  const [values, setValues] = useState<Record<string, unknown>>(() =>
+    Object.fromEntries(
+      fields.map((f) => [
+        f.name,
+        f.name === 'location' ? (readWeatherLocation(icon.data) ?? '') : extractString(icon.data, f.name),
+      ]),
+    ),
+  )
+  function setField(name: string, v: unknown) {
+    setValues((prev) => ({ ...prev, [name]: v }))
+  }
+  return (
+    <>
+      {/* 透明遮罩:点击任意处取消 */}
+      <button
+        type="button"
+        aria-hidden
+        tabIndex={-1}
+        onClick={(e) => {
+          e.stopPropagation()
+          onCancel()
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+        className="fixed inset-0 z-30 cursor-default"
+      />
+      <div
+        className="absolute top-5 right-0 z-40 glass-panel rounded-lg p-2 min-w-[200px] space-y-2"
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        {fields.map((f) =>
+          f.name === 'location' ? (
+            <LocationPicker
+              key={f.name}
+              value={values[f.name] ? (values[f.name] as WeatherLocation) : null}
+              onChange={(loc) => setField('location', loc)}
+              placeholder={f.placeholder}
+            />
+          ) : (
+            <input
+              key={f.name}
+              value={(values[f.name] as string) ?? ''}
+              onChange={(e) => setField(f.name, e.target.value)}
+              placeholder={f.placeholder}
+              aria-label={f.label}
+              className="w-full px-2.5 py-1.5 rounded-md bg-white/20 text-white placeholder-white/50 text-xs outline-none focus:ring-2 focus:ring-accent"
+            />
+          ),
+        )}
+        <div className="flex gap-2 justify-end pt-0.5">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onCancel()
+            }}
+            className="px-2 py-1 rounded-md text-xs text-white/80 hover:bg-white/20"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={(e) => {
+              e.stopPropagation()
+              onSave(buildIconData(fields, values))
+            }}
+            className="px-2.5 py-1 rounded-md bg-accent/90 hover:bg-accent disabled:opacity-50 text-white text-xs"
+          >
+            保存
+          </button>
+        </div>
+      </div>
     </>
   )
 }

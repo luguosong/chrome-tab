@@ -8,7 +8,7 @@ import {
 } from './iconCapacity'
 
 // 对齐 spec §接缝2:容量纯函数输入输出断言,无 DOM。
-// 后端单一事实源为 Size.cells()(small=1/medium=4/large=6)与 DEFAULT_CAPACITY_CELLS(24),
+// 后端单一事实源为 Size.cells()(small=1/medium=4/large=6)与 DEFAULT_CAPACITY_CELLS(64),
 // 前端此处镜像该约定,故断言值与后端对齐。
 
 describe('cellsUsed — 占用格子求和', () => {
@@ -38,7 +38,7 @@ describe('cellsUsed — 占用格子求和', () => {
     const p3 = Array.from({ length: 13 }, () => ({ size: 'medium' as const }))
     expect(cellsUsed(p1)).toBe(12)
     expect(cellsUsed(p2)).toBe(6)
-    expect(cellsUsed(p3)).toBe(52) // 超过单页容量 → 迁移会拆页(spec §迁移)
+    expect(cellsUsed(p3)).toBe(52) // 8×8=64 容量下单页可容纳(未满)
   })
 
   it('与 CELLS_PER_SIZE 一致', () => {
@@ -48,8 +48,8 @@ describe('cellsUsed — 占用格子求和', () => {
 })
 
 describe('capacityFor — 列×行', () => {
-  it('6×4 = 24(桌面典型,与后端 DEFAULT 对齐)', () => {
-    expect(capacityFor(6, 4)).toBe(24)
+  it('8×8 = 64(固定网格,与后端 DEFAULT_CAPACITY_CELLS 对齐)', () => {
+    expect(capacityFor(8, 8)).toBe(64)
   })
 
   it('其它网格', () => {
@@ -58,8 +58,8 @@ describe('capacityFor — 列×行', () => {
     expect(capacityFor(4, 4)).toBe(16)
   })
 
-  it('DEFAULT_PAGE_CAPACITY 为 6×4', () => {
-    expect(DEFAULT_PAGE_CAPACITY).toBe(capacityFor(6, 4))
+  it('DEFAULT_PAGE_CAPACITY 为 8×8', () => {
+    expect(DEFAULT_PAGE_CAPACITY).toBe(capacityFor(8, 8))
   })
 
   it('零维度 = 0', () => {

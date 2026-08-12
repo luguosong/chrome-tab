@@ -2,7 +2,7 @@ import type { IconSize } from './types'
 
 /**
  * 图标尺寸 → 网格格子(col × row),见 CONTEXT.md「尺寸」。
- * 6 列网格:small=1×1 / medium=2×2 / large=3×2。IconGrid 用此映射算 grid span。
+ * 8 列网格:small=1×1 / medium=2×2 / large=3×2。IconGrid 用此映射算 grid span。
  * 容量校验相关的 cellsUsed/capacityFor 属于 05/09 ticket,这里不导出。
  */
 export const SIZE_CELLS: Record<IconSize, { cols: number; rows: number }> = {
@@ -11,5 +11,9 @@ export const SIZE_CELLS: Record<IconSize, { cols: number; rows: number }> = {
   large: { cols: 3, rows: 2 },
 }
 
-/** 网格列数(桌面端 6 列,见 CONTEXT.md「格子」)。 */
-export const GRID_COLUMNS = 6
+/**
+ * 固定 8×8 网格(见 CONTEXT.md「格子」):列数与行数都固定,
+ * 背景尺寸由网格决定而非随图标数量变化。容量 = GRID_COLUMNS × GRID_ROWS。
+ */
+export const GRID_COLUMNS = 8
+export const GRID_ROWS = 8

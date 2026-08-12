@@ -10,6 +10,7 @@ import {
 import { useDndContext, useDroppable } from '@dnd-kit/core'
 import PageTabs from './PageTabs'
 import { resolveWrapPage } from '../lib/carouselNav'
+import { pageTransitionFrame } from '../lib/pageTransition'
 
 /**
  * 走马灯：基于 CSS scroll-snap，原生顺滑、自带触控/触控板支持。
@@ -92,11 +93,22 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
       if (!resolved) return // 空页集
       const { pageIndex, isWrap } = resolved
       const target = pageIndex * el.clientWidth
+      // [DEBUG-pgsw] 临时诊断:页面切换回弹缺失。定位后整段 grep 删除。
+      console.log('[DEBUG-pgsw] req', {
+        i,
+        count: labels.length,
+        isWrap,
+        pageIndex,
+        target,
+        scrollLeftBefore: el.scrollLeft,
+        clientWidth: el.clientWidth,
+      })
 
       // 取消在飞的弹簧动画,并恢复 scroll-snap / scroll-behavior
       const resetOverrides = () => {
         el.style.scrollSnapType = ''
         el.style.scrollBehavior = ''
+        el.style.setProperty('--pg-overshoot', '0px')
       }
       if (animRef.current != null) {
         cancelAnimationFrame(animRef.current)
@@ -109,6 +121,7 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
       // 直接落点。落点恰为 snap 点(页边界),无需关 snap;状态由下方 scroll 监听同步,
       // 与 slide 路径一致。
       if (isWrap) {
+        console.log('[DEBUG-pgsw] path=wrap-instant-cut (无回弹,ADR-0008 设计)')
         el.scrollLeft = target
         return
       }
@@ -116,6 +129,7 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
       // 回弹是用户明确要求的核心切换反馈,故无视 prefers-reduced-motion(产品决策)。
       // 已在目标位置则不动画。
       if (target === el.scrollLeft) {
+        console.log('[DEBUG-pgsw] path=already-at-target (无回弹:已在目标位置)')
         el.scrollLeft = target
         return
       }
@@ -125,28 +139,34 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
       // 动画期间必须同时关掉两项,否则回弹被吃掉:
       //   - scroll-snap-type: none —— mandatory 会把越界位置立刻拽回 snap 点
       //   - scroll-behavior: auto —— 容器带 scroll-smooth,smooth 会对「逐帧 scrollLeft 赋值」
-      //     再做一次平滑插值,直接抹平 easeOutBack 的越界回弹(初次实现没效果即此原因)
+      //     再做一次平滑插值,直接抹平回弹
       el.style.scrollSnapType = 'none'
       el.style.scrollBehavior = 'auto'
 
-      // easeOutBack:c1=1.7(经典值)≈ 9.5% 越界,回弹明显;560ms 落定,留出时间读回弹。
+      // 回弹分两路(pageTransitionFrame,见 lib/pageTransition.ts):scrollLeft 走 easeOutCubic
+      // 单调到位(永不越界 → 首/末页不再被浏览器夹掉回弹),越界回弹量交给 CSS 变量
+      // --pg-overshoot,由每页内容的 translateX 承担(transform 不受 scrollLeft 边界限制)。
+      // 合成视觉与原 easeOutBack 等价。560ms 落定。
       const duration = 560
-      const c1 = 1.7
-      const c3 = c1 + 1
-      const easeOutBack = (t: number) =>
-        1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2)
       const t0 = performance.now()
       const tick = (now: number) => {
         const t = Math.min(1, (now - t0) / duration)
-        el.scrollLeft = start + distance * easeOutBack(t)
+        const { scrollLeft, overshoot } = pageTransitionFrame(t, start, distance)
+        el.scrollLeft = scrollLeft
+        el.style.setProperty('--pg-overshoot', `${overshoot}px`)
         if (t < 1) {
           animRef.current = requestAnimationFrame(tick)
         } else {
           animRef.current = null
           el.scrollLeft = target // 落到精确像素(= snap 点)
-          resetOverrides() // 恢复:snap-x mandatory + scroll-smooth(交给 Tailwind 类)
+          resetOverrides() // 恢复:snap-x mandatory + scroll-smooth + --pg-overshoot=0
+          console.log('[DEBUG-pgsw] spring-done', {
+            finalScrollLeft: el.scrollLeft,
+            target,
+          })
         }
       }
+      console.log('[DEBUG-pgsw] path=spring-started', { start, distance, duration })
       animRef.current = requestAnimationFrame(tick)
     },
     [labels.length],
@@ -174,6 +194,12 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
       cancelAnimationFrame(raf)
       raf = requestAnimationFrame(() => {
         const i = Math.round(el.scrollLeft / el.clientWidth)
+        console.log('[DEBUG-pgsw] scroll', {
+          derivedActive: i,
+          currentActive: active,
+          scrollLeft: el.scrollLeft,
+          clientWidth: el.clientWidth,
+        })
         if (i !== active) {
           setActive(i)
           onActiveChange?.(i)
@@ -244,11 +270,18 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
           {children.map((child, i) => (
             <div
               key={i}
-              className="w-full shrink-0 snap-center px-4 sm:px-16 h-full"
+              className="w-full shrink-0 snap-center h-full"
               aria-roledescription="slide"
               aria-label={labels[i]}
             >
-              {child}
+              {/* 回弹越界由 translateX(--pg-overshoot) 承担(goTo 逐帧设置);放在内层而非
+                  snap 子元素上,使 snap-child 休息态无 transform,避免干扰原生 snap 落点。 */}
+              <div
+                className="h-full px-4 sm:px-16"
+                style={{ transform: 'translateX(var(--pg-overshoot, 0px))' }}
+              >
+                {child}
+              </div>
             </div>
           ))}
         </div>

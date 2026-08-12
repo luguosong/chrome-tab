@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useCreateIcon } from '../api/config'
 import { ApiError } from '../api/client'
 import { canAdd, listTypes, type IconTypeDefinition } from '../lib/iconTypeRegistry'
-import { normalizeUrl } from '../lib/normalizeUrl'
+import { buildIconData } from '../lib/iconData'
+import LocationPicker from './LocationPicker'
+import type { WeatherLocation } from '../lib/weather'
 import type { IconTypeId } from '../lib/types'
 
 /**
@@ -116,17 +118,18 @@ function TypeCard({
   disabled: boolean
 }) {
   const create = useCreateIcon()
-  const [values, setValues] = useState<Record<string, string>>(() =>
+  const [values, setValues] = useState<Record<string, unknown>>(() =>
     Object.fromEntries(def.editor.map((f) => [f.name, ''])),
   )
 
-  function setField(name: string, v: string) {
+  function setField(name: string, v: unknown) {
     setValues((prev) => ({ ...prev, [name]: v }))
   }
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     if (pageId === undefined) return
+    if (def.editor.some((f) => f.name === 'location') && !values['location']) return
     // mutateAsync:成功才清空表单(抽屉保持打开以连续添加,issue 09);
     // 失败抛出由 react-query 记录到 create.error,UI 据此展示提示。
     try {
@@ -134,7 +137,7 @@ function TypeCard({
         pageId,
         type: def.id,
         size: def.defaultSize,
-        data: buildData(def, values),
+        data: buildIconData(def.editor, values),
       })
       setValues(Object.fromEntries(def.editor.map((f) => [f.name, ''])))
     } catch {
@@ -164,6 +167,7 @@ function TypeCard({
   }
 
   const noPage = pageId === undefined
+  const locMissing = def.editor.some((f) => f.name === 'location') && !values['location']
   return (
     <form
       onSubmit={submit}
@@ -171,16 +175,25 @@ function TypeCard({
     >
       <div className="text-sm text-white/90">{def.label}</div>
 
-      {def.editor.map((f) => (
-        <input
-          key={f.name}
-          value={values[f.name] ?? ''}
-          onChange={(e) => setField(f.name, e.target.value)}
-          placeholder={f.placeholder}
-          aria-label={f.label}
-          className="w-full px-3 py-2 rounded-lg bg-white/20 text-white placeholder-white/50 text-sm outline-none focus:ring-2 focus:ring-accent"
-        />
-      ))}
+      {def.editor.map((f) =>
+        f.name === 'location' ? (
+          <LocationPicker
+            key={f.name}
+            value={values[f.name] ? (values[f.name] as WeatherLocation) : null}
+            onChange={(loc) => setField('location', loc)}
+            placeholder={f.placeholder}
+          />
+        ) : (
+          <input
+            key={f.name}
+            value={(values[f.name] as string) ?? ''}
+            onChange={(e) => setField(f.name, e.target.value)}
+            placeholder={f.placeholder}
+            aria-label={f.label}
+            className="w-full px-3 py-2 rounded-lg bg-white/20 text-white placeholder-white/50 text-sm outline-none focus:ring-2 focus:ring-accent"
+          />
+        ),
+      )}
 
       {/* changelog(editor=[])无表单字段,直接一个提交按钮 */}
 
@@ -188,29 +201,11 @@ function TypeCard({
 
       <button
         type="submit"
-        disabled={create.isPending || noPage}
+        disabled={create.isPending || noPage || locMissing}
         className="w-full rounded-lg bg-accent/90 hover:bg-accent disabled:opacity-50 text-white text-sm py-1.5 transition"
       >
-        {create.isPending ? '添加中…' : `添加${def.label}`}
+        {create.isPending ? '添加中…' : locMissing ? '请选择城市' : `添加${def.label}`}
       </button>
     </form>
   )
-}
-
-/**
- * 从表单值构造该类型的 data。url 字段补 https:// 前缀(见 normalizeUrl);
- * 无 editor 字段的类型(如 changelog)返回 null。模块内纯函数——核心归一化逻辑
- * normalizeUrl 已被独立 Vitest 覆盖,此处仅做字段装配。
- */
-function buildData(
-  def: IconTypeDefinition,
-  values: Record<string, string>,
-): Record<string, unknown> | null {
-  if (def.editor.length === 0) return null
-  const data: Record<string, unknown> = {}
-  for (const f of def.editor) {
-    const v = (values[f.name] ?? '').trim()
-    data[f.name] = f.name === 'url' ? normalizeUrl(v) : v
-  }
-  return data
 }
