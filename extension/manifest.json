@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "chrome-tab 新标签页重定向",
+  "version": "0.1.0",
+  "description": "接管新标签页,重定向到目标页 URL(默认本地 dev,工具栏 popup 可改)。决策见 docs/adr/0010。",
+  "chrome_url_overrides": { "newtab": "newtab.html" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "修改目标页 URL"
+  },
+  "icons": {
+    "16": "icons/icon128.png",
+    "48": "icons/icon128.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": ["storage"]
+}

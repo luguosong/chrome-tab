@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>chrome-tab 目标页设置</title>
+<style>
+  body {
+    margin: 0;
+    padding: 14px;
+    width: 300px;
+    background: #0b1220;
+    color: #e2e8f0;
+    font: 13px/1.5 system-ui, sans-serif;
+  }
+  label { display: block; margin-bottom: 4px; color: #94a3b8; }
+  input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    color: #e2e8f0;
+  }
+  button {
+    margin-top: 10px;
+    padding: 6px 14px;
+    background: #0284c7;
+    border: 0;
+    border-radius: 6px;
+    color: #fff;
+    cursor: pointer;
+  }
+  .status { margin-top: 8px; min-height: 1.2em; color: #94a3b8; }
+  .status.error { color: #f87171; }
+</style>
+<form>
+  <label for="target-url">目标页 URL</label>
+  <input id="target-url" type="text" placeholder="https://your-domain.example" autocomplete="off" spellcheck="false">
+  <button type="submit">保存</button>
+  <div class="status" id="status"></div>
+</form>
+<script type="module" src="popup.js"></script>
