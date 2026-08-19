@@ -21,21 +21,78 @@ code {
   background: #0e1014;
 }
 
-/* 毛玻璃面板：inftab 风格的玻璃浮层，叠在壁纸背景上 */
+/* ── Liquid Glass 三档材质(ADR-0012;参数为原型实机验证定稿)────────────── */
+
+/* L1 · regular 玻璃(主力档:弹层 / 抽屉 / Modal),明暗双值 */
 .glass-panel {
   background: rgba(255, 255, 255, 0.55);
-  backdrop-filter: blur(16px) saturate(160%);
-  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 .dark .glass-panel {
   background: rgba(24, 24, 27, 0.5); /* zinc-900/50 */
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
-/* 整页面板:中度模糊 + 轻着色 + 顶部内高光。区别于 glass-panel(重模糊的小浮层),
+/* L1 可读性兜底:文本密集面板在 L1 玻璃底上再垫 white·20 / black·20
+   (单层等效合成:亮 = 白 0.55 over 白 0.2 → 0.64;暗 = zinc-900/50 over 黑 0.2) */
+.glass-panel-readable {
+  background: rgba(255, 255, 255, 0.64);
+}
+.dark .glass-panel-readable {
+  background: rgba(16, 16, 18, 0.6);
+}
+
+/* L2 · clear 折射档:近透明底 + 边缘高光;折射部分(backdrop-filter 的 url(#…))
+   由 LensBox 按元素实测尺寸注入专属滤镜,CSS 侧只放静态外观 */
+.lens-panel {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.dark .lens-panel {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+/* map 未就绪的首帧兜底(useEffect 在首帧 paint 后才跑):无折射的轻玻璃,
+   避免 0.06 近透明底裸透壁纸一帧;lens 就绪后由内联 backdrop-filter 接管 */
+.lens-fallback {
+  backdrop-filter: blur(2px) saturate(160%);
+  -webkit-backdrop-filter: blur(2px) saturate(160%);
+}
+/* 环境不支持 backdrop-filter: url()(Safari/Firefox)时回落 L1,
+   与 LensBox 内 CSS.supports 用同一表达式 */
+@supports not (backdrop-filter: url(#f)) {
+  .lens-panel {
+    background: rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.18),
+      inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  }
+  .dark .lens-panel {
+    background: rgba(24, 24, 27, 0.5);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
+}
+
+/* L0 · 页板雾化:中度模糊 + 轻着色 + 顶部内高光。区别于 glass-panel(重模糊的小浮层),
    这里做适度雾化(8px)既保留壁纸可辨、又压住亮度保证图标/文字可读,顶部 inset 高光
-   给玻璃面一丝厚度感。仅用于铺满视口的页面主面板。 */
+   给玻璃面一丝厚度感。仅用于铺满视口的页面主面板。参数已按 ADR-0012 定标。 */
 .page-panel {
   background: rgba(255, 255, 255, 0.18);
   backdrop-filter: blur(8px) saturate(140%);
