@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   canAdd,
   get,
+  listTypes,
   register,
   sizesFor,
   type IconTypeDefinition,
@@ -157,6 +158,25 @@ describe('天气类型 weather(ADR-0009)', () => {
   it('summarize 无位置(非法 data):返回 null', () => {
     expect(get('weather')!.summarize(null, {})).toBeNull()
     expect(get('weather')!.summarize({}, {})).toBeNull()
+  })
+})
+
+describe('分组类型 group(ADR-0011 / issue 07)', () => {
+  it('登记:kind=group(不入新增抽屉 base/extension 分区)、仅 small、无 editor、无摘要', () => {
+    const g = get('group')
+    expect(g?.kind).toBe('group')
+    expect(sizesFor('group')).toEqual(['small'])
+    expect(g?.editor).toEqual([])
+    expect(g?.summarize(null, {})).toBeNull()
+  })
+
+  it('kind=group 不落新增抽屉任一分区(组只由合并手势诞生)', () => {
+    const kinds = listTypes().map((t) => t.kind)
+    const drawerKinds = kinds.filter((k) => k === 'base' || k === 'extension')
+    expect(drawerKinds).toContain('base')
+    expect(drawerKinds).toContain('extension')
+    // AddDrawer 渲染 base/extension 两分区,group 不在任一分区 → 不出现
+    expect(listTypes().some((t) => t.kind === 'group')).toBe(true)
   })
 })
 

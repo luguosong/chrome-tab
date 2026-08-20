@@ -24,16 +24,21 @@ export type SizeKey = keyof typeof CELLS_PER_SIZE
 /** 后端兜底默认容量（固定 8 × 8 = 64 格）。角标以此为准：与服务端最终校验一致。 */
 export const DEFAULT_PAGE_CAPACITY = 64
 
-/** 只需 size 字段即可算容量，便于用最小对象/测试桩调用。 */
-export type SizedIcon = { size: IconSize }
+/** 只需 size 字段即可算容量，便于用最小对象/测试桩调用。parentId 用于分组容量语义(ADR-0011)。 */
+export type SizedIcon = { size: IconSize; parentId?: number | null }
 
 /**
- * 一组图标占用的格子总数（对齐后端 Size.cells() 求和）。
- * 传入的 icons 应已限定到单个页面（调用方负责按 pageId 过滤）。
+ * 一组图标占用的格子总数（对齐后端 Size.cells() 求和)。
+ * 传入的 icons 应已限定到单个页面（调用方负责按 pageId 过滤)。
+ * 分组语义(ADR-0011):只计页面**顶层**行——parentId 非空的组内成员不计容量
+ * (组行自身 size='small' 恒占 1 格),对齐后端 IconService.cellsUsed。
  */
 export function cellsUsed(icons: ReadonlyArray<SizedIcon>): number {
   let sum = 0
-  for (const i of icons) sum += CELLS_PER_SIZE[i.size]
+  for (const i of icons) {
+    if (i.parentId != null) continue
+    sum += CELLS_PER_SIZE[i.size]
+  }
   return sum
 }
 

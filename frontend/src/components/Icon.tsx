@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { get, sizesFor, type EditorField, type IconTypeDefinition, type Summary, type SummaryInput } from '../lib/iconTypeRegistry'
@@ -9,11 +9,14 @@ import LocationPicker from './LocationPicker'
 import type { Icon as IconModel, IconSize } from '../lib/types'
 import { useIconData } from '../context/IconDataContext'
 import { useEditMode } from '../context/EditModeContext'
+import { useGroupGesture } from '../context/GroupGestureContext'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import { SIZE_CELLS } from '../lib/iconLayout'
 import { extractString, buildIconData } from '../lib/iconData'
+import { groupMembers } from '../lib/groupReducer'
 import { readWeatherLocation, type WeatherLocation } from '../lib/weather'
-import { useDeleteIcon, useUpdateIconSize, useUpdateIconData } from '../api/config'
+import { useConfig, useDeleteIcon, useDissolveGroup, useUpdateIconSize, useUpdateIconData } from '../api/config'
+import { ApiError } from '../api/client'
 
 /**
  * 单个图标渲染(见 CONTEXT.md「图标」/ spec §前端架构 IconGrid)。
@@ -74,6 +77,15 @@ export default function Icon({
   const delIcon = useDeleteIcon()
   const resizeIcon = useUpdateIconSize()
   const editIcon = useUpdateIconData()
+  // 分组 × = 解散(POST dissolve),区别于普通图标 × 的删除;容量 409 提示见下方浮层
+  const dissolve = useDissolveGroup()
+  useEffect(() => {
+    if (!dissolve.isError) return
+    const t = window.setTimeout(() => dissolve.reset(), 2600)
+    return () => window.clearTimeout(t)
+  }, [dissolve.isError])
+  // 合并手势悬停达标(编辑模式拖 A 悬停本图标达阈值):放大反馈,松手建组/入组
+  const dwellTarget = useGroupGesture()
   const [menuOpen, setMenuOpen] = useState(false)
   // 编辑配置 popover(✎):与尺寸菜单互斥,开一个关另一个。
   const [editOpen, setEditOpen] = useState(false)
@@ -149,6 +161,8 @@ export default function Icon({
         // 保留并加深玻璃容器(比 nav 更实的框),用于承载富内容并形成视觉层级。
         (icon.type === 'nav' ? 'hover:bg-white/10 ' : 'bg-white/25 hover:bg-white/40 ') +
         (interactive ? 'cursor-pointer' : 'cursor-default') +
+        // 合并手势达标放大(dwell):目标非被拖项、无 dnd transform 冲突;transition 已有
+        (dwellTarget === icon.id && !overlay ? ' scale-[1.15] z-10 ' : '') +
         (editing && !overlay ? ' editing-jiggle cursor-grab active:cursor-grabbing' : '') +
         (isDragging && !overlay ? ' ring-2 ring-accent' : '') +
         (overlay ? ' shadow-2xl ring-2 ring-accent cursor-grabbing' : '')
@@ -158,6 +172,17 @@ export default function Icon({
         <StockIconBody icon={icon} />
       ) : icon.type === 'weather' ? (
         <WeatherIconBody icon={icon} />
+      ) : icon.type === 'group' ? (
+        /* 分组(ADR-0011):iOS 文件夹式玻璃容器 + 前 9 个成员 3×3 迷你预览 + 名称外置。
+           材质细节在票 10 定稿,此处落渲染结构。点组打开弹层 = 票 08。 */
+        <>
+          <GroupBody icon={icon} favPx={favPx} />
+          {name && (
+            <span className="text-xs text-white/90 max-w-full truncate text-center">
+              {name}
+            </span>
+          )}
+        </>
       ) : (
         <>
           {favicon && (
@@ -182,6 +207,13 @@ export default function Icon({
         </>
       )}
 
+      {/* 分组解散失败提示(容量 409「先移出部分图标」等):组图标上方小气泡,短暂显示 */}
+      {icon.type === 'group' && dissolve.isError && (
+        <span className="absolute -top-9 left-1/2 -translate-x-1/2 z-40 glass-panel rounded-full px-3 py-1 text-[11px] text-white/90 whitespace-nowrap shadow-lg pointer-events-none">
+          {dissolve.error instanceof ApiError ? dissolve.error.message : '解散失败'}
+        </span>
+      )}
+
       {/* 编辑模式角标:尺寸切换菜单 + 删除 ×(spec user story 27/28)。
           仅展示该类型支持的尺寸(sizesFor);点击 PATCH 改 size,× 点击 DELETE,
           乐观更新 + 失败回滚见 api/config.ts。stopPropagation 避免冒泡到 Tag。
@@ -194,8 +226,10 @@ export default function Icon({
           setMenuOpen={setMenuOpen}
           editOpen={editOpen}
           setEditOpen={setEditOpen}
-          busy={delIcon.isPending || resizeIcon.isPending || editIcon.isPending}
-          onDelete={() => delIcon.mutate(icon.id)}
+          busy={delIcon.isPending || resizeIcon.isPending || editIcon.isPending || dissolve.isPending}
+          onDelete={() =>
+            icon.type === 'group' ? dissolve.mutate(icon.id) : delIcon.mutate(icon.id)
+          }
           onResize={(size) => resizeIcon.mutate({ id: icon.id, size })}
           onEdit={(data) => editIcon.mutate({ id: icon.id, data })}
         />
@@ -230,6 +264,43 @@ function SummaryLine({ summary }: { summary: Summary | null }) {
 }
 
 // ── 辅助 ──────────────────────────────────────────────────────────────────
+
+/**
+ * 分组图标内容(ADR-0011):玻璃容器内按组内序取**前 9 个**成员的 favicon 作 3×3 迷你
+ * 预览(不足 9 格留空,与 iOS 文件夹一致);成员从聚合缓存按 parentId 派生(groupMembers)。
+ * 在组件内(而非 Icon 主体)调 useConfig:仅 group 类型挂载时才订阅,['config'] 命中缓存
+ * 无网络开销;overlay 拖拽幽灵同路径渲染(React 上下文随 React 树,不随 DOM)。
+ */
+function GroupBody({ icon, favPx }: { icon: IconModel; favPx: number }) {
+  const { data } = useConfig()
+  const members = useMemo(
+    () => groupMembers(data?.icons ?? [], icon.id).slice(0, 9),
+    [data?.icons, icon.id],
+  )
+  return (
+    <div
+      className="grid grid-cols-3 place-items-center gap-[6%] rounded-[24%] bg-white/15 p-[10%]"
+      style={{ width: favPx, height: favPx }}
+    >
+      {members.map((m) => {
+        // 组成员只能是 nav(后端把关),但防御式兜底非 nav/无 url 的占位灰块
+        const url = m.type === 'nav' ? extractString(m.data, 'url') : ''
+        const src = url ? faviconUrl(url) : ''
+        return src ? (
+          <img
+            key={m.id}
+            src={src}
+            alt=""
+            referrerPolicy="no-referrer"
+            className="w-full h-full rounded-[2px] object-contain"
+          />
+        ) : (
+          <span key={m.id} className="w-full h-full rounded-[2px] bg-white/20" />
+        )
+      })}
+    </div>
+  )
+}
 
 /** 各类型的显示名(nav/stock 用 data.name,changelog 用类型 label)。 */
 function extractName(icon: IconModel): string {

@@ -9,10 +9,10 @@ function icon(id: number, pageId: number, sortOrder: number, type: IconTypeId = 
   return { id, pageId, parentId: null, type, size: 'small', sortOrder, data: null }
 }
 
-/** 断言「按 sortOrder 升序后的 id 序列」,便于读同页重排结果。 */
+/** 断言「页内顶层按 sortOrder 升序的 id 序列」(组内成员不参与页面序列,ADR-0011)。 */
 function orderOf(icons: Icon[], pageId: number): number[] {
   return icons
-    .filter((i) => i.pageId === pageId)
+    .filter((i) => i.pageId === pageId && i.parentId === null)
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((i) => i.id)
 }
@@ -101,6 +101,29 @@ describe('moveIcon — 边界与不变量', () => {
     const page2After = next.filter((i) => i.pageId === 2)
     expect(page2After).toEqual(page2Before)
     expect(orderOf(next, PAGE)).toEqual([2, 1])
+  })
+})
+
+// 分组序列语义(ADR-0011 / issue 07):页面序列只含顶层行,组内成员不参与
+// toIndex 定位与重排——对齐后端 IconService.move 的 topLevel 查询过滤。
+describe('moveIcon — 组内成员不参与页面序列', () => {
+  it('跨页移入含组的页:toIndex 按顶层位序解释,成员被忽略', () => {
+    // 页1=[X];页2 顶层 [A(0), 组(1)],组成员 M(组内 0)、B 顶层(2)
+    const PAGE2 = 2
+    const base = [
+      icon(1, PAGE2, 0),
+      icon(9, PAGE2, 1, 'group'),
+      icon(3, PAGE2, 2),
+      icon(5, PAGE2, 0),
+      icon(100, PAGE, 0),
+    ].map((i) => (i.id === 5 ? { ...i, parentId: 9 } : i))
+    // 把 X(100)移入页2 toIndex=1(顶层序列 [A,组,B] 的 1 号=组前)→ [A, X, 组, B]
+    const next = moveIcon(base, { id: 100, toPageId: PAGE2, toIndex: 1 })
+    expect(orderOf(next, PAGE2)).toEqual([1, 100, 9, 3])
+    // 组内成员 M 的组内序不变
+    const m = next.find((i) => i.id === 5)!
+    expect(m.parentId).toBe(9)
+    expect(m.sortOrder).toBe(0)
   })
 })
 

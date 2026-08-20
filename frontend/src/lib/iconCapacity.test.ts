@@ -45,6 +45,25 @@ describe('cellsUsed — 占用格子求和', () => {
     expect(cellsUsed([{ size: 'small' }, { size: 'medium' }, { size: 'large' }]))
       .toBe(CELLS_PER_SIZE.small + CELLS_PER_SIZE.medium + CELLS_PER_SIZE.large)
   })
+
+  // 分组容量语义(ADR-0011):组行按 small 计 1 格;组内成员(parentId 非空)不计。
+  it('分组:组行计 1 格,组内成员不计容量', () => {
+    const groupRow = { size: 'small' as const, parentId: null }
+    const members = [
+      { size: 'large' as const, parentId: 9 },  // 成员保留 size 但不占格
+      { size: 'medium' as const, parentId: 9 },
+    ]
+    const top = [{ size: 'small' as const, parentId: null }]
+    expect(cellsUsed([groupRow, ...members, ...top])).toBe(1 + 1)
+  })
+
+  it('成员无论保留多大 size 都不计(移出时才按保留 size 计入,由 move 路径负责)', () => {
+    const members = Array.from({ length: 20 }, () => ({
+      size: 'large' as const,
+      parentId: 9,
+    }))
+    expect(cellsUsed(members)).toBe(0)
+  })
 })
 
 describe('capacityFor — 列×行', () => {

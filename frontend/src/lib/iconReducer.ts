@@ -20,6 +20,12 @@ export type MoveAction = { id: number; toPageId: number; toIndex: number }
  * 把 id 标识的图标移到 toPageId 页的 toIndex 位序,返回新的 icons 数组。
  * 不修改原数组;未知 id 原样返回(防御式)。
  *
+ * 入组语义(parentId 非空)不在本 reducer:入组恒落组内末尾、源页补洞,
+ * 由 groupReducer.moveIntoGroup 承载(ADR-0011),useMoveIcon.onMutate 按 parentId 分派。
+ *
+ * 序列语义(ADR-0011):页面序列只含顶层行(parentId==null);组内成员不参与
+ * toIndex 定位与重排——后端 topLevel 查询同义,invalidate 后两者一致。
+ *
  * @param icons   当前全部图标(跨页)
  * @param action  { id, toPageId, toIndex } —— toIndex 为目标页内位序(0..n)
  */
@@ -28,18 +34,24 @@ export function moveIcon(icons: readonly Icon[], action: MoveAction): Icon[] {
   const moving = icons.find((i) => i.id === id)
   if (!moving) return [...icons]
 
-  // 目标页图标(剔除被移动项)按 sortOrder 升序,在 toIndex 插入,重算 0..n-1。
+  // 目标页顶层图标(剔除被移动项;组内成员不参与页面序列)按 sortOrder 升序,
+  // 在 toIndex 插入,重算 0..n-1。被移项恒清 parentId(镜像后端 move 分支三
+  // setParentId(null)):组内成员经本 reducer 落页面序列 = move-out 乐观转移。
   const targetList = icons
-    .filter((i) => i.pageId === toPageId && i.id !== id)
+    .filter((i) => i.pageId === toPageId && i.parentId === null && i.id !== id)
     .sort((a, b) => a.sortOrder - b.sortOrder)
   const insertAt = Math.max(0, Math.min(toIndex, targetList.length))
-  targetList.splice(insertAt, 0, { ...moving, pageId: toPageId })
+  targetList.splice(insertAt, 0, { ...moving, pageId: toPageId, parentId: null })
 
   const order = new Map(targetList.map((i, idx) => [i.id, idx]))
 
   // 同页:仅目标页(== 源页)图标重算 sortOrder。跨页(07):被移动项 pageId 变更,
   // 目标页重排;源页序号留待 onSettled invalidate 后由服务端权威数据补齐。
+  // move-out 的源组行留待 invalidate(源组变空由服务端删,乐观瞬态可见空组,对齐
+  // 「源页序号留洞」的同款预期,见测试注释)。
   return icons.map((i) =>
-    order.has(i.id) ? { ...i, pageId: toPageId, sortOrder: order.get(i.id)! } : i,
+    order.has(i.id)
+      ? { ...i, pageId: toPageId, parentId: null, sortOrder: order.get(i.id)! }
+      : i,
   )
 }

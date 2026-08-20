@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from './client'
 import type { Config, Icon, IconSize, IconTypeId, LayoutSettings, Page } from '../lib/types'
 import { moveIcon, type MoveAction } from '../lib/iconReducer'
+import { dissolveGroup, mergeIcons, moveIntoGroup, type MergeAction } from '../lib/groupReducer'
 import type { WireConfig } from '../lib/mirror/backup'
 
 /** Page 重排请求项(对齐后端 PageService.ReorderItem)。 */
@@ -293,17 +294,21 @@ export function useCreateIcon() {
 // ── Icon 移动/重排（issue 06 同页拖拽排序）─────────────────────────────────
 
 /**
- * 移动/重排图标(spec §后端 API 契约 / issue 06)。body=`{id, toPageId, toIndex}`,
- * 同页与跨页统一端点;本票仅消费同页(toPageId === 图标当前 pageId)。
+ * 移动/重排图标(spec §后端 API 契约 / issue 06 同页排序 / 07 跨页+入组)。
+ * body=`{id, toPageId, toIndex, parentId}`:parentId 非空 = 入组(后端忽略 toIndex、
+ * 恒落组内末尾;前端乐观走 {@link moveIntoGroup} 对齐);null/缺省 = 落页面序列
+ * (moveIcon,被移项恒清 parentId = move-out)。
  *
- * 乐观更新复用纯 reducer {@link moveIcon}:onMutate 即把 ['config'].icons 推到目标态,
- * 拖拽视觉即时跟随;失败回滚快照,完成后 invalidate 兜底。容量约束由服务端在跨页
- * 场景把关(同页纯重排不触发容量校验,占用不变)。
+ * 乐观更新复用纯 reducer:onMutate 即把 ['config'].icons 推到目标态,拖拽视觉即时跟随;
+ * 失败回滚快照,完成后 invalidate 兜底。容量约束由服务端在跨页/入组场景把关。
  */
+/** useMoveIcon 的请求变量:parentId 是 wire 层字段(入组目标),reducer 的 MoveAction 不含。 */
+export type MoveIconVars = MoveAction & { parentId?: number | null }
+
 export function useMoveIcon() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (vars: MoveAction) =>
+    mutationFn: (vars: MoveIconVars) =>
       apiFetch<void>('/api/icons/move', {
         method: 'PATCH',
         body: JSON.stringify(vars),
@@ -312,11 +317,85 @@ export function useMoveIcon() {
       await qc.cancelQueries({ queryKey: ['config'] })
       const prev = qc.getQueryData<Config>(['config'])
       if (prev) {
-        qc.setQueryData<Config>(['config'], { ...prev, icons: moveIcon(prev.icons, vars) })
+        qc.setQueryData<Config>(['config'], {
+          ...prev,
+          icons:
+            vars.parentId != null
+              ? moveIntoGroup(prev.icons, { id: vars.id, groupId: vars.parentId })
+              : moveIcon(prev.icons, vars),
+        })
       }
       return { prev }
     },
     onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData<Config>(['config'], ctx.prev)
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['config'] })
+    },
+  })
+}
+
+// ── 分组写操作(issue 07:建组 / 解散,ADR-0011)─────────────────────────────
+
+/**
+ * 建组:POST /api/icons/merge body={pageId, memberIds}(memberIds 有序:首位=被拖图标、
+ * 末位=悬停目标,组行继承其位序)。乐观更新用 {@link mergeIcons} + 负数临时组 id,
+ * onSettled invalidate 拉回服务端真 id(invalidate 后 React key 更替属预期);
+ * 失败(成员违例 409 等)回滚快照。返回组行(IconResponse,大写枚举,调用方一般不用)。
+ */
+export function useMergeIcons() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: Omit<MergeAction, 'groupId'>) =>
+      apiFetch<unknown>('/api/icons/merge', {
+        method: 'POST',
+        body: JSON.stringify(vars),
+      }),
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: ['config'] })
+      const prev = qc.getQueryData<Config>(['config'])
+      if (prev) {
+        // 临时负数组 id:仅存在于乐观窗口,invalidate 后由服务端分配的真 id 替换
+        const tempGroupId = -Date.now()
+        qc.setQueryData<Config>(['config'], {
+          ...prev,
+          icons: mergeIcons(prev.icons, { ...vars, groupId: tempGroupId }),
+        })
+      }
+      return { prev }
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData<Config>(['config'], ctx.prev)
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['config'] })
+    },
+  })
+}
+
+/**
+ * 解散分组:POST /api/icons/{id}/dissolve → 200 无体。乐观用 {@link dissolveGroup}
+ * (成员按保留 size 洒回组行原位);容量不足 409 时服务端拒绝、前端回滚,
+ * 调用方(Icon 的 ×)从 mutation.error 读 ApiError.message 显示「先移出部分图标」提示。
+ */
+export function useDissolveGroup() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) =>
+      apiFetch<void>(`/api/icons/${id}/dissolve`, { method: 'POST' }),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: ['config'] })
+      const prev = qc.getQueryData<Config>(['config'])
+      if (prev) {
+        qc.setQueryData<Config>(['config'], {
+          ...prev,
+          icons: dissolveGroup(prev.icons, id),
+        })
+      }
+      return { prev }
+    },
+    onError: (_err, _id, ctx) => {
       if (ctx?.prev) qc.setQueryData<Config>(['config'], ctx.prev)
     },
     onSettled: () => {

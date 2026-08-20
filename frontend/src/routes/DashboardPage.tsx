@@ -16,10 +16,13 @@ import {
 } from '@dnd-kit/core'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../context/AuthContext'
-import { useConfig, useMoveIcon } from '../api/config'
+import { useConfig, useMergeIcons, useMoveIcon } from '../api/config'
+import { ApiError } from '../api/client'
 import { moveIcon } from '../lib/iconReducer'
+import { topLevelOf } from '../lib/groupReducer'
 import { canFit, DEFAULT_PAGE_CAPACITY } from '../lib/iconCapacity'
 import { withDefaults } from '../lib/layoutSettings'
+import { GroupGestureContext, useGroupGestureDwell } from '../context/GroupGestureContext'
 import { EditModeProvider, useEditMode } from '../context/EditModeContext'
 import { IconDataProvider } from '../context/IconDataContext'
 import { LayoutSettingsProvider } from '../context/LayoutSettingsContext'
@@ -69,10 +72,9 @@ function PageSlide({
   icons: Icon[]
   onOpenDetail?: (icon: Icon) => void
 }) {
-  const pageIcons = useMemo(
-    () => icons.filter((i) => i.pageId === page.id),
-    [icons, page.id],
-  )
+  // 只取页面顶层行(ADR-0011):组内成员随组图标预览渲染,不独立占格。
+  // 成员的 pageId 与组同页,故须按 parentId 排除,否则成员会以 sortable 项重复进网格。
+  const pageIcons = useMemo(() => topLevelOf(icons, page.id), [icons, page.id])
   return <IconGrid page={page} icons={pageIcons} onOpenDetail={onOpenDetail} />
 }
 
@@ -103,11 +105,15 @@ function Dashboard() {
   //   单用 PointerSensor 的 delay 模式会让鼠标「按下即拖」的位移在 5px 容差内超限而 handleCancel,
   //   导致拖拽无反应——故按输入类型拆成两个 sensor。查看模式与编辑模式均启用拖拽。
   const moveIconMut = useMoveIcon()
+  const mergeMut = useMergeIcons()
   const qc = useQueryClient()
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
   )
+
+  // 合并手势 dwell(票 07,ADR-0011 建组手势):计时/反馈状态收在 hook,语义见其 JSDoc。
+  const { dwellTargetId, clearDwell, updateDwell } = useGroupGestureDwell()
 
   // 拖拽中的图标 id:供 DragOverlay 渲染跟随光标的只读副本(spec user story 35 视觉反馈)。
   // onDragStart 置位,onDragEnd/onDragCancel 清空。查看/编辑模式拖拽期间均会置位。
@@ -128,11 +134,30 @@ function Dashboard() {
     noticeTimerRef.current = window.setTimeout(() => setNotice(null), 1800)
   }
 
+  // ── 长按进入编辑模式(票 07 辅助入口;右键为主)───────────────────────────
+  // 指针静止按住 550ms → 进入编辑模式(仅查看态;编辑态长按不退出,退出仍走右键防误触)。
+  // 位移 >10px(横滑翻页/拖拽)或在交互控件(button/input/a/对话框)上按下则不触发。
+  // 触控场景 TouchSensor 已在 250ms 启动拖拽,长按到点时图标处于拖拽中——编辑模式叠加
+  // 拖拽本就是合法状态(编辑模式可拖拽),松手落点照常提交,视觉为 banner+抖动即时出现。
+  const LONG_PRESS_MS = 550
+  const longPressRef = useRef<{ x: number; y: number; timer: number | null }>({
+    x: 0,
+    y: 0,
+    timer: null,
+  })
+  function clearLongPress() {
+    if (longPressRef.current.timer != null) {
+      window.clearTimeout(longPressRef.current.timer)
+      longPressRef.current.timer = null
+    }
+  }
+
   // 编辑态进入时关闭已开的详情与新增抽屉,避免编辑/详情/新增态并存(spec user story 29)。
   useEffect(() => {
     if (editing) {
       setDetail(null)
       setAddDrawerOpen(false)
+      clearLongPress()
     }
   }, [editing])
 
@@ -173,9 +198,15 @@ function Dashboard() {
   }
   function handleDragOver(e: DragOverEvent) {
     const { active, over } = e
-    if (!over) return
+    if (!over) {
+      clearDwell() // 指针拖离所有 droppable:熄灭合并反馈,防「不在目标上却建组」
+      return
+    }
     // 边缘 droppable 由 EdgeDropZone 自管计时器翻页,这里不处理其落点
-    if (over.id === EDGE_DROP_ID.left || over.id === EDGE_DROP_ID.right) return
+    if (over.id === EDGE_DROP_ID.left || over.id === EDGE_DROP_ID.right) {
+      clearDwell()
+      return
+    }
     const activeId = Number(active.id)
     const cur = qc.getQueryData<Config>(['config'])
     if (!cur) return
@@ -185,9 +216,15 @@ function Dashboard() {
     // 空页落点(07 限制修复):空页只有页级 useDroppable(见 IconGrid.PageDropArea),
     // over.data.current.type==='page',无 sortable.containerId。命中即把图标移入空页位序 0。
     const overData = over.data.current
-    if (overData?.type === 'page') {
+    const overIsPage = overData?.type === 'page'
+    // 合并手势 dwell 计时(仅编辑模式;同起点页判定防跨页 409,见 hook JSDoc)
+    const startPageId =
+      dragSnapshotRef.current?.icons.find((i) => i.id === activeId)?.pageId ?? dragged.pageId
+    updateDwell(dragged, startPageId, Number(over.id), overIsPage, cur.icons)
+    if (overIsPage) {
       const targetPageId = overData.pageId
       if (targetPageId === dragged.pageId) return
+      // 容量只计顶层行(cellsUsed 内跳过组内成员,ADR-0011)
       const targetIcons = cur.icons.filter((i) => i.pageId === targetPageId)
       if (!canFit(targetIcons, DEFAULT_PAGE_CAPACITY, dragged.size)) {
         showNotice('目标页已满,无法移入')
@@ -213,7 +250,8 @@ function Dashboard() {
       showNotice('目标页已满,无法移入')
       return
     }
-    // 落点 = over 项在目标页(按 sortOrder 升序)中的位序;over 非目标页成员则追加末尾
+    // 落点 = over 项在目标页顶层序列(按 sortOrder 升序;组内成员不参与页面序列,ADR-0011)
+    // 中的位序;over 非目标页成员则追加末尾
     const overId = Number(over.id)
     const overIdx = [...targetIcons]
       .sort((a, b) => a.sortOrder - b.sortOrder)
@@ -241,24 +279,49 @@ function Dashboard() {
     const startIcon = snapshot?.icons.find((i) => i.id === activeId) ?? null
     if (!current || !startIcon) return
 
+    // ── 合并手势收尾(票 07):dwell 达标**且指针仍停在目标上**才建组/入组;
+    // 达标后又拖离(over ≠ 目标)则熄灭反馈、落回下方排序/移动逻辑。
+    // 目标从缓存现取(dwell 期间 over 恒定则 onDragOver 不再触发,缓存稳定)。
+    if (dwellTargetId != null) {
+      const dwellOver = over != null && Number(over.id) === dwellTargetId
+      const target = currentIcons.find((i) => i.id === dwellTargetId) ?? null
+      const groupId = target?.type === 'group' ? target.id : null
+      clearDwell()
+      if (dwellOver && target) {
+        if (groupId != null) {
+          // 拖 nav 到组上:入组(后端忽略 toIndex、恒落组内末尾)
+          moveIconMut.mutate(
+            { id: activeId, toPageId: target.pageId, toIndex: 0, parentId: groupId },
+            { onError: (err) => showNotice(err instanceof ApiError ? err.message : '加入分组失败') },
+          )
+        } else {
+          // nav 拖到 nav 上:建组(memberIds 有序 = [被拖 A, 悬停目标 B],组行继承 B 位)
+          mergeMut.mutate(
+            { pageId: target.pageId, memberIds: [activeId, target.id] },
+            { onError: (err) => showNotice(err instanceof ApiError ? err.message : '创建分组失败') },
+          )
+        }
+        return
+      }
+    }
+
     // 跨页:缓存已是最终态,持久化最终页 + 位序
     if (current.pageId !== startIcon.pageId) {
       moveIconMut.mutate({ id: activeId, toPageId: current.pageId, toIndex: current.sortOrder })
       return
     }
 
-    // 同页(06):缓存未在拖拽中改过(视觉由 dnd-kit transform 负责),按 over 落点提交
+    // 同页(06):缓存未在拖拽中改过(视觉由 dnd-kit transform 负责),按 over 落点提交。
+    // 落点位序按顶层序列解释(组内成员不参与,ADR-0011)。
     if (!over || active.id === over.id) return
     const overId = Number(over.id)
-    const overIdx = currentIcons
-      .filter((i) => i.pageId === current.pageId)
-      .sort((a, b) => a.sortOrder - b.sortOrder)
-      .findIndex((i) => i.id === overId)
+    const overIdx = topLevelOf(currentIcons, current.pageId).findIndex((i) => i.id === overId)
     if (overIdx === -1) return
     moveIconMut.mutate({ id: activeId, toPageId: current.pageId, toIndex: overIdx })
   }
   function handleDragCancel() {
     setActiveIconId(null)
+    clearDwell()
     // 撤销 onDragOver 期间的乐观跨页写入:整份回写 dragStart 快照,缓存不留幻影移动
     if (dragSnapshotRef.current) {
       qc.setQueryData<Config>(['config'], dragSnapshotRef.current)
@@ -275,6 +338,27 @@ function Dashboard() {
         e.preventDefault()
         toggle()
       }}
+      onPointerDown={(e) => {
+        if (editing || e.button !== 0) return
+        // 交互控件上长按不进编辑(按钮/输入/链接/对话框内)
+        if (
+          e.target instanceof Element &&
+          e.target.closest('button,a,input,textarea,select,[role="dialog"]')
+        )
+          return
+        clearLongPress()
+        longPressRef.current.x = e.clientX
+        longPressRef.current.y = e.clientY
+        longPressRef.current.timer = window.setTimeout(toggle, LONG_PRESS_MS)
+      }}
+      onPointerMove={(e) => {
+        const lp = longPressRef.current
+        if (lp.timer == null) return
+        if (Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) clearLongPress()
+      }}
+      onPointerUp={clearLongPress}
+      onPointerCancel={clearLongPress}
+      onPointerLeave={clearLongPress}
     >
       <Background />
 
@@ -350,6 +434,8 @@ function Dashboard() {
               onDragCancel={handleDragCancel}
             >
               <IconDataProvider icons={icons}>
+              {/* 合并手势 dwell 目标下发(Icon 放大反馈);随 DndContext 生命周期,拖拽结束即清 */}
+              <GroupGestureContext.Provider value={dwellTargetId}>
                 <Carousel
                   labels={pages.map((p) => p.name)}
                   onActiveChange={setActiveIndex}
@@ -375,6 +461,7 @@ function Dashboard() {
                 <DragOverlay dropAnimation={null}>
                   {activeIcon && <IconView icon={activeIcon} overlay />}
                 </DragOverlay>
+              </GroupGestureContext.Provider>
               </IconDataProvider>
             </DndContext>
           ) : (
