@@ -198,14 +198,14 @@ export default function Icon({
       ) : (
         <>
           {/* nav:玻璃 squircle 块 = 图标本体(ADR-0015 修订:玻璃下沉到图标层,只包
-              favicon,名称外置块下方),favicon 铺满块内。 */}
+              favicon,名称外置块下方),favicon 撑满块(pad=0,图形即块)。 */}
           {favicon && (
-            <TileFrame favPx={favPx} padPx={padPx} overlay={overlay}>
+            <TileFrame favPx={favPx} overlay={overlay}>
               <img
                 src={favicon}
                 alt=""
                 referrerPolicy="no-referrer"
-                className="w-full h-full rounded-[22%] object-contain transition-transform hover:scale-110 active:scale-95"
+                className="w-full h-full rounded-[22%] object-contain"
               />
             </TileFrame>
           )}
@@ -253,21 +253,23 @@ export default function Icon({
 // ── 辅助 ──────────────────────────────────────────────────────────────────
 
 /**
- * 图标本体玻璃块(ADR-0015 修订):squircle 玻璃容器只包图标内容(favicon / 分组预览),
- * 名称在块外画格上(iOS 主屏层级:块=图标本体,文字=壁纸层)。块边 = min(推导上限
- * faviconPx + 2×pad, 画格可用高度)——maxWidth/maxHeight 双上限 + aspect-square 与
+ * 图标本体玻璃块(ADR-0015 修订):squircle 玻璃容器即图标本体——favicon 撑满块
+ * (pad=0,块边 = faviconPx 推导值,图形即块,iOS app 图标式);分组预览等嵌套内容
+ * 可传小 pad 呼吸。名称在块外画格上(iOS 主屏层级:块=图标本体,文字=壁纸层)。
+ * 块边 = min(推导值, 画格可用高度)——maxWidth/maxHeight 双上限 + aspect-square 与
  * favicon 时代的收缩机制同款(同档位画格等高,收缩全体一致);overlay 幽灵无画格约束
- * (shrink-wrap),固定上限值。hover 提亮由 .glass-soft 自身规则承担(ADR-0012)。
+ * (shrink-wrap),固定推导值。hover/active 缩放作用于**整块**(图形随块,iOS 无溢出
+ * 裁切问题),提亮由 .glass-soft 自身规则承担(ADR-0012)。
  */
 function TileFrame({
   favPx,
-  padPx,
+  padPx = 0,
   overlay,
   className = '',
   children,
 }: {
   favPx: number
-  padPx: number
+  padPx?: number
   overlay: boolean
   className?: string
   children: ReactNode
@@ -277,7 +279,9 @@ function TileFrame({
     <div
       className={
         'glass-soft rounded-[22%] ' +
-        (!overlay ? 'flex-1 min-h-0 aspect-square ' : '') +
+        (!overlay
+          ? 'flex-1 min-h-0 aspect-square transition-transform hover:scale-110 active:scale-95 '
+          : '') +
         className
       }
       style={
