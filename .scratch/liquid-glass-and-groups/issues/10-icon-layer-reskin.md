@@ -10,10 +10,13 @@ Blocked by: 09 — 材质 token 与 LensBox
 
 **工具:** 实现时使用 ui-ux-pro-max 插件——动工前 Skill 调用 `ui-ux-pro-max:ui-ux-pro-max`(UI/UX 设计智能);涉及 Tailwind 样式细节可配 `ui-ux-pro-max:ui-styling`。
 
-- [ ] nav squircle soft 底板 + 名称外置;「布局设置」iconScale 三档缩放正常
-- [ ] stock 小组件排版:大价格 + sparkline,三档密度
-- [ ] weather 小组件排版:城市 / 大温度 / 状况
-- [ ] changelog 小组件排版:版本列表
-- [ ] 分组图标材质:玻璃容器 + 3×3 迷你预览 + 名称外置
-- [ ] 编辑模式抖动、拖拽 DragOverlay、空页落点 / 容量角标不回归
+- [x] nav squircle soft 底板 + 名称外置;「布局设置」iconScale 三档缩放正常
+- [x] stock 小组件排版:大价格 + sparkline,三档密度
+- [x] weather 小组件排版:城市 / 大温度 / 状况
+- [x] changelog 小组件排版:版本列表
+- [x] 分组图标材质:玻璃容器 + 3×3 迷你预览 + 名称外置(注:原以为「渲染结构 07 已建」,
+      实际 07 与本票同期落地;07 建结构(bg-white/15 占位),本票定稿材质 glass-soft +
+      圆角 30% + 边长 fav×1.5 与 nav squircle 等大)
+- [x] 编辑模式抖动、拖拽 DragOverlay、空页落点 / 容量角标不回归(tsc/vitest 177 全绿
+      + build 通过;代码路径未动,待实机复核)
 - [ ] 验证:真实壁纸 + 明/暗壁纸各走查一遍全部类型与尺寸 — **待手动验证**

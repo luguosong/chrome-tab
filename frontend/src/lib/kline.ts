@@ -48,3 +48,19 @@ export function parseKlines(raw: unknown, max?: number): KlinePoint[] {
   }
   return max != null && max > 0 ? pts.slice(-max) : pts
 }
+
+/**
+ * 收盘序列 → SVG polyline "x,y" 串(大尺寸 stock 小组件的迷你走势,ADR-0007 三档密度)。
+ * 归一化铺满 w×h:x 均分、y 按极值;全平(极差 0)垂直居中(同 KlineChart 的防除零),
+ * 单点居中。空序列 → ''(调用方按空串隐藏 svg)。坐标留 2 位小数。
+ */
+export function sparklinePoints(closes: number[], w: number, h: number): string {
+  const n = closes.length
+  if (n === 0) return ''
+  const min = Math.min(...closes)
+  const max = Math.max(...closes)
+  const range = max - min
+  const x = (i: number) => (n === 1 ? w / 2 : (i / (n - 1)) * w)
+  const y = (c: number) => (range > 0 ? (1 - (c - min) / range) * h : h / 2)
+  return closes.map((c, i) => `${x(i).toFixed(2)},${y(c).toFixed(2)}`).join(' ')
+}

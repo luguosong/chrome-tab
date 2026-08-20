@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { get, sizesFor, type EditorField, type IconTypeDefinition, type Summary, type SummaryInput } from '../lib/iconTypeRegistry'
-import { inline } from '../lib/changelogParser'
+import { get, sizesFor, type EditorField, type IconTypeDefinition } from '../lib/iconTypeRegistry'
 import StockIconBody from './StockIcon'
 import WeatherIconBody from './WeatherIcon'
+import ChangelogIconBody from './ChangelogIcon'
 import LocationPicker from './LocationPicker'
 import type { Icon as IconModel, IconSize } from '../lib/types'
-import { useIconData } from '../context/IconDataContext'
 import { useEditMode } from '../context/EditModeContext'
 import { useGroupGesture } from '../context/GroupGestureContext'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
@@ -19,20 +18,19 @@ import { useConfig, useDeleteIcon, useDissolveGroup, useUpdateIconSize, useUpdat
 import { ApiError } from '../api/client'
 
 /**
- * 单个图标渲染(见 CONTEXT.md「图标」/ spec §前端架构 IconGrid)。
+ * 单个图标渲染(见 CONTEXT.md「图标」/ spec §前端架构 IconGrid / ADR-0012 图标层换肤)。
  *
- * 按 size 决定信息密度:
- *   - small  (1×1):仅 favicon
- *   - medium (2×2):favicon + 名称
- *   - large  (3×2):favicon + 名称 + 实时摘要(调用类型注册表 summarize)
+ * 视觉按类型分派:
+ *   - nav:app 图标式 —— soft 档玻璃 squircle 底板(rounded 24%)包居中 favicon,
+ *     名称外置底板下方(iOS 主屏式),三档仅尺寸不同
+ *   - stock / weather / changelog:专属小组件 body(StockIcon / WeatherIcon / ChangelogIcon,
+ *     各自按尺寸分档信息密度),外壳统一 soft 档玻璃卡容器
  *
- * 点击行为(10 ticket,按 detail 字段派发 —— ADR-0001 契约:容器形态由类型定义声明,
+ * 点击行为(按 detail 字段派发 —— ADR-0001 契约:容器形态由类型定义声明,
  * 新增复用 modal/drawer 的类型无需改本组件):
  *   - 编辑模式:不触发任何详情/跳转(角标操作优先,spec user story 29)
  *   - detail='none':nav 渲染为 <a>(新标签打开目标 URL,spec user story 13)
  *   - detail='modal'/'drawer':查看态点击 → onOpenDetail(icon),父组件按 detail 渲染面板
- *
- * 刷新失败降级:summarize 返回 null → 摘要行显示灰色 "--"(spec user story 14)。
  *
  * 拖拽(06):本组件是网格画格(grid item,拥有 gridColumn/gridRow span),故 useSortable
  * 直接挂在此处——sortable 节点必须即画格节点,否则 grid 跨度会失效。查看模式与编辑模式均可拖。
@@ -42,7 +40,8 @@ import { ApiError } from '../api/client'
  * data 带 pageId/size 供 DndContext handler 读取(跨页 07 用)。
  * 编辑模式角标(EditActions)的交互按钮 onPointerDown stopPropagation,避免点角标误启拖拽。
  */
-/** 各档基础像素(=改造前 Tailwind p-2/w-8… 的 px 值);乘以 iconScale 得实际尺寸。 */
+/** 各档基础像素(=改造前 Tailwind p-2/w-8… 的 px 值);乘以 iconScale 得实际尺寸。
+ *  fav 同时是 squircle 内 favicon 边长,底板边长 = fav×1.5(原型定稿比例)。 */
 const SIZE_BASE_PX: Record<IconSize, { pad: number; fav: number }> = {
   small: { pad: 8, fav: 32 },
   medium: { pad: 12, fav: 40 },
@@ -71,7 +70,6 @@ export default function Icon({
   overlay?: boolean
 }) {
   const def = get(icon.type)
-  const { quotes, changelog } = useIconData()
   const { editing } = useEditMode()
   const { iconScale } = useLayoutSettings()
   const delIcon = useDeleteIcon()
@@ -99,13 +97,6 @@ export default function Icon({
     disabled: overlay,
   })
 
-  // 实时摘要(仅非 stock 的大尺寸;stock 走专属 StockIconBody,不进此路径)。
-  const summary = useMemo<Summary | null>(() => {
-    if (icon.type === 'stock' || icon.type === 'weather' || icon.size !== 'large' || !def) return null
-    const live: SummaryInput = { quotes, changelog: changelog?.[0] ?? null }
-    return def.summarize(icon.data, live)
-  }, [icon.size, icon.data, def, quotes, changelog])
-
   const span = SIZE_CELLS[icon.size]
   const base = SIZE_BASE_PX[icon.size]
   const padPx = base.pad * iconScale
@@ -124,9 +115,12 @@ export default function Icon({
       : null),
   }
 
-  const name = extractName(icon)
+  const name = extractString(icon.data, 'name')
   const url = icon.type === 'nav' ? extractString(icon.data, 'url') : ''
   const favicon = url ? faviconUrl(url) : ''
+
+  // 小组件类型(stock/weather/changelog):soft 玻璃卡外壳 + 专属 body;nav 裸排版。
+  const isWidget = icon.type === 'stock' || icon.type === 'weather' || icon.type === 'changelog'
 
   // 点击派发:编辑模式一律不触发;查看模式按 detail 字段(ADR-0001 契约:容器形态由类型定义声明)
   //   - detail='none':nav 渲染为 <a target=_blank> 新标签打开(保留原生中键/右键菜单)
@@ -151,15 +145,13 @@ export default function Icon({
       onClick={onClick}
       title={def?.label}
       className={
-        'relative flex flex-col rounded-2xl transition ' +
-        // stock 走左对齐 ticker 卡(见 StockIcon);其余类型保持居中堆叠。
-        (icon.type === 'stock' || icon.type === 'weather'
-          ? 'items-stretch justify-center gap-1 text-left '
-          : 'items-center justify-center gap-2 ') +
-        // nav 导航链接采用简约风格:无标签背景(裸 favicon + 下方文字),仅 hover 留一层轻晕
-        // 维持可点 affordance;其余类型(changelog=Claude Code / stock=股票 等带实时摘要)
-        // 保留并加深玻璃容器(比 nav 更实的框),用于承载富内容并形成视觉层级。
-        (icon.type === 'nav' ? 'hover:bg-white/10 ' : 'bg-white/25 hover:bg-white/40 ') +
+        'relative flex flex-col transition ' +
+        // 小组件类型:soft 档玻璃卡容器(ADR-0012,hover 提亮在 .glass-soft 自身规则里),
+        // medium/large 起 iOS 小组件大圆角,小卡沿用 2xl;body 左对齐铺满。
+        (isWidget
+          ? `glass-soft items-stretch justify-center gap-1 text-left ${icon.size === 'small' ? 'rounded-2xl' : 'rounded-3xl'} `
+          : // nav:无标签背景,squircle 底板自承玻璃(下方渲染处)
+            'items-center justify-center gap-2 rounded-2xl ') +
         (interactive ? 'cursor-pointer' : 'cursor-default') +
         // 合并手势达标放大(dwell):目标非被拖项、无 dnd transform 冲突;transition 已有
         (dwellTarget === icon.id && !overlay ? ' scale-[1.15] z-10 ' : '') +
@@ -173,8 +165,8 @@ export default function Icon({
       ) : icon.type === 'weather' ? (
         <WeatherIconBody icon={icon} />
       ) : icon.type === 'group' ? (
-        /* 分组(ADR-0011):iOS 文件夹式玻璃容器 + 前 9 个成员 3×3 迷你预览 + 名称外置。
-           材质细节在票 10 定稿,此处落渲染结构。点组打开弹层 = 票 08。 */
+        /* 分组(ADR-0011):iOS 文件夹式玻璃容器 + 前 9 个成员 3×3 迷你预览 + 名称外置
+           (与 nav 名称同位)。点组打开弹层 = 票 08。 */
         <>
           <GroupBody icon={icon} favPx={favPx} />
           {name && (
@@ -183,27 +175,33 @@ export default function Icon({
             </span>
           )}
         </>
+      ) : icon.type === 'changelog' ? (
+        <ChangelogIconBody icon={icon} />
       ) : (
         <>
+          {/* nav:app 图标式 squircle 玻璃底板(soft 档、圆角 24% ≈ iOS 连续曲率)
+              包居中 favicon,边长 = favicon×1.5(原型定稿比例),随 iconScale 缩放 */}
           {favicon && (
-            <img
-              src={favicon}
-              alt=""
-              style={{ width: favPx, height: favPx }}
-              className="rounded-lg"
-              referrerPolicy="no-referrer"
-            />
+            <span
+              className="glass-soft rounded-[24%] flex items-center justify-center"
+              style={{ width: favPx * 1.5, height: favPx * 1.5 }}
+            >
+              <img
+                src={favicon}
+                alt=""
+                style={{ width: favPx, height: favPx }}
+                className="rounded-[22%]"
+                referrerPolicy="no-referrer"
+              />
+            </span>
           )}
 
-          {/* 名称:有则显示。见 CONTEXT.md「尺寸」。 */}
+          {/* 名称:外置底板下方(iOS 主屏式)。见 CONTEXT.md「尺寸」。 */}
           {name && (
             <span className="text-xs text-white/90 max-w-full truncate text-center">
               {name}
             </span>
           )}
-
-          {/* large:实时摘要行(失败降级 "--")*/}
-          {icon.size === 'large' && <SummaryLine summary={summary} />}
         </>
       )}
 
@@ -238,36 +236,13 @@ export default function Icon({
   )
 }
 
-/** 大尺寸图标的摘要行:有则高亮显示,无则灰色 "--"。带 inline markdown(版本号/价格)。 */
-function SummaryLine({ summary }: { summary: Summary | null }) {
-  if (!summary) {
-    return <span className="font-mono text-[11px] text-white/40">--</span>
-  }
-  const toneCls =
-    summary.tone === 'up' ? 'text-up' : summary.tone === 'down' ? 'text-down' : 'text-white/70'
-  return (
-    <div className="flex flex-col items-center gap-0.5 max-w-full">
-      {summary.title && (
-        <span
-          className="font-mono text-[12px] text-accent max-w-full truncate"
-          dangerouslySetInnerHTML={{ __html: inline(summary.title) }}
-        />
-      )}
-      {summary.text && (
-        <span
-          className={`font-mono text-[11px] ${toneCls} max-w-full truncate`}
-          dangerouslySetInnerHTML={{ __html: inline(summary.text) }}
-        />
-      )}
-    </div>
-  )
-}
-
 // ── 辅助 ──────────────────────────────────────────────────────────────────
 
 /**
- * 分组图标内容(ADR-0011):玻璃容器内按组内序取**前 9 个**成员的 favicon 作 3×3 迷你
- * 预览(不足 9 格留空,与 iOS 文件夹一致);成员从聚合缓存按 parentId 派生(groupMembers)。
+ * 分组图标内容(ADR-0011):iOS 文件夹式玻璃容器内按组内序取**前 9 个**成员的 favicon
+ * 作 3×3 迷你预览(不足 9 格留空,与 iOS 文件夹一致);成员从聚合缓存按 parentId 派生
+ * (groupMembers)。材质 = soft 档玻璃 + 圆角 30%(ADR-0012 分组定稿,比 nav squircle
+ * 24% 更钝),容器边长与 nav squircle 同为 fav×1.5,两类图标视觉等大。
  * 在组件内(而非 Icon 主体)调 useConfig:仅 group 类型挂载时才订阅,['config'] 命中缓存
  * 无网络开销;overlay 拖拽幽灵同路径渲染(React 上下文随 React 树,不随 DOM)。
  */
@@ -279,8 +254,8 @@ function GroupBody({ icon, favPx }: { icon: IconModel; favPx: number }) {
   )
   return (
     <div
-      className="grid grid-cols-3 place-items-center gap-[6%] rounded-[24%] bg-white/15 p-[10%]"
-      style={{ width: favPx, height: favPx }}
+      className="glass-soft grid grid-cols-3 place-items-center gap-[6%] rounded-[30%] p-[10%]"
+      style={{ width: favPx * 1.5, height: favPx * 1.5 }}
     >
       {members.map((m) => {
         // 组成员只能是 nav(后端把关),但防御式兜底非 nav/无 url 的占位灰块
@@ -300,12 +275,6 @@ function GroupBody({ icon, favPx }: { icon: IconModel; favPx: number }) {
       })}
     </div>
   )
-}
-
-/** 各类型的显示名(nav/stock 用 data.name,changelog 用类型 label)。 */
-function extractName(icon: IconModel): string {
-  if (icon.type === 'changelog') return get('changelog')?.label ?? '更新日志'
-  return extractString(icon.data, 'name')
 }
 
 /** nav 的 favicon:沿用旧 NavTileGroup 的 google s2 favicons 服务。 */
