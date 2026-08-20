@@ -22,7 +22,7 @@ import type { Icon } from '../lib/types'
  * 由 Icon.tsx 作为外壳(拖拽/编辑角标/点击派发)在 type==='stock' 时委托调用。
  *
  * 字号随「布局设置」的 iconScale 同比缩放(各 Tier 基础 px × iconScale,1.0=默认),
- * 与 nav/changelog 图标的缩放语义一致(见 Icon.tsx 的 WIDGET_PAD_PX / faviconPx)。
+ * 与 nav/changelog 图标的缩放语义一致(见 Icon.tsx 的 ICON_PAD_PX / faviconPx)。
  */
 export default function StockIconBody({ icon }: { icon: Icon }) {
   const { quotes } = useIconData()

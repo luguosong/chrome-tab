@@ -20,11 +20,13 @@ import { ApiError } from '../api/client'
 /**
  * 单个图标渲染(见 CONTEXT.md「图标」/ spec §前端架构 IconGrid / ADR-0012 图标层换肤)。
  *
- * 视觉按类型分派:
- *   - nav:裸 favicon 直出、无底板(ADR-0013),名称外置图标下方(iOS 主屏式),
+ * 视觉按类型分派(ADR-0015 全容器化:所有类型统一 soft 玻璃块外壳,块缘铺满画格 =
+ * 格线对齐,iPhone 主屏语言;nav/分组的外壳即本组件 Tag,小组件沿用既有卡):
+ *   - nav:favicon 居中块内(边长推导 ADR-0014 作上限),名称外置图标下方(iOS 主屏式),
  *     hover/active 轻缩放作反馈,三档仅尺寸不同
+ *   - group:iOS 文件夹式——块内成员 favicon 3×2 迷你预览(GroupBody,ADR-0011)
  *   - stock / weather / changelog:专属小组件 body(StockIcon / WeatherIcon / ChangelogIcon,
- *     各自按尺寸分档信息密度),外壳统一 soft 档玻璃卡容器
+ *     各自按尺寸分档信息密度),body 左对齐铺满块
  *
  * 点击行为(按 detail 字段派发 —— ADR-0001 契约:容器形态由类型定义声明,
  * 新增复用 modal/drawer 的类型无需改本组件):
@@ -40,9 +42,9 @@ import { ApiError } from '../api/client'
  * data 带 pageId/size 供 DndContext handler 读取(跨页 07 用)。
  * 编辑模式角标(EditActions)的交互按钮 onPointerDown stopPropagation,避免点角标误启拖拽。
  */
-/** 小组件卡(stock/weather/changelog)内边距(原 Tailwind p-* 的 px 值),乘 iconScale 得实际值。
- *  nav/group 不吃 padding(名称外置图标区外);favicon 边长自画格跨度推导,见 faviconPx(ADR-0014)。 */
-const WIDGET_PAD_PX: Record<IconSize, number> = {
+/** 图标块内边距(原 Tailwind p-* 的 px 值),乘 iconScale 得实际值。
+ *  ADR-0015 全容器化:所有类型统一玻璃块外壳,块内边距统一;favicon 边长推导见 faviconPx(ADR-0014)。 */
+const ICON_PAD_PX: Record<IconSize, number> = {
   small: 8,
   medium: 12,
   large: 16,
@@ -101,19 +103,19 @@ export default function Icon({
   })
 
   const span = SIZE_CELLS[icon.size]
-  const padPx = WIDGET_PAD_PX[icon.size] * iconScale
+  const padPx = ICON_PAD_PX[icon.size] * iconScale
   // favicon 边长自相似推导(ADR-0014):小=32 基准,中=2×32+gap,大=3×32+2×gap,随 iconScale 同比
   const favPx = faviconPx(icon.size, gridGap, iconScale)
 
-  // 小组件类型(stock/weather/changelog):soft 玻璃卡外壳 + 专属 body;nav/group 裸排版。
+  // 小组件类型(stock/weather/changelog):专属 body 左对齐铺满;nav/group 内容居中。
   const isWidget = icon.type === 'stock' || icon.type === 'weather' || icon.type === 'changelog'
 
   const style: CSSProperties = {
     gridColumn: `span ${span.cols}`,
     gridRow: `span ${span.rows}`,
-    // padding 只给小组件卡;nav/group 的名称在图标区外(iOS 主屏式),图标区自吃画格剩余高度,
-    // 再叠 padding 会挤爆 small 画格(flex 压缩把名称行高压没 → 文字被遮挡,实测复现)。
-    padding: isWidget ? padPx : 0,
+    // 块内边距全类型统一(ADR-0015 容器化)。名称行在块外(shrink-0 不被压缩,9020806),
+    // favicon 区吃块内剩余高度,iconScale 偏大时由 maxHeight + flex 收缩防溢出。
+    padding: padPx,
     // 拖拽变换仅作用于网格内本体(06);overlay 幽灵由 DragOverlay 负责定位,不重复套 transform。
     ...(!overlay
       ? {
@@ -158,12 +160,15 @@ export default function Icon({
       title={def?.label}
       className={
         'relative flex flex-col transition ' +
-        // 小组件类型:soft 档玻璃卡容器(ADR-0012,hover 提亮在 .glass-soft 自身规则里),
-        // medium/large 起 iOS 小组件大圆角,小卡沿用 2xl;body 左对齐铺满。
-        (isWidget
-          ? `glass-soft items-stretch justify-center gap-1 text-left ${icon.size === 'small' ? 'rounded-2xl' : 'rounded-3xl'} `
-          : // nav/group:无标签背景、无 padding;nav 裸 favicon,group 封面 = 首成员 favicon(同渲染路径)
-            'items-center justify-center gap-1 rounded-2xl ') +
+        // ADR-0015 全容器化:所有类型统一 soft 玻璃块外壳(ADR-0012 材质,hover 提亮在
+        // .glass-soft 自身规则里),块缘铺满画格 = 格线对齐(iPhone 主屏语言,对齐由 grid
+        // 布局自动保证);small 沿用 2xl 圆角、medium/large 起 iOS 小组件 3xl。
+        // [container-type:size]:作容器查询的查询容器(画格高度随视口缩放,body 按卡高
+        // 自适应信息密度,如 changelog 逐级减版本行;size containment 对 grid item 无布局
+        // 影响——高度由轨道定,不依赖内容)。不能加 overflow-hidden:编辑角标定位在卡外。
+        `glass-soft justify-center gap-1 [container-type:size] ${icon.size === 'small' ? 'rounded-2xl' : 'rounded-3xl'} ` +
+        // widget body 左对齐铺满;nav/group 内容居中
+        (isWidget ? 'items-stretch text-left ' : 'items-center ') +
         (interactive ? 'cursor-pointer' : 'cursor-default') +
         // 合并手势达标放大(dwell):目标非被拖项、无 dnd transform 冲突;transition 已有
         (dwellTarget === icon.id && !overlay ? ' scale-[1.15] z-10 ' : '') +
@@ -177,10 +182,10 @@ export default function Icon({
       ) : icon.type === 'weather' ? (
         <WeatherIconBody icon={icon} />
       ) : icon.type === 'group' ? (
-        /* 分组(ADR-0011 收纳语义 + ADR-0014 封面式):首成员 favicon 作封面 + 成员数角标,
-           尺寸/排版与 nav 小图标一致(名称同样外置下方)。点组打开弹层看全部成员 = 票 08。 */
+        /* 分组(ADR-0011,ADR-0015 容器化):iOS 文件夹式——玻璃块内成员 favicon 迷你预览,
+           名称外置下方。点组打开弹层看全部成员 = 票 08。 */
         <>
-          <GroupBody icon={icon} favPx={favPx} overlay={overlay} />
+          <GroupBody icon={icon} />
           {name && (
             <span className="shrink-0 text-xs text-white/90 max-w-full truncate text-center">
               {name}
@@ -191,8 +196,8 @@ export default function Icon({
         <ChangelogIconBody icon={icon} />
       ) : (
         <>
-          {/* nav:裸 favicon 直出、无底板(ADR-0013,对 ADR-0012 方向 C 的有限反转——
-              图标坐 L0 页板雾化层,可读性前提已变)。渲染细节见 FaviconImg。 */}
+          {/* nav:玻璃块 + favicon 居中(ADR-0015 全容器化,反转 ADR-0013 裸直出)。
+              favicon 边长推导(ADR-0014)作块内上限,渲染细节见 FaviconImg。 */}
           {favicon && <FaviconImg src={favicon} favPx={favPx} overlay={overlay} />}
 
           {/* 名称:外置图标下方(iOS 主屏式)。shrink-0 保证行高不被压缩。见 CONTEXT.md「尺寸」。 */}
@@ -238,13 +243,10 @@ export default function Icon({
 // ── 辅助 ──────────────────────────────────────────────────────────────────
 
 /**
- * 裸 favicon 渲染(ADR-0013 裸直出 + ADR-0014 推导边长):nav 图标与分组封面共用同一
- * 组件,两条路径视觉恒一致(此前靠复制标记维持,任一侧改动易静默分叉)。网格内吃画格
- * 剩余高度(flex-1 min-h-0 aspect-square,favPx 为上限)防 small 画格 + 大 iconScale 溢出;
- * overlay 幽灵无画格约束(shrink-wrap),flex-1 会塌,固定 favPx。hover/active 轻缩放 =
- * 替代原 glass-soft hover 提亮(接续 dwell scale-[1.15] 缩放语言),仅网格态(幽灵恒处
- * 光标下方,:hover 会恒命中)。src 空渲染灰块占位(分组封面兜底;nav 调用点以 && 短路,
- * 维持无图标行为)。
+ * nav 图标的 favicon 渲染(ADR-0015 块内居中):网格内吃块内剩余高度(flex-1 min-h-0
+ * aspect-square,favPx 为上限)防 small 块 + 大 iconScale 溢出;overlay 幽灵无画格约束
+ * (shrink-wrap),flex-1 会塌,固定 favPx。hover/active 轻缩放叠加块的 glass-soft 提亮
+ * (接续 dwell scale-[1.15] 缩放语言),仅网格态(幽灵恒处光标下方,:hover 会恒命中)。
  */
 function FaviconImg({
   src,
@@ -282,40 +284,38 @@ function FaviconImg({
 }
 
 /**
- * 分组图标内容(ADR-0011 收纳语义,ADR-0014 封面式):首成员 favicon 作封面 + 成员数角标,
- * 封面与 nav 裸 favicon 共用 FaviconImg(视觉恒一致);浏览成员走分组弹层(票 08)。
+ * 分组图标内容(ADR-0011,ADR-0015 容器化):iOS 文件夹式迷你预览——块内 3×2 网格,
+ * 按组内序取**前 6 个**成员的 favicon(不足留空)。取 3×2 而非 iOS 原版 3×3:块为横条形
+ * (画格列宽 > 行高),3×3 每子仅约 10px 不可辨认;3×2 每子约 20px 是辨认下限。
  * 成员从聚合缓存按 parentId 派生(groupMembers)。
  * 在组件内(而非 Icon 主体)调 useConfig:仅 group 类型挂载时才订阅,['config'] 命中缓存
  * 无网络开销;overlay 拖拽幽灵同路径渲染(React 上下文随 React 树,不随 DOM)。
  */
-function GroupBody({
-  icon,
-  favPx,
-  overlay,
-}: {
-  icon: IconModel
-  favPx: number
-  overlay: boolean
-}) {
+function GroupBody({ icon }: { icon: IconModel }) {
   const { data } = useConfig()
-  const { editing } = useEditMode()
   const members = useMemo(
-    () => groupMembers(data?.icons ?? [], icon.id),
+    () => groupMembers(data?.icons ?? [], icon.id).slice(0, 6),
     [data?.icons, icon.id],
   )
-  const first = members[0]
-  const url = first?.type === 'nav' ? extractString(first.data, 'url') : ''
   return (
-    <>
-      {/* 封面:首成员 favicon,与 nav 同组件(ADR-0014) */}
-      <FaviconImg src={url ? faviconUrl(url) : ''} favPx={favPx} overlay={overlay} />
-      {/* 成员数角标:仅查看态显示(右上让位编辑模式的 EditActions 角标;编辑态看成员走弹层) */}
-      {!overlay && !editing && members.length > 0 && (
-        <span className="absolute -top-1.5 -right-1.5 z-10 min-w-[16px] h-4 px-1 rounded-full bg-accent text-white text-[10px] leading-4 text-center">
-          {members.length}
-        </span>
-      )}
-    </>
+    <div className="flex-1 min-h-0 w-full grid grid-cols-3 grid-rows-2 place-items-center gap-[6%]">
+      {members.map((m) => {
+        // 组成员只能是 nav(后端把关),但防御式兜底非 nav/无 url 的占位灰块
+        const url = m.type === 'nav' ? extractString(m.data, 'url') : ''
+        const src = url ? faviconUrl(url) : ''
+        return src ? (
+          <img
+            key={m.id}
+            src={src}
+            alt=""
+            referrerPolicy="no-referrer"
+            className="w-full h-full rounded-[2px] object-contain"
+          />
+        ) : (
+          <span key={m.id} className="w-full h-full rounded-[2px] bg-white/20" />
+        )
+      })}
+    </div>
   )
 }
 
