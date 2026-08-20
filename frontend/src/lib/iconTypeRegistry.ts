@@ -183,7 +183,8 @@ export const WEATHER_DEF: IconTypeDefinition = {
 }
 
 /**
- * 分组(ADR-0011):iOS 文件夹式收纳容器。kind='group' 不属于 base/extension 任一分区,
+ * 分组(ADR-0011):封面式收纳容器(收起态 = 首成员 favicon 封面 + 成员数角标,ADR-0014)。
+ * kind='group' 不属于 base/extension 任一分区,
  * 新增抽屉按分区渲染时自然不列出——组只能经编辑模式合并手势诞生(POST /icons/merge),
  * 后端拒绝直接 POST type=group(空组不存活)。固定 small(1 格)、无 editor(改名走
  * 08 票分组弹层点名称)、无实时摘要。弹层打开/翻页/组内拖出在 08 票接入。

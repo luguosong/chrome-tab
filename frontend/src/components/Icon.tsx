@@ -10,7 +10,7 @@ import type { Icon as IconModel, IconSize } from '../lib/types'
 import { useEditMode } from '../context/EditModeContext'
 import { useGroupGesture } from '../context/GroupGestureContext'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
-import { SIZE_CELLS } from '../lib/iconLayout'
+import { SIZE_CELLS, faviconPx } from '../lib/iconLayout'
 import { extractString, buildIconData, faviconUrl } from '../lib/iconData'
 import { groupMembers } from '../lib/groupReducer'
 import { readWeatherLocation, type WeatherLocation } from '../lib/weather'
@@ -40,12 +40,12 @@ import { ApiError } from '../api/client'
  * data 带 pageId/size 供 DndContext handler 读取(跨页 07 用)。
  * 编辑模式角标(EditActions)的交互按钮 onPointerDown stopPropagation,避免点角标误启拖拽。
  */
-/** 各档基础像素(=改造前 Tailwind p-2/w-8… 的 px 值);乘以 iconScale 得实际尺寸。
- *  fav = favicon 理想边长(nav 裸图标即此边长);group 底板边长以 fav×1.5 为上限、按画格剩余高度自适应。 */
-const SIZE_BASE_PX: Record<IconSize, { pad: number; fav: number }> = {
-  small: { pad: 8, fav: 32 },
-  medium: { pad: 12, fav: 40 },
-  large: { pad: 16, fav: 48 },
+/** 小组件卡(stock/weather/changelog)内边距(原 Tailwind p-* 的 px 值),乘 iconScale 得实际值。
+ *  nav/group 不吃 padding(名称外置图标区外);favicon 边长自画格跨度推导,见 faviconPx(ADR-0014)。 */
+const WIDGET_PAD_PX: Record<IconSize, number> = {
+  small: 8,
+  medium: 12,
+  large: 16,
 }
 
 /** 编辑模式尺寸菜单与角标的中文标签(spec user story 28:大/中/小三档)。 */
@@ -74,7 +74,7 @@ export default function Icon({
 }) {
   const def = get(icon.type)
   const { editing } = useEditMode()
-  const { iconScale } = useLayoutSettings()
+  const { iconScale, gridGap } = useLayoutSettings()
   const delIcon = useDeleteIcon()
   const resizeIcon = useUpdateIconSize()
   const editIcon = useUpdateIconData()
@@ -101,9 +101,9 @@ export default function Icon({
   })
 
   const span = SIZE_CELLS[icon.size]
-  const base = SIZE_BASE_PX[icon.size]
-  const padPx = base.pad * iconScale
-  const favPx = base.fav * iconScale
+  const padPx = WIDGET_PAD_PX[icon.size] * iconScale
+  // favicon 边长自相似推导(ADR-0014):小=32 基准,中=2×32+gap,大=3×32+2×gap,随 iconScale 同比
+  const favPx = faviconPx(icon.size, gridGap, iconScale)
 
   // 小组件类型(stock/weather/changelog):soft 玻璃卡外壳 + 专属 body;nav/group 裸排版。
   const isWidget = icon.type === 'stock' || icon.type === 'weather' || icon.type === 'changelog'
@@ -162,7 +162,7 @@ export default function Icon({
         // medium/large 起 iOS 小组件大圆角,小卡沿用 2xl;body 左对齐铺满。
         (isWidget
           ? `glass-soft items-stretch justify-center gap-1 text-left ${icon.size === 'small' ? 'rounded-2xl' : 'rounded-3xl'} `
-          : // nav/group:无标签背景;group 底板自承玻璃(下方渲染处),nav 裸 favicon,名称贴图标下方
+          : // nav/group:无标签背景、无 padding;nav 裸 favicon,group 封面 = 首成员 favicon(同渲染路径)
             'items-center justify-center gap-1 rounded-2xl ') +
         (interactive ? 'cursor-pointer' : 'cursor-default') +
         // 合并手势达标放大(dwell):目标非被拖项、无 dnd transform 冲突;transition 已有
@@ -177,8 +177,8 @@ export default function Icon({
       ) : icon.type === 'weather' ? (
         <WeatherIconBody icon={icon} />
       ) : icon.type === 'group' ? (
-        /* 分组(ADR-0011):iOS 文件夹式玻璃容器 + 前 9 个成员 3×3 迷你预览 + 名称外置
-           (与 nav 名称同位)。点组打开弹层 = 票 08。 */
+        /* 分组(ADR-0011 收纳语义 + ADR-0014 封面式):首成员 favicon 作封面 + 成员数角标,
+           尺寸/排版与 nav 小图标一致(名称同样外置下方)。点组打开弹层看全部成员 = 票 08。 */
         <>
           <GroupBody icon={icon} favPx={favPx} overlay={overlay} />
           {name && (
@@ -192,29 +192,8 @@ export default function Icon({
       ) : (
         <>
           {/* nav:裸 favicon 直出、无底板(ADR-0013,对 ADR-0012 方向 C 的有限反转——
-              图标坐 L0 页板雾化层,可读性前提已变)。网格内:吃画格剩余高度(flex-1
-              aspect-square、favPx 为上限)防 small 画格 + 大 iconScale 溢出;overlay 幽灵
-              无画格约束(shrink-wrap),flex-1 会塌,退回固定 favPx。hover/active 轻缩放 =
-              替代原 glass-soft hover 提亮(接续 dwell scale-[1.15] 缩放语言),只缩图标不动名称。 */}
-          {favicon && (
-            <img
-              src={favicon}
-              alt=""
-              style={
-                overlay
-                  ? { width: favPx, height: favPx }
-                  : { maxWidth: favPx, maxHeight: favPx }
-              }
-              className={
-                'rounded-[22%] ' +
-                // 缩放反馈仅网格态:overlay 幽灵恒处光标下方,:hover 会恒命中致幽灵尺寸失控
-                (!overlay
-                  ? 'flex-1 min-h-0 aspect-square transition-transform hover:scale-110 active:scale-95'
-                  : '')
-              }
-              referrerPolicy="no-referrer"
-            />
-          )}
+              图标坐 L0 页板雾化层,可读性前提已变)。渲染细节见 FaviconImg。 */}
+          {favicon && <FaviconImg src={favicon} favPx={favPx} overlay={overlay} />}
 
           {/* 名称:外置图标下方(iOS 主屏式)。shrink-0 保证行高不被压缩。见 CONTEXT.md「尺寸」。 */}
           {name && (
@@ -259,10 +238,53 @@ export default function Icon({
 // ── 辅助 ──────────────────────────────────────────────────────────────────
 
 /**
- * 分组图标内容(ADR-0011):iOS 文件夹式玻璃容器内按组内序取**前 9 个**成员的 favicon
- * 作 3×3 迷你预览(不足 9 格留空,与 iOS 文件夹一致);成员从聚合缓存按 parentId 派生
- * (groupMembers)。材质 = soft 档玻璃 + 圆角 30%(ADR-0012 分组定稿;ADR-0013 后
- * 图标层唯一底板);容器为吃画格剩余高度的正方形(fav×1.5 上限)。
+ * 裸 favicon 渲染(ADR-0013 裸直出 + ADR-0014 推导边长):nav 图标与分组封面共用同一
+ * 组件,两条路径视觉恒一致(此前靠复制标记维持,任一侧改动易静默分叉)。网格内吃画格
+ * 剩余高度(flex-1 min-h-0 aspect-square,favPx 为上限)防 small 画格 + 大 iconScale 溢出;
+ * overlay 幽灵无画格约束(shrink-wrap),flex-1 会塌,固定 favPx。hover/active 轻缩放 =
+ * 替代原 glass-soft hover 提亮(接续 dwell scale-[1.15] 缩放语言),仅网格态(幽灵恒处
+ * 光标下方,:hover 会恒命中)。src 空渲染灰块占位(分组封面兜底;nav 调用点以 && 短路,
+ * 维持无图标行为)。
+ */
+function FaviconImg({
+  src,
+  favPx,
+  overlay,
+}: {
+  src: string
+  favPx: number
+  overlay: boolean
+}) {
+  const style = overlay ? { width: favPx, height: favPx } : { maxWidth: favPx, maxHeight: favPx }
+  return src ? (
+    <img
+      src={src}
+      alt=""
+      style={style}
+      className={
+        'rounded-[22%] ' +
+        (!overlay
+          ? 'flex-1 min-h-0 aspect-square transition-transform hover:scale-110 active:scale-95'
+          : '')
+      }
+      referrerPolicy="no-referrer"
+    />
+  ) : (
+    // 防御式兜底:空 src 占位灰块(分组首成员无 url 时;组成员后端只允许 nav)
+    <span
+      className={
+        'rounded-[22%] bg-white/20 ' +
+        (!overlay ? 'flex-1 min-h-0 aspect-square max-w-full' : '')
+      }
+      style={style}
+    />
+  )
+}
+
+/**
+ * 分组图标内容(ADR-0011 收纳语义,ADR-0014 封面式):首成员 favicon 作封面 + 成员数角标,
+ * 封面与 nav 裸 favicon 共用 FaviconImg(视觉恒一致);浏览成员走分组弹层(票 08)。
+ * 成员从聚合缓存按 parentId 派生(groupMembers)。
  * 在组件内(而非 Icon 主体)调 useConfig:仅 group 类型挂载时才订阅,['config'] 命中缓存
  * 无网络开销;overlay 拖拽幽灵同路径渲染(React 上下文随 React 树,不随 DOM)。
  */
@@ -276,40 +298,24 @@ function GroupBody({
   overlay: boolean
 }) {
   const { data } = useConfig()
+  const { editing } = useEditMode()
   const members = useMemo(
-    () => groupMembers(data?.icons ?? [], icon.id).slice(0, 9),
+    () => groupMembers(data?.icons ?? [], icon.id),
     [data?.icons, icon.id],
   )
+  const first = members[0]
+  const url = first?.type === 'nav' ? extractString(first.data, 'url') : ''
   return (
-    <div
-      className={
-        'glass-soft grid grid-cols-3 place-items-center gap-[6%] rounded-[30%] p-[10%] ' +
-        // 网格内吃画格剩余高度的正方形(fav×1.5 上限);overlay 固定边长
-        (!overlay ? 'flex-1 min-h-0 aspect-square' : '')
-      }
-      style={
-        overlay
-          ? { width: favPx * 1.5, height: favPx * 1.5 }
-          : { maxWidth: favPx * 1.5, maxHeight: favPx * 1.5 }
-      }
-    >
-      {members.map((m) => {
-        // 组成员只能是 nav(后端把关),但防御式兜底非 nav/无 url 的占位灰块
-        const url = m.type === 'nav' ? extractString(m.data, 'url') : ''
-        const src = url ? faviconUrl(url) : ''
-        return src ? (
-          <img
-            key={m.id}
-            src={src}
-            alt=""
-            referrerPolicy="no-referrer"
-            className="w-full h-full rounded-[2px] object-contain"
-          />
-        ) : (
-          <span key={m.id} className="w-full h-full rounded-[2px] bg-white/20" />
-        )
-      })}
-    </div>
+    <>
+      {/* 封面:首成员 favicon,与 nav 同组件(ADR-0014) */}
+      <FaviconImg src={url ? faviconUrl(url) : ''} favPx={favPx} overlay={overlay} />
+      {/* 成员数角标:仅查看态显示(右上让位编辑模式的 EditActions 角标;编辑态看成员走弹层) */}
+      {!overlay && !editing && members.length > 0 && (
+        <span className="absolute -top-1.5 -right-1.5 z-10 min-w-[16px] h-4 px-1 rounded-full bg-accent text-white text-[10px] leading-4 text-center">
+          {members.length}
+        </span>
+      )}
+    </>
   )
 }
 
