@@ -21,3 +21,36 @@ export function resolveWrapPage(
   const pageIndex = ((i % count) + count) % count
   return { pageIndex, isWrap }
 }
+
+/**
+ * 相邻环形的连续滑动计划(修订 ADR-0008:末页→首页/首页→末页从瞬间跳切改为
+ * 克隆页单步滑动,消除"闪回"感)。
+ *
+ * 走马灯 DOM 首尾各有一个克隆位 slide:索引空间 [0=左克隆位, 1..count=真页,
+ * count+1=右克隆位](真页 i 的 slide 索引 = i+1,故所有 scrollLeft 都带 +1 页偏移)。
+ * 相邻环形时:把目标页 DOM 快照克隆进对应克隆位 → 弹簧动画滑过去(视觉 = 连续翻一页)
+ * → 落定后无动画瞬移回真页位(克隆位与真位内容相同,瞬移无感)。
+ *
+ * 仅"逻辑相邻"的环形可这样滑(末页→首页、首页→末页);多步越界(如 i=count+1)物理
+ * 跨度 > 1 页,滑动会扫过中间页,返回 null——调用方回落 instant cut(ADR-0008 原行为)。
+ *
+ * @param pageIndex resolveWrapPage 解析出的目标逻辑页(0..count-1)
+ * @param active    当前逻辑页
+ * @param count     总页数
+ * @returns 克隆源真页号 + 动画落点 slide 索引(slideTo) + 复位真页 slide 索引(settleTo);
+ *          调用方把 slide 索引乘页宽得 scrollLeft。不可滑动时 null。
+ */
+export function wrapSlidePlan(
+  pageIndex: number,
+  active: number,
+  count: number,
+): { cloneFrom: number; slideTo: number; settleTo: number } | null {
+  if (count <= 1) return null // 单页:环形回自身,无需克隆
+  const adjacent =
+    (pageIndex === 0 && active === count - 1) || // 末页 +1 → 首页
+    (pageIndex === count - 1 && active === 0) // 首页 -1 → 末页
+  if (!adjacent) return null
+  return pageIndex === 0
+    ? { cloneFrom: 0, slideTo: count + 1, settleTo: 1 } // 首页快照滑入右克隆位,复位真首页
+    : { cloneFrom: count - 1, slideTo: 0, settleTo: count } // 末页快照滑入左克隆位,复位真末页
+}

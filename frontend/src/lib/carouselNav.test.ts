@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveWrapPage } from './carouselNav'
+import { resolveWrapPage, wrapSlidePlan } from './carouselNav'
 
 // 环形翻页取模逻辑(ADR-0008)。纯函数断言,无 DOM。
 // 重点覆盖负数取模修正与首尾环形边界,这是 off-by-one 高发区。
@@ -59,5 +59,42 @@ describe('resolveWrapPage — 空页集', () => {
 
   it('count<0 返回 null', () => {
     expect(resolveWrapPage(0, -1)).toBeNull()
+  })
+})
+
+// wrapSlidePlan — 环形连续滑动的物理计划(修订 ADR-0008:相邻环形从 instant cut 改为
+// 克隆页单步滑动)。slide 索引空间:0=左克隆位,1..count=真页,count+1=右克隆位。
+// 调用方(Carousel)把 slideTo/settleTo 乘页宽得 scrollLeft。
+describe('wrapSlidePlan — 相邻环形(单步,可连续滑动)', () => {
+  it('末页 +1 → 克隆首页滑入右克隆位,落定复位到真首页位', () => {
+    expect(wrapSlidePlan(0, 2, 3)).toEqual({ cloneFrom: 0, slideTo: 4, settleTo: 1 })
+  })
+
+  it('首页 -1 → 克隆末页滑入左克隆位,落定复位到真末页位', () => {
+    expect(wrapSlidePlan(2, 0, 3)).toEqual({ cloneFrom: 2, slideTo: 0, settleTo: 3 })
+  })
+
+  it('两页:两个方向都是相邻环形,互为镜像', () => {
+    expect(wrapSlidePlan(0, 1, 2)).toEqual({ cloneFrom: 0, slideTo: 3, settleTo: 1 })
+    expect(wrapSlidePlan(1, 0, 2)).toEqual({ cloneFrom: 1, slideTo: 0, settleTo: 2 })
+  })
+})
+
+describe('wrapSlidePlan — 不可滑动(返回 null,调用方回落 instant cut)', () => {
+  it('多步越界(如 i=count+1 → 页 1):物理跨度 > 1 页,扫过中间页观感错乱', () => {
+    expect(wrapSlidePlan(1, 2, 3)).toBeNull() // 末页 +2 绕到页 1
+  })
+
+  it('多步反向(i=-2 → 倒数第二页)', () => {
+    expect(wrapSlidePlan(1, 0, 3)).toBeNull()
+  })
+
+  it('单页:环形解析回自身,无需克隆(调用方 target===scrollLeft 拦截为 no-op)', () => {
+    expect(wrapSlidePlan(0, 0, 1)).toBeNull()
+  })
+
+  it('非相邻环形(防御:正常导航路径到不了,但多步取模可能落回端点页)', () => {
+    // i=count+count=6,count=3 → 页 0,但 active=1 非末页 → 非相邻
+    expect(wrapSlidePlan(0, 1, 3)).toBeNull()
   })
 })

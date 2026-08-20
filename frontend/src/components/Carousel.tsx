@@ -1,8 +1,10 @@
 import {
   createContext,
+  forwardRef,
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -10,7 +12,7 @@ import {
 import { useDndContext, useDroppable } from '@dnd-kit/core'
 import PageTabs from './PageTabs'
 import { LensBox } from './LensBox'
-import { resolveWrapPage } from '../lib/carouselNav'
+import { resolveWrapPage, wrapSlidePlan } from '../lib/carouselNav'
 import { pageTransitionFrame } from '../lib/pageTransition'
 
 /**
@@ -19,10 +21,15 @@ import { pageTransitionFrame } from '../lib/pageTransition'
  * - 左右玻璃箭头、常驻 PageTabs 页签条(切换/重排/管理,见 PageTabs)
  * - 滚轮纵向 → 翻页(阻止页面内滚动,见 CONTEXT.md「页面」:固定画布)
  * - 键盘 ←/→ 翻页
- * - 滚轮/方向键越界时首尾环形相接(首页↑→末页,末页↓→首页),环形瞬间到位而非
- *   位置滑动;跨页拖拽不环形(见 ADR-0008)
+ * - 滚轮/方向键越界时首尾环形相接(首页↑→末页,末页↓→首页):相邻环形经克隆位
+ *   连续滑动(修订 ADR-0008),多步越界瞬间跳切;跨页拖拽不环形
  * - scroll 事件同步激活页
  * - 翻页用 rAF 弹簧曲线(easeOutBack)回弹落定,更灵动;回弹无视 prefers-reduced-motion(核心切换反馈,产品决策)
+ *
+ * 克隆位(CloneSlot):DOM 首尾各一个占位 slide(非 snap 点、平时空且不可见),
+ * 使真页 i 的 slide 索引 = i+1、所有 scrollLeft 带 +1 页偏移。相邻环形翻页时把
+ * 目标页 DOM 快照(cloneNode,纯 DOM——不进 React/dnd-kit,无 droppable id 冲突)
+ * 填进对应克隆位,弹簧滑过去后无动画瞬移回真页位(两处内容相同,无感)。
  */
 
 /**
@@ -83,6 +90,9 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
   // easeOutBack 弹簧曲线:到达目标后略微越界再回弹,「落定」手感更灵动。
   // 新调用会取消在飞动画并从当前位置重新瞄准(连续滚轮连翻不卡顿)。
   const animRef = useRef<number | null>(null)
+  // 克隆位 slide(首/尾各一,结构见 CloneSlot)。环形连续滑动时往里填目标页 DOM 快照。
+  const leftSlotRef = useRef<HTMLDivElement>(null)
+  const rightSlotRef = useRef<HTMLDivElement>(null)
 
   const goTo = useCallback(
     (i: number) => {
@@ -93,17 +103,17 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
       const resolved = resolveWrapPage(i, labels.length)
       if (!resolved) return // 空页集
       const { pageIndex, isWrap } = resolved
-      const target = pageIndex * el.clientWidth
-      // [DEBUG-pgsw] 临时诊断:页面切换回弹缺失。定位后整段 grep 删除。
-      console.log('[DEBUG-pgsw] req', {
-        i,
-        count: labels.length,
-        isWrap,
-        pageIndex,
-        target,
-        scrollLeftBefore: el.scrollLeft,
-        clientWidth: el.clientWidth,
-      })
+      // 真页 i 的 slide 索引 = i+1(首 slide 被左克隆位占据,所有 scrollLeft 带 +1 页偏移)
+      const target = (pageIndex + 1) * el.clientWidth
+
+      // 清空克隆位(填快照与中断归位两处共用)
+      const clearSlots = () => {
+        for (const slot of [leftSlotRef.current, rightSlotRef.current]) {
+          if (!slot) continue
+          slot.style.visibility = 'hidden'
+          slot.firstElementChild?.replaceChildren()
+        }
+      }
 
       // 取消在飞的弹簧动画,并恢复 scroll-snap / scroll-behavior
       const resetOverrides = () => {
@@ -114,63 +124,89 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
       if (animRef.current != null) {
         cancelAnimationFrame(animRef.current)
         animRef.current = null
+        // 环形滑动被打断且恰好停在克隆区时,先无感归位到同内容的真页位
+        // (克隆位与真位内容相同,瞬移不可见),新动画才能从真位正确起步。
+        const w = el.clientWidth
+        const rawSlot = Math.round(el.scrollLeft / w)
+        if (rawSlot === 0) el.scrollLeft = labels.length * w // 左克隆区 → 真末页
+        else if (rawSlot === labels.length + 1) el.scrollLeft = w // 右克隆区 → 真首页
+        clearSlots()
         resetOverrides()
-      }
-
-      // 环形瞬间到位(ADR-0008):末页→首页的 scrollLeft 跨度是 (count-1)×width,
-      // 沿用 easeOutBack 位置动画会高速扫过所有中间页、观感错乱。环形是"跳一格"语义,
-      // 直接落点。落点恰为 snap 点(页边界),无需关 snap;状态由下方 scroll 监听同步,
-      // 与 slide 路径一致。
-      if (isWrap) {
-        console.log('[DEBUG-pgsw] path=wrap-instant-cut (无回弹,ADR-0008 设计)')
-        el.scrollLeft = target
-        return
       }
 
       // 回弹是用户明确要求的核心切换反馈,故无视 prefers-reduced-motion(产品决策)。
       // 已在目标位置则不动画。
       if (target === el.scrollLeft) {
-        console.log('[DEBUG-pgsw] path=already-at-target (无回弹:已在目标位置)')
         el.scrollLeft = target
         return
       }
-
-      const start = el.scrollLeft
-      const distance = target - start
-      // 动画期间必须同时关掉两项,否则回弹被吃掉:
-      //   - scroll-snap-type: none —— mandatory 会把越界位置立刻拽回 snap 点
-      //   - scroll-behavior: auto —— 容器带 scroll-smooth,smooth 会对「逐帧 scrollLeft 赋值」
-      //     再做一次平滑插值,直接抹平回弹
-      el.style.scrollSnapType = 'none'
-      el.style.scrollBehavior = 'auto'
 
       // 回弹分两路(pageTransitionFrame,见 lib/pageTransition.ts):scrollLeft 走 easeOutCubic
       // 单调到位(永不越界 → 首/末页不再被浏览器夹掉回弹),越界回弹量交给 CSS 变量
       // --pg-overshoot,由每页内容的 translateX 承担(transform 不受 scrollLeft 边界限制)。
       // 合成视觉与原 easeOutBack 等价。560ms 落定。
-      const duration = 560
-      const t0 = performance.now()
-      const tick = (now: number) => {
-        const t = Math.min(1, (now - t0) / duration)
-        const { scrollLeft, overshoot } = pageTransitionFrame(t, start, distance)
-        el.scrollLeft = scrollLeft
-        el.style.setProperty('--pg-overshoot', `${overshoot}px`)
-        if (t < 1) {
-          animRef.current = requestAnimationFrame(tick)
-        } else {
-          animRef.current = null
-          el.scrollLeft = target // 落到精确像素(= snap 点)
-          resetOverrides() // 恢复:snap-x mandatory + scroll-smooth + --pg-overshoot=0
-          console.log('[DEBUG-pgsw] spring-done', {
-            finalScrollLeft: el.scrollLeft,
-            target,
-          })
+      // 动画期间必须同时关掉两项,否则回弹被吃掉:
+      //   - scroll-snap-type: none —— mandatory 会把越界位置立刻拽回 snap 点
+      //   - scroll-behavior: auto —— 容器带 scroll-smooth,smooth 会对「逐帧 scrollLeft 赋值」
+      //     再做一次平滑插值,直接抹平回弹
+      const springTo = (targetPx: number, onDone?: () => void) => {
+        const start = el.scrollLeft
+        const distance = targetPx - start
+        el.style.scrollSnapType = 'none'
+        el.style.scrollBehavior = 'auto'
+        const duration = 560
+        const t0 = performance.now()
+        const tick = (now: number) => {
+          const t = Math.min(1, (now - t0) / duration)
+          const { scrollLeft, overshoot } = pageTransitionFrame(t, start, distance)
+          el.scrollLeft = scrollLeft
+          el.style.setProperty('--pg-overshoot', `${overshoot}px`)
+          if (t < 1) {
+            animRef.current = requestAnimationFrame(tick)
+          } else {
+            animRef.current = null
+            el.scrollLeft = targetPx // 落到精确像素(= snap 点 / 克隆位点)
+            onDone?.()
+            resetOverrides() // 恢复:snap-x mandatory + scroll-smooth + --pg-overshoot=0
+          }
         }
+        animRef.current = requestAnimationFrame(tick)
       }
-      console.log('[DEBUG-pgsw] path=spring-started', { start, distance, duration })
-      animRef.current = requestAnimationFrame(tick)
+
+      // 环形(ADR-0008,2026-08 修订):相邻环形(末页+1→首页 / 首页-1→末页)改为
+      // 连续滑动——把目标页 DOM 快照克隆进克隆位,弹簧滑过去(视觉 = 翻一页),
+      // 落定后无动画瞬移回真页位(两处内容相同,瞬移无感)。多步越界(物理跨度 > 1 页,
+      // 滑动会高速扫过中间页)与单页 no-op 仍走瞬间跳切。
+      if (isWrap) {
+        const plan = wrapSlidePlan(pageIndex, active, labels.length)
+        if (!plan) {
+          el.scrollLeft = target
+          return
+        }
+        const w = el.clientWidth
+        // 克隆源 = 真页 slide 的内层 div(不含 snap-center 外壳,免得克隆件变成 snap 点);
+        // 落点 = 对应侧克隆位。DOM 结构意外时兜底回落瞬间跳切。
+        const srcSlide = el.children[plan.cloneFrom + 1]
+        const slot = plan.slideTo === 0 ? leftSlotRef.current : rightSlotRef.current
+        if (!srcSlide?.firstElementChild || !slot?.firstElementChild) {
+          el.scrollLeft = target
+          return
+        }
+        const snapshot = srcSlide.firstElementChild.cloneNode(true) as HTMLElement
+        snapshot.style.transform = '' // 快照静止,不吃动画期的 --pg-overshoot
+        const slotInner = slot.firstElementChild as HTMLElement
+        slotInner.replaceChildren(snapshot)
+        slot.style.visibility = 'visible'
+        springTo(plan.slideTo * w, () => {
+          el.scrollLeft = plan.settleTo * w // 无感瞬移:克隆位与真位内容相同
+          clearSlots()
+        })
+        return
+      }
+
+      springTo(target)
     },
-    [labels.length],
+    [labels.length, active],
   )
 
   // 卸载时取消在飞动画,避免 rAF 回调操作已卸载节点
@@ -186,7 +222,19 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
     setActive((a) => Math.min(a, Math.max(0, labels.length - 1)))
   }, [labels.length])
 
-  // scroll → 激活页同步
+  // 挂载与页数变化时校准 scrollLeft 到真页区(slide 索引 [1, count],见 CloneSlot 偏移):
+  // 挂载时从 0 拉到真首页;删页后夹回末真页,防止停留在已消失的位置。
+  // useLayoutEffect:paint 前执行,首帧不闪左克隆位。
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || el.clientWidth === 0) return
+    const slide = Math.min(Math.max(Math.round(el.scrollLeft / el.clientWidth), 1), labels.length)
+    el.scrollLeft = slide * el.clientWidth
+  }, [labels.length])
+
+  // scroll → 激活页同步。原始 slide 索引(= scrollLeft/页宽)带 +1 克隆位偏移,减 1 后
+  // 落在克隆区(-1 / count)的经环形解析映射回对端真页——环形滑动动画中途派生出的
+  // 已是目标页,与视觉一致。
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -194,13 +242,8 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
     const onScroll = () => {
       cancelAnimationFrame(raf)
       raf = requestAnimationFrame(() => {
-        const i = Math.round(el.scrollLeft / el.clientWidth)
-        console.log('[DEBUG-pgsw] scroll', {
-          derivedActive: i,
-          currentActive: active,
-          scrollLeft: el.scrollLeft,
-          clientWidth: el.clientWidth,
-        })
+        const raw = Math.round(el.scrollLeft / el.clientWidth) - 1
+        const i = resolveWrapPage(raw, labels.length)?.pageIndex ?? active
         if (i !== active) {
           setActive(i)
           onActiveChange?.(i)
@@ -212,7 +255,7 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
       el.removeEventListener('scroll', onScroll)
       cancelAnimationFrame(raf)
     }
-  }, [active, onActiveChange])
+  }, [active, labels.length, onActiveChange])
 
   // 滚轮翻页(CONTEXT.md「页面」:滚轮用于页间切换,而非页内滚动)。
   // 只接管"纵向滚轮"(常规鼠标):deltaY 占主导时翻页并 preventDefault;
@@ -271,6 +314,7 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
           className="no-scrollbar flex overflow-x-auto snap-x snap-mandatory scroll-smooth flex-1 min-h-0"
           aria-roledescription="carousel"
         >
+          <CloneSlot ref={leftSlotRef} />
           {children.map((child, i) => (
             <div
               key={i}
@@ -288,6 +332,7 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
               </div>
             </div>
           ))}
+          <CloneSlot ref={rightSlotRef} />
         </div>
 
         {/* 左箭头(环形,ADR-0008):不再在首页隐藏——首页点此环形跳到末页。
@@ -320,6 +365,27 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
     </CarouselApiContext.Provider>
   )
 }
+
+/**
+ * 环形连续滑动的克隆位 slide(修订 ADR-0008)。占 DOM 首尾各一:
+ * - 常驻占宽(否则左克隆位出现时会把全部真页右推一页,scrollLeft 错位);
+ * - 不带 snap-center —— 不是 snap 点,原生触控板横扫不会停在它上面(边界行为同旧版);
+ * - 平时空且 visibility:hidden;环形翻页时 goTo 填入目标页 DOM 快照再显形。
+ * 内层只挂高度链——快照本身就是真页内层 div(自带 px 页边距),整块塞入即逐像素
+ * 同构,边距单层不翻倍。
+ */
+const CloneSlot = forwardRef<HTMLDivElement>(function CloneSlot(_props, ref) {
+  return (
+    <div
+      ref={ref}
+      aria-hidden
+      className="w-full shrink-0 h-full"
+      style={{ visibility: 'hidden' }}
+    >
+      <div className="h-full" />
+    </div>
+  )
+})
 
 /**
  * 拖拽时的左右边缘翻页方块(issue 07 / spec user story 31,2026-08-12 可见化改版)。
