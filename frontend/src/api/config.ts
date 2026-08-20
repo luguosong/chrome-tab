@@ -321,7 +321,13 @@ export function useMoveIcon() {
           ...prev,
           icons:
             vars.parentId != null
-              ? moveIntoGroup(prev.icons, { id: vars.id, groupId: vars.parentId })
+              ? // toIndex 透传:组内重排按夹紧位序算乐观态(票 08);入组路径后端
+                // 忽略 toIndex、恒落末尾,reducer 的夹紧对「已在组」才生效,语义无冲突
+                moveIntoGroup(prev.icons, {
+                  id: vars.id,
+                  groupId: vars.parentId,
+                  toIndex: vars.toIndex,
+                })
               : moveIcon(prev.icons, vars),
         })
       }

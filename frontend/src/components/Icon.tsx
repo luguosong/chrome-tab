@@ -11,7 +11,7 @@ import { useEditMode } from '../context/EditModeContext'
 import { useGroupGesture } from '../context/GroupGestureContext'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import { SIZE_CELLS } from '../lib/iconLayout'
-import { extractString, buildIconData } from '../lib/iconData'
+import { extractString, buildIconData, faviconUrl } from '../lib/iconData'
 import { groupMembers } from '../lib/groupReducer'
 import { readWeatherLocation, type WeatherLocation } from '../lib/weather'
 import { useConfig, useDeleteIcon, useDissolveGroup, useUpdateIconSize, useUpdateIconData } from '../api/config'
@@ -58,10 +58,13 @@ const SIZE_LABEL: Record<IconSize, string> = {
 export default function Icon({
   icon,
   onOpenDetail,
+  onOpenGroup,
   overlay = false,
 }: {
   icon: IconModel
   onOpenDetail?: (icon: IconModel) => void
+  /** 点组图标开分组弹层(票 08)。任意模式可用(组内排序需编辑模式,弹层内自判)。 */
+  onOpenGroup?: (icon: IconModel) => void
   /**
    * DragOverlay 中的拖拽幽灵(06):由 DashboardPage 在拖拽期间渲染一份只读副本跟随光标,
    * 原位置降级为占位(dimmed)。overlay 模式下不挂载 sortable 接线、不渲染编辑角标、
@@ -125,18 +128,24 @@ export default function Icon({
   const url = icon.type === 'nav' ? extractString(icon.data, 'url') : ''
   const favicon = url ? faviconUrl(url) : ''
 
-  // 点击派发:编辑模式一律不触发;查看模式按 detail 字段(ADR-0001 契约:容器形态由类型定义声明)
-  //   - detail='none':nav 渲染为 <a target=_blank> 新标签打开(保留原生中键/右键菜单)
-  //   - detail='modal'/'drawer':点击 → onOpenDetail,由父组件按 detail 渲染对应面板
+  // 点击派发(ADR-0001 契约:容器形态由类型定义声明):
+  //   - group:点开分组弹层(票 08)——任意模式(编辑态也要先开弹层才能组内排序)
+  //   - 其余类型:编辑模式一律不触发;查看模式按 detail 字段
+  //     - detail='none':nav 渲染为 <a target=_blank> 新标签打开(保留原生中键/右键菜单)
+  //     - detail='modal'/'drawer':点击 → onOpenDetail,由父组件按 detail 渲染对应面板
   const isNavLink = icon.type === 'nav' && !editing
   const Tag = isNavLink ? 'a' : 'div'
   const linkProps = isNavLink
     ? { href: url, target: '_blank' as const, rel: 'noreferrer' }
     : {}
   const hasPanel = def?.detail === 'modal' || def?.detail === 'drawer'
-  const onClick = !editing && hasPanel && onOpenDetail ? () => onOpenDetail(icon) : undefined
+  // 组图标点击 = 开弹层(票 08):任意模式(编辑态开弹层才能组内排序),不与编辑态互斥
+  const onGroupOpen = icon.type === 'group' && onOpenGroup ? () => onOpenGroup(icon) : undefined
+  const onClick =
+    onGroupOpen ??
+    (!editing && hasPanel && onOpenDetail ? () => onOpenDetail(icon) : undefined)
 
-  const interactive = !editing && (isNavLink || onClick !== undefined)
+  const interactive = isNavLink || onClick !== undefined
 
   return (
     <Tag
@@ -304,16 +313,6 @@ function GroupBody({
       })}
     </div>
   )
-}
-
-/** nav 的 favicon:沿用旧 NavTileGroup 的 google s2 favicons 服务。 */
-function faviconUrl(url: string): string {
-  try {
-    const domain = new URL(url).hostname
-    return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`
-  } catch {
-    return ''
-  }
 }
 
 /**

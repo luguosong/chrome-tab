@@ -45,3 +45,14 @@ export function buildIconData(
   }
   return data
 }
+
+/** nav 的 favicon 服务地址:沿用旧 NavTileGroup 的 google s2 favicons。
+ *  网格 Icon、组图标预览(GroupBody)与分组弹层子图标(GroupOverlay)共用。 */
+export function faviconUrl(url: string): string {
+  try {
+    const domain = new URL(url).hostname
+    return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`
+  } catch {
+    return ''
+  }
+}

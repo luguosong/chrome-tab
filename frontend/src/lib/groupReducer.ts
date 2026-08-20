@@ -102,18 +102,33 @@ export function dissolveGroup(icons: readonly Icon[], groupId: number): Icon[] {
 }
 
 /**
- * 图标入组(镜像 IconService.move 的 parentId 分支):入组恒落组内序列末尾
- * (后端忽略 toIndex);源页顶层序列补洞重排;pageId 同步为组的 pageId。
- * 目标不是组 / 图标已在组内时原样返回副本(后端对应分支为 409,由服务端把关)。
+ * 图标入组 / 组内重排(镜像 IconService.move 的 parentId 分支):
+ * - 顶层图标入组:恒落组内序列末尾(后端忽略 toIndex);源页顶层序列补洞重排;
+ *   pageId 同步为组的 pageId。
+ * - 已在同组(票 08 组内重排):剔除自身后按**夹紧 toIndex** 插入,页面顶层不动。
+ * - 跨组搬移:后端支持(removeFromGroup + 落目标组末尾)但 UI 无路径,原样返回副本。
+ * 目标不是组时原样返回副本(后端对应分支为 409,由服务端把关)。
  */
 export function moveIntoGroup(
   icons: readonly Icon[],
-  action: { id: number; groupId: number },
+  action: { id: number; groupId: number; toIndex?: number },
 ): Icon[] {
-  const { id, groupId } = action
+  const { id, groupId, toIndex } = action
   const icon = icons.find((i) => i.id === id)
   const group = icons.find((i) => i.id === groupId && i.type === 'group')
-  if (!icon || !group || icon.parentId !== null) return [...icons]
+  if (!icon || !group) return [...icons]
+  if (icon.parentId != null && icon.parentId !== groupId) return [...icons]
+
+  // 已在同组:组内重排(镜像后端 alreadyInside 分支——先剔除自身再按夹紧 toIndex 插入,
+  // 故「拖 A 悬停 B」传 B 的绝对序会让 A 落 B 后,与 dnd-kit arrayMove 视觉一致)
+  if (icon.parentId === groupId) {
+    const seq = icons
+      .filter((i) => i.parentId === groupId && i.id !== id)
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+    seq.splice(Math.max(0, Math.min(toIndex ?? seq.length, seq.length)), 0, icon)
+    const order = new Map(seq.map((i, k) => [i.id, k]))
+    return icons.map((i) => (order.has(i.id) ? { ...i, sortOrder: order.get(i.id)! } : i))
+  }
 
   // 源页顶层补洞(镜像后端 renumber(src))
   const src = topLevelOf(icons, icon.pageId).filter((i) => i.id !== id)
@@ -132,4 +147,19 @@ export function moveIntoGroup(
 /** 组内成员按 sortOrder 升序(组图标 3×3 预览 / 08 票弹层渲染用派生函数)。 */
 export function groupMembers(icons: readonly Icon[], groupId: number): Icon[] {
   return icons.filter((i) => i.parentId === groupId).sort((a, b) => a.sortOrder - b.sortOrder)
+}
+
+// ── 组内弹层分页(票 08,ADR-0011:9 个/页的纯展示切片,无「组内页」实体)──────
+
+/** 组内弹层每页成员数(3×3)。 */
+export const GROUP_PAGE_SIZE = 9
+
+/** 组内弹层总页数。空组(乐观瞬态)为 0 页,由调用方按空态处理。 */
+export function groupPageCount(memberCount: number): number {
+  return Math.ceil(memberCount / GROUP_PAGE_SIZE)
+}
+
+/** 组内弹层第 k 页(0 基)的成员切片:`[9k, 9k+9)`;越界 / 负数页为空切片。 */
+export function groupPageSlice(members: readonly Icon[], k: number): Icon[] {
+  return members.slice(GROUP_PAGE_SIZE * k, GROUP_PAGE_SIZE * (k + 1))
 }

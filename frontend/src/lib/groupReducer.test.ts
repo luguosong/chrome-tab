@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { dissolveGroup, groupMembers, mergeIcons, moveIntoGroup } from './groupReducer'
+import {
+  dissolveGroup,
+  groupMembers,
+  groupPageCount,
+  groupPageSlice,
+  mergeIcons,
+  moveIntoGroup,
+} from './groupReducer'
 import { moveIcon } from './iconReducer'
 import type { Icon, IconSize } from './types'
 
@@ -201,7 +208,7 @@ describe('moveIntoGroup — 入组', () => {
     expect(next).toEqual(icons)
   })
 
-  it('已在组内的图标不能再入组(组内重排是 08 票)→ 原样返回', () => {
+  it('跨组搬移(后端支持、UI 无路径)→ 原样返回副本,invalidate 校正', () => {
     const icons = [
       group(9, PAGE, 0),
       group(8, PAGE, 1),
@@ -209,6 +216,96 @@ describe('moveIntoGroup — 入组', () => {
     ]
     const next = moveIntoGroup(icons, { id: 1, groupId: 8 })
     expect(next).toEqual(icons)
+  })
+})
+
+describe('moveIntoGroup — 组内重排(票 08,镜像后端 alreadyInside 分支)', () => {
+  it('已在同组:剔除自身后按夹紧 toIndex 插入,页面顶层与组外不动', () => {
+    // 组内 [A(0), B(1), C(2)],把 A 重排到 toIndex=2 → [B, C, A]
+    const icons = [
+      icon(10, PAGE, 0),
+      group(9, PAGE, 1),
+      icon(1, PAGE, 0, { parentId: 9 }),
+      icon(2, PAGE, 1, { parentId: 9 }),
+      icon(3, PAGE, 2, { parentId: 9 }),
+    ]
+    const next = moveIntoGroup(icons, { id: 1, groupId: 9, toIndex: 2 })
+    expect(groupMembers(next, 9).map((i) => i.id)).toEqual([2, 3, 1])
+    // 页面顶层 [X, 组] 不动
+    expect(topLevelOf(next, PAGE)).toEqual([10, 9])
+  })
+
+  it('toIndex 超界夹紧到组内末尾(对齐后端 clamp)', () => {
+    const icons = [
+      group(9, PAGE, 0),
+      icon(1, PAGE, 0, { parentId: 9 }),
+      icon(2, PAGE, 1, { parentId: 9 }),
+    ]
+    const next = moveIntoGroup(icons, { id: 1, groupId: 9, toIndex: 99 })
+    expect(groupMembers(next, 9).map((i) => i.id)).toEqual([2, 1])
+  })
+
+  it('toIndex 缺省(入组调用方不传)→ 已在同组视为末尾', () => {
+    const icons = [
+      group(9, PAGE, 0),
+      icon(1, PAGE, 0, { parentId: 9 }),
+      icon(2, PAGE, 1, { parentId: 9 }),
+    ]
+    const next = moveIntoGroup(icons, { id: 1, groupId: 9 })
+    expect(groupMembers(next, 9).map((i) => i.id)).toEqual([2, 1])
+  })
+
+  it('后移一位的语义:toIndex 取 over 项在剔除后序列中的位序(active 在 over 前 → 落 over 后)', () => {
+    // 组内 [A, B];拖 A 悬停 B(onDragEnd 传 toIndex = B 的绝对序 1)→ 剔除 A 后 seq=[B]
+    // 插入 1 → [B, A]:A 落到 B 后,与 dnd-kit arrayMove(A→B)视觉一致
+    const icons = [
+      group(9, PAGE, 0),
+      icon(1, PAGE, 0, { parentId: 9 }),
+      icon(2, PAGE, 1, { parentId: 9 }),
+    ]
+    const next = moveIntoGroup(icons, { id: 1, groupId: 9, toIndex: 1 })
+    expect(groupMembers(next, 9).map((i) => i.id)).toEqual([2, 1])
+  })
+})
+
+describe('groupPageSlice / groupPageCount — 组内弹层分页(票 08,9 个/页展示切片)', () => {
+  const membersOf = (n: number) =>
+    Array.from({ length: n }, (_, k) => icon(k + 1, PAGE, k, { parentId: 9 }))
+  const ids = (ms: Icon[]) => ms.map((i) => i.id)
+
+  it('恰好 9 个:1 页,第 0 页全量、第 1 页空切片', () => {
+    const members = membersOf(9)
+    expect(groupPageCount(9)).toBe(1)
+    expect(ids(groupPageSlice(members, 0))).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+    expect(groupPageSlice(members, 1)).toEqual([])
+  })
+
+  it('10 个:2 页,第 1 页仅第 10 个', () => {
+    const members = membersOf(10)
+    expect(groupPageCount(10)).toBe(2)
+    expect(ids(groupPageSlice(members, 1))).toEqual([10])
+  })
+
+  it('18 个:2 页,两页各 9(整除边界)', () => {
+    const members = membersOf(18)
+    expect(groupPageCount(18)).toBe(2)
+    expect(groupPageSlice(members, 1)).toHaveLength(9)
+  })
+
+  it('19 个:3 页,第 2 页仅第 19 个', () => {
+    const members = membersOf(19)
+    expect(groupPageCount(19)).toBe(3)
+    expect(ids(groupPageSlice(members, 2))).toEqual([19])
+  })
+
+  it('0 个:0 页(空组乐观瞬态,调用方按空态渲染)', () => {
+    expect(groupPageCount(0)).toBe(0)
+    expect(groupPageSlice(membersOf(0), 0)).toEqual([])
+  })
+
+  it('k 越界 / 负数:空切片不抛(UI 夹页后仍防御)', () => {
+    expect(groupPageSlice(membersOf(10), 5)).toEqual([])
+    expect(groupPageSlice(membersOf(10), -1)).toEqual([])
   })
 })
 

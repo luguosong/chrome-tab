@@ -23,10 +23,13 @@ export default function IconGrid({
   page,
   icons,
   onOpenDetail,
+  onOpenGroup,
 }: {
   page: Page
   icons: Icon[]
   onOpenDetail?: (icon: Icon) => void
+  /** 点组图标开分组弹层(票 08),透传给 Icon。 */
+  onOpenGroup?: (icon: Icon) => void
 }) {
   const { editing } = useEditMode()
   const { gridWidth, gridGap } = useLayoutSettings()
@@ -74,7 +77,7 @@ export default function IconGrid({
             DashboardPage 的 onDragOver 据 over.data.current.sortable.containerId 判断跨页(issue 07)。 */}
         <SortableContext id={String(page.id)} items={icons.map((i) => i.id)} strategy={rectSortingStrategy}>
           {icons.map((icon) => (
-            <IconView key={icon.id} icon={icon} onOpenDetail={onOpenDetail} />
+            <IconView key={icon.id} icon={icon} onOpenDetail={onOpenDetail} onOpenGroup={onOpenGroup} />
           ))}
         </SortableContext>
       </div>
