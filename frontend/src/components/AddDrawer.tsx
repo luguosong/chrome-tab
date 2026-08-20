@@ -51,7 +51,7 @@ export default function AddDrawer({
       {/* 遮罩:点击关闭 */}
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
 
-      <aside className="glass-panel relative h-full w-full max-w-sm animate-slide-in-right overflow-y-auto">
+      <aside className="glass-panel glass-panel-readable relative h-full w-full max-w-sm animate-slide-in-right overflow-y-auto">
         {/* 顶栏:标题 + 关闭 */}
         <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3 border-b border-white/20 bg-[inherit]">
           <h2 className="text-sm uppercase tracking-wider text-white/80">新增图标</h2>

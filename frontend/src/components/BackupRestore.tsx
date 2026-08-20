@@ -47,15 +47,15 @@ export function BackupRestore() {
         <button
           type="button"
           onClick={doExport}
-          className="px-3 py-1.5 rounded-full glass-panel text-white/85 hover:bg-white/30 transition"
+          className="px-3 py-1.5 rounded-full bg-white/20 text-white/85 hover:bg-white/30 transition"
         >
           导出备份
         </button>
-        <label className="px-3 py-1.5 rounded-full glass-panel text-white/85 hover:bg-white/30 cursor-pointer transition">
+        <label className="px-3 py-1.5 rounded-full bg-white/20 text-white/85 hover:bg-white/30 cursor-pointer transition">
           导入(替换)
           <input type="file" accept="application/json" hidden onChange={(e) => onFile(e, 'replace')} />
         </label>
-        <label className="px-3 py-1.5 rounded-full glass-panel text-white/85 hover:bg-white/30 cursor-pointer transition">
+        <label className="px-3 py-1.5 rounded-full bg-white/20 text-white/85 hover:bg-white/30 cursor-pointer transition">
           导入(合并)
           <input type="file" accept="application/json" hidden onChange={(e) => onFile(e, 'merge')} />
         </label>

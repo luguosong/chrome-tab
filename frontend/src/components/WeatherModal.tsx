@@ -47,7 +47,7 @@ export default function WeatherModal({
     >
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
 
-      <div className="glass-panel relative w-full max-w-lg rounded-3xl p-6">
+      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6">
         <button
           type="button"
           onClick={onClose}

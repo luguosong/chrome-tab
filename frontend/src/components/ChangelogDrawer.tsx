@@ -51,7 +51,7 @@ export default function ChangelogDrawer({ onClose }: { onClose: () => void }) {
       {/* 遮罩:点击关闭 */}
       <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
 
-      <div className="glass-panel relative w-full max-w-2xl rounded-3xl pb-4 animate-pop-in">
+      <div className="glass-panel glass-panel-readable relative w-full max-w-2xl rounded-3xl pb-4 animate-pop-in">
         {/* 顶栏:标题 + 副标题 + 关闭 */}
         <div className="flex items-start justify-between px-6 pt-4 pb-2">
           <div className="min-w-0">

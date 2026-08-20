@@ -60,14 +60,14 @@ export default function SettingsDrawer({
   return (
     <div className="fixed inset-0 z-[60] flex justify-end">
       <div className="absolute inset-0 bg-black/50" onClick={close} />
-      <aside className="glass-panel relative h-full w-full max-w-sm animate-slide-in-right overflow-y-auto p-5">
+      <aside className="glass-panel glass-panel-readable relative h-full w-full max-w-sm animate-slide-in-right overflow-y-auto p-5">
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-sm font-semibold text-white/90">布局设置</h2>
           <button
             type="button"
             onClick={close}
             aria-label="关闭"
-            className="glass-panel w-7 h-7 rounded-full text-white/80 hover:bg-white/40 flex items-center justify-center"
+            className="w-7 h-7 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center"
           >
             ×
           </button>

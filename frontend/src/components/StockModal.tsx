@@ -73,7 +73,7 @@ export default function StockModal({
         onClick={onClose}
       />
 
-      <div className="glass-panel relative w-full max-w-lg rounded-3xl p-6">
+      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6">
         {/* 关闭按钮 */}
         <button
           type="button"

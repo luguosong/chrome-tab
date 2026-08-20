@@ -116,8 +116,8 @@ export default function GroupOverlay({
 
   return createPortal(
     <div className="fixed inset-0 z-40 flex items-center justify-center">
-      {/* 暗化背景:常态 pointer-events:none(票 08 硬约束) */}
-      <div className="absolute inset-0 bg-black/45 pointer-events-none" />
+      {/* 暗化背景:常态 pointer-events:none(票 08 硬约束);浓度与其余浮层遮罩统一 /50 */}
+      <div className="absolute inset-0 bg-black/50 pointer-events-none" />
       <div
         ref={panelRef}
         role="dialog"

@@ -62,7 +62,7 @@ export default function LocationPicker({
             onClick={() => setOpen(false)}
             className="fixed inset-0 z-30 cursor-default"
           />
-          <div className="absolute left-0 right-0 z-40 mt-1 glass-panel rounded-lg py-1 max-h-56 overflow-y-auto">
+          <div className="absolute left-0 right-0 z-40 mt-1 glass-panel glass-panel-readable rounded-lg py-1 max-h-56 overflow-y-auto">
             {res.isLoading && <div className="px-3 py-1.5 text-xs text-white/50">搜索中…</div>}
             {!res.isLoading && (res.data?.length ?? 0) === 0 && (
               <div className="px-3 py-1.5 text-xs text-white/50">无匹配城市</div>
