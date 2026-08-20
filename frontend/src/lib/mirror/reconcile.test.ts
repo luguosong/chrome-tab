@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { decideReconciliation, tsValue, type MirrorRecord } from './reconcile'
 import type { Config } from '../types'
+import { DEFAULT_LAYOUT_SETTINGS } from '../layoutSettings'
 
 function cfg(): Config {
-  return { pages: [{ id: 1, name: 'P', sortOrder: 0 }], icons: [], layoutSettings: { gridWidth: 1024, gridGap: 8, iconScale: 1 }, updatedAt: '2026-08-12T10:00:00' }
+  return { pages: [{ id: 1, name: 'P', sortOrder: 0 }], icons: [], layoutSettings: { ...DEFAULT_LAYOUT_SETTINGS }, updatedAt: '2026-08-12T10:00:00' }
 }
 function mirror(over: Partial<MirrorRecord> = {}): MirrorRecord {
   return { config: cfg(), updatedAt: '2026-08-12T10:00:00', dirty: false, ...over }

@@ -38,7 +38,7 @@ newtab:
     translate-recent: 5                  # 只译最近 N 版（见 ADR 0005：164K token 约束下的强制截断）
     llm:
       base-url: https://aihubmix.com/v1  # OpenAI 兼容网关
-      model: gpt-5-nano                  # GPT-5 系推理模型，temperature 被网关忽略，确定性靠系统提示
+      model: coding-glm-5.3                  # GPT-5 系推理模型，temperature 被网关忽略，确定性靠系统提示
       api-key: ${AIHUBMIX_API_KEY:}      # 留空则跳过译制、透传英文原文；部署期注入，不入库
   weather:                               # 和风天气（见 ADR-0009）：后端代理，Key/主机走环境变量、不入库
     api-key: ${QWEATHER_API_KEY:}        # 留空则天气图标显示"刷新失败"；部署期注入

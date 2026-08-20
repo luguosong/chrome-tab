@@ -32,7 +32,7 @@ export default function IconGrid({
   onOpenGroup?: (icon: Icon) => void
 }) {
   const { editing } = useEditMode()
-  const { gridWidth, gridGap } = useLayoutSettings()
+  const { gridWidth, gridGap, gridGapY } = useLayoutSettings()
   // 剩余格数角标(spec user story 42):容量取 DEFAULT_PAGE_CAPACITY(与后端最终校验一致),
   // 纯函数 cellsUsed 累加本页图标占用(icons 已由调用方按 pageId 过滤)。
   const remaining = DEFAULT_PAGE_CAPACITY - cellsUsed(icons)
@@ -63,7 +63,10 @@ export default function IconGrid({
     gridTemplateRows: `repeat(${GRID_ROWS}, minmax(0, 1fr))`,
     gridAutoFlow: 'dense',
     maxWidth: gridWidth,
-    gap: gridGap,
+    // 「布局设置」间距拆分:横向(列)= gridGap,favicon 自相似推导只随它(ADR-0014);
+    // 竖向(行)= gridGapY,不参与推导,上限宽(固定画布防溢出)。
+    columnGap: gridGap,
+    rowGap: gridGapY,
   }
 
   return (

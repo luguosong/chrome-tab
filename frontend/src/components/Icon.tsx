@@ -57,6 +57,24 @@ const SIZE_LABEL: Record<IconSize, string> = {
   large: '大',
 }
 
+/**
+ * 图标名称(见 CONTEXT.md「图标名称」):外置块下方的一行文字,iOS 主屏式——
+ * 普通图标与「分组」共用。样式(显隐/字号/颜色)来自「布局设置」,显隐全局生效
+ * (编辑模式同样隐藏,不设特殊分支);shrink-0 保证行高不被压缩。
+ */
+function IconLabel({ name }: { name: string }) {
+  const { labelVisible, labelSize, labelColor } = useLayoutSettings()
+  if (!labelVisible) return null
+  return (
+    <span
+      className="shrink-0 max-w-full truncate text-center"
+      style={{ fontSize: labelSize, color: labelColor }}
+    >
+      {name}
+    </span>
+  )
+}
+
 export default function Icon({
   icon,
   onOpenDetail,
@@ -187,11 +205,7 @@ export default function Icon({
            名称外置下方。点组打开弹层看全部成员 = 票 08。 */
         <>
           <GroupBody icon={icon} favPx={favPx} overlay={overlay} />
-          {name && (
-            <span className="shrink-0 text-xs text-white/90 max-w-full truncate text-center">
-              {name}
-            </span>
-          )}
+          {name && <IconLabel name={name} />}
         </>
       ) : icon.type === 'changelog' ? (
         <ChangelogIconBody icon={icon} />
@@ -210,12 +224,8 @@ export default function Icon({
             </TileFrame>
           )}
 
-          {/* 名称:外置图标下方(iOS 主屏式)。shrink-0 保证行高不被压缩。见 CONTEXT.md「尺寸」。 */}
-          {name && (
-            <span className="shrink-0 text-xs text-white/90 max-w-full truncate text-center">
-              {name}
-            </span>
-          )}
+          {/* 名称:外置图标下方(iOS 主屏式),样式见 IconLabel。 */}
+          {name && <IconLabel name={name} />}
         </>
       )}
 

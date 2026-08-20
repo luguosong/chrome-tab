@@ -1,4 +1,4 @@
-import type { Config } from '../types'
+import type { Config, LayoutSettings } from '../types'
 
 /**
  * 备份文件 schema 版本;结构变更时递增。
@@ -28,7 +28,8 @@ export type WireConfig = {
     sortOrder: number
     data: Record<string, unknown> | null
   }[]
-  layoutSettings: { gridWidth: number; gridGap: number; iconScale: number } | null
+  /** Partial:导出恒为全量(经 withDefaults);导入旧备份可能只有旧三字段,缺项由后端落默认。 */
+  layoutSettings: Partial<LayoutSettings> | null
 }
 
 /** 把前端归一化 Config(小写枚举)转 PUT wire 格式(大写枚举)。导出/推送/导入合并共用。 */

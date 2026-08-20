@@ -7,8 +7,6 @@ import com.personal.newtab.icon.Icon;
 import com.personal.newtab.icon.IconRepository;
 import com.personal.newtab.icon.IconType;
 import com.personal.newtab.icon.Size;
-import com.personal.newtab.layoutsetting.LayoutSetting;
-import com.personal.newtab.layoutsetting.LayoutSettingRepository;
 import com.personal.newtab.layoutsetting.LayoutSettingService;
 import com.personal.newtab.page.Page;
 import com.personal.newtab.page.PageRepository;
@@ -40,7 +38,7 @@ public class ConfigReplaceService {
 
     private final PageRepository pageRepository;
     private final IconRepository iconRepository;
-    private final LayoutSettingRepository layoutSettingRepository;
+    private final LayoutSettingService layoutSettingService;
     private final ConfigVersionService configVersionService;
     private final ConfigAssembler configAssembler;
 
@@ -81,18 +79,10 @@ public class ConfigReplaceService {
             insertIcon(userId, ii, pageIdMap, iconIdMap.get(ii.parentId()));
         }
 
-        // 4. layout 可选:null 则保留现有行
+        // 4. layout 可选:null 则保留现有行(复用 LayoutSettingService 的 upsert:新字段
+        //    null→默认值映射只有这一处,与本服务的整建语义一致)
         if (req.layoutSettings() != null) {
-            LayoutSettingService.LayoutSettingRequest li = req.layoutSettings();
-            LayoutSetting s = layoutSettingRepository.findByUserId(userId).orElseGet(() -> {
-                LayoutSetting n = new LayoutSetting();
-                n.setUserId(userId);
-                return n;
-            });
-            s.setGridWidth(li.gridWidth());
-            s.setGridGap(li.gridGap());
-            s.setIconScale(li.iconScale());
-            layoutSettingRepository.save(s);
+            layoutSettingService.update(userId, req.layoutSettings());
         }
 
         // 5. bump 版本 + 回读聚合返回

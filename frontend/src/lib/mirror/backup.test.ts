@@ -7,6 +7,7 @@ import {
   toWireConfig,
 } from './backup'
 import type { Config } from '../types'
+import { DEFAULT_LAYOUT_SETTINGS } from '../layoutSettings'
 
 function cfg(): Config {
   return {
@@ -14,7 +15,7 @@ function cfg(): Config {
     icons: [
       { id: 7, pageId: 1, parentId: null, type: 'nav', size: 'small', sortOrder: 0, data: { name: 'a', url: 'https://x.com' } },
     ],
-    layoutSettings: { gridWidth: 1024, gridGap: 8, iconScale: 1 },
+    layoutSettings: { ...DEFAULT_LAYOUT_SETTINGS },
     updatedAt: '2026-08-12T10:00:00',
   }
 }
@@ -32,7 +33,7 @@ describe('toWireConfig', () => {
       sortOrder: 0,
       data: { name: 'a', url: 'https://x.com' },
     })
-    expect(w.layoutSettings).toEqual({ gridWidth: 1024, gridGap: 8, iconScale: 1 })
+    expect(w.layoutSettings).toEqual({ ...DEFAULT_LAYOUT_SETTINGS })
   })
 })
 
@@ -101,7 +102,7 @@ describe('mergeBlobs', () => {
       [12, 2, 11],     // 导入成员:parentId 重映射到导入组的新 id
     ])
     // 导入布局被忽略,沿用 current
-    expect(merged.layoutSettings).toEqual({ gridWidth: 1024, gridGap: 8, iconScale: 1 })
+    expect(merged.layoutSettings).toEqual({ ...DEFAULT_LAYOUT_SETTINGS })
   })
   it('成员引用未导入的组 → 跳过该行(照 pageId 先例)', () => {
     const imported = {

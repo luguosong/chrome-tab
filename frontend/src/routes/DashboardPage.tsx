@@ -37,10 +37,12 @@ import GroupOverlay, { isGroupContainerId, parseGroupContainerId } from '../comp
 import StockModal from '../components/StockModal'
 import WeatherModal from '../components/WeatherModal'
 import ChangelogDrawer from '../components/ChangelogDrawer'
-import AddDrawer from '../components/AddDrawer'
-import SettingsDrawer from '../components/SettingsDrawer'
+import ControlDrawer from '../components/ControlDrawer'
 import { get } from '../lib/iconTypeRegistry'
 import type { Config, Icon, IconTypeId, Page } from '../lib/types'
+
+/** 页板底色 RGB(暗色恒定;与 globals.css 的 .dark .page-panel 同源,改色须两处同步)。 */
+const PAGE_PANEL_RGB = '18,18,23'
 
 /**
  * 多尺寸 grid 的碰撞检测自定义 fallback 链(ADR-0003):
@@ -104,11 +106,8 @@ function Dashboard() {
   // openGroup 派生为 null → 弹层随组行卸载。开关判定在 onDragEnd(见 handleDragEnd)。
   const [openGroupId, setOpenGroupId] = useState<number | null>(null)
 
-  // 新增抽屉开关(issue 09):右上角 "+" 唤起,与编辑模式职责分离。
-  const [addDrawerOpen, setAddDrawerOpen] = useState(false)
-
-  // 布局设置抽屉开关:右上角 ⚙ 唤起,三项显示几何随账号持久化、跨设备共享。
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  // 控制抽屉开关(issue 09):右上角 ⚙ 唤起,tab 切换「新增 / 布局」,与编辑模式职责分离。
+  const [controlOpen, setControlOpen] = useState(false)
 
   // 当前激活页索引:Carousel 滚动停稳后向上通知,用于新增抽屉把新图标落到"当前页"。
   const [activeIndex, setActiveIndex] = useState(0)
@@ -168,11 +167,11 @@ function Dashboard() {
     }
   }
 
-  // 编辑态进入时关闭已开的详情与新增抽屉,避免编辑/详情/新增态并存(spec user story 29)。
+  // 编辑态进入时关闭已开的详情与控制抽屉,避免编辑/详情/新增态并存(spec user story 29)。
   useEffect(() => {
     if (editing) {
       setDetail(null)
-      setAddDrawerOpen(false)
+      setControlOpen(false)
       clearLongPress()
     }
   }, [editing])
@@ -489,35 +488,39 @@ function Dashboard() {
 
       {/* 整体半透明面板(简约大气风格):铺满整个视口、100% 遮蔽、四边零留白,
           统一承载搜索框 + 走马灯 + 页签。用 page-panel(轻模糊+轻着色)而非 glass-panel,
-          既能看清壁纸、又压住亮度保证图标可读;overflow-hidden 裁住内部滚动;无圆角避免边角露白。 */}
+          既能看清壁纸、又压住亮度保证图标可读;overflow-hidden 裁住内部滚动;无圆角避免边角露白。
+          「布局设置」·雾化(panelFog)经 inline backgroundColor 覆盖 .dark .page-panel 的
+          底色 alpha(RGB 取 PAGE_PANEL_RGB,与 globals.css 的 .dark .page-panel 同源,
+          改色须两处同步);blur 8px 属定稿,不随设置。 */}
       <LayoutSettingsProvider value={layout}>
-      <main className="relative z-10 flex-1 min-h-0 flex flex-col page-panel overflow-hidden">
+      <main
+        className="relative z-10 flex-1 min-h-0 flex flex-col page-panel overflow-hidden"
+        style={{ backgroundColor: `rgba(${PAGE_PANEL_RGB},${layout.panelFog / 100})` }}
+      >
         {/* 顶部常驻(issue 11):时钟(iOS 锁屏式大字裸排)居左 + 右上胶囊 L2 折射壳,
             下接搜索框 —— 顶行布局按原型 prototype/liquid-glass @3f10ddf 定稿。
-            pt-8:与编辑模式提示条(顶部 ~32px)不叠。 */}
+            pt-8:与编辑模式提示条(顶部 ~32px)不叠。时钟隐藏(clockVisible)时行内只剩
+            右上胶囊,justify 切 end 保持其靠右原位。 */}
         <div className="px-4 pt-8 pb-4">
-          <div className="flex items-start justify-between gap-4">
-            <Clock />
+          <div
+            className={
+              layout.clockVisible
+                ? 'flex items-start justify-between gap-4'
+                : 'flex items-start justify-end gap-4'
+            }
+          >
+            {layout.clockVisible && <Clock />}
             {/* 右上控件:归组进 L2 胶囊,统一视觉权重(+/⚙/用户名/登出),hover 轻晕 */}
             <LensBox
               radius={22}
               className="shrink-0 rounded-full flex items-center gap-0.5 pl-1 pr-1 py-1"
             >
-              {/* 新增图标入口(issue 09):与编辑模式分离,点开侧抽屉选类型即填即加 */}
+              {/* 控制抽屉入口(issue 09):右上角 ⚙ 唤起统一抽屉,tab 切换「新增 / 布局」 */}
               <button
                 type="button"
-                onClick={() => setAddDrawerOpen(true)}
-                aria-label="新增图标"
-                className="w-8 h-8 rounded-full text-white/90 hover:bg-white/25 flex items-center justify-center text-lg leading-none transition"
-              >
-                +
-              </button>
-              {/* 布局设置入口:整体宽度 / 图标间距 / 图标缩放 */}
-              <button
-                type="button"
-                onClick={() => setSettingsOpen(true)}
-                aria-label="布局设置"
-                title="布局设置"
+                onClick={() => setControlOpen(true)}
+                aria-label="新增与设置"
+                title="新增与设置"
                 className="w-8 h-8 rounded-full text-white/90 hover:bg-white/25 flex items-center justify-center text-base leading-none transition"
               >
                 ⚙
@@ -532,9 +535,12 @@ function Dashboard() {
               </button>
             </LensBox>
           </div>
-          <div className="mt-4 w-full max-w-xl mx-auto">
-            <SearchBox />
-          </div>
+          {/* 搜索栏:宽度(searchBarWidth)= max-width、居中;显隐(searchBarVisible)整行卸载。 */}
+          {layout.searchBarVisible && (
+            <div className="mt-4 w-full mx-auto" style={{ maxWidth: layout.searchBarWidth }}>
+              <SearchBox />
+            </div>
+          )}
         </div>
 
         {/* 走马灯:从 useConfig().pages 动态渲染,每页一个 IconGrid。
@@ -618,20 +624,16 @@ function Dashboard() {
         </div>
       )}
 
-      {/* 新增抽屉(issue 09):fixed 侧抽屉,新图标落到当前激活页末尾。
-          existingTypeIds 用于单例置灰;pageId 取当前激活页(无页则禁用提交)。 */}
-      {addDrawerOpen && (
-        <AddDrawer
+      {/* 控制抽屉(issue 09 + 布局设置):fixed 侧抽屉,tab 切换「新增 / 布局」。
+          新增 tab:新图标落到当前激活页末尾,existingTypeIds 用于单例置灰;
+          布局 tab:五组显示设置随账号持久化、跨设备共享(draft/预览/PUT 在抽屉内)。 */}
+      {controlOpen && (
+        <ControlDrawer
           pageId={activePageId}
           existingTypeIds={existingTypeIds}
-          onClose={() => setAddDrawerOpen(false)}
+          layout={layout}
+          onClose={() => setControlOpen(false)}
         />
-      )}
-
-      {/* 布局设置抽屉(见 CONTEXT.md「布局设置」):三项显示几何随账号持久化、跨设备共享。
-          layout 由聚合接口得出(叠加抽屉内乐观预览);抽屉自管 draft/预览/PUT。 */}
-      {settingsOpen && (
-        <SettingsDrawer layout={layout} onClose={() => setSettingsOpen(false)} />
       )}
     </div>
   )

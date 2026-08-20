@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { useCreateIcon } from '../api/config'
 import { ApiError } from '../api/client'
 import { canAdd, listTypes, type IconTypeDefinition } from '../lib/iconTypeRegistry'
@@ -8,72 +8,34 @@ import type { WeatherLocation } from '../lib/weather'
 import type { IconTypeId } from '../lib/types'
 
 /**
- * 新增抽屉(见 CONTEXT.md「新增抽屉」/ issue 09)。
+ * 新增面板(见 CONTEXT.md「新增抽屉」/ issue 09):ControlDrawer 的「新增」tab 内容。
  *
- * 由 DashboardPage 右上角 "+" 唤起的侧抽屉,与编辑模式职责分离——选类型填表单即填即加到
- * 当前页末尾。类型卡片按基础/扩展分区(从注册表 listTypes 读取),每张内嵌该类型 `editor`
- * 声明的配置表单。单例类型已存在时置灰(注册表 canAdd 判断)。提交调 useCreateIcon →
- * POST /api/icons,react-query 失效后即时出现;抽屉保持打开以连续添加。
- *
- * 容器:fixed 右侧、从右滑入(animate-slide-in-right)、玻璃面板、关闭按钮;Esc / 遮罩关闭。
+ * 与编辑模式职责分离——选类型填表单即填即加到当前页末尾。类型卡片按基础/扩展分区
+ * (从注册表 listTypes 读取),每张内嵌该类型 `editor` 声明的配置表单。单例类型已存在时
+ * 置灰(注册表 canAdd 判断)。提交调 useCreateIcon → POST /api/icons,react-query 失效后
+ * 即时出现;抽屉保持打开以连续添加。壳(遮罩/Esc/顶栏)由 ControlDrawer 统一持有。
  */
-export default function AddDrawer({
+export function AddPane({
   pageId,
   existingTypeIds,
-  onClose,
 }: {
   /** 当前激活页 id——新图标落到此页末尾。undefined 时禁用提交(无页可加)。 */
   pageId: number | undefined
   /** 当前用户全部图标出现的类型集合——用于单例置灰判断(单例=全局唯一,跨页)。 */
   existingTypeIds: IconTypeId[]
-  onClose: () => void
 }) {
   const types = useMemo(() => listTypes(), [])
   const base = types.filter((t) => t.kind === 'base')
   const ext = types.filter((t) => t.kind === 'extension')
 
-  // Esc 关闭
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   return (
-    <div
-      className="fixed inset-0 z-[60] flex justify-end"
-      role="dialog"
-      aria-modal="true"
-      aria-label="新增图标"
-    >
-      {/* 遮罩:点击关闭 */}
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-
-      <aside className="glass-panel glass-panel-readable relative h-full w-full max-w-sm animate-slide-in-right overflow-y-auto">
-        {/* 顶栏:标题 + 关闭 */}
-        <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3 border-b border-white/20 bg-[inherit]">
-          <h2 className="text-sm uppercase tracking-wider text-white/80">新增图标</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="关闭"
-            className="w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center"
-          >
-            ×
-          </button>
-        </div>
-
-        <div className="px-5 py-4 space-y-6">
-          {pageId === undefined && (
-            <div className="text-sm text-white/60">无可用页面。</div>
-          )}
-          <TypeSection title="基础" defs={base} pageId={pageId} existingTypeIds={existingTypeIds} />
-          <TypeSection title="扩展" defs={ext} pageId={pageId} existingTypeIds={existingTypeIds} />
-        </div>
-      </aside>
-    </div>
+    <>
+      {pageId === undefined && (
+        <div className="text-sm text-white/60">无可用页面。</div>
+      )}
+      <TypeSection title="基础" defs={base} pageId={pageId} existingTypeIds={existingTypeIds} />
+      <TypeSection title="扩展" defs={ext} pageId={pageId} existingTypeIds={existingTypeIds} />
+    </>
   )
 }
 

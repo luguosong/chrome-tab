@@ -1,11 +1,22 @@
 import { useState, type FormEvent } from 'react'
 import { LensBox } from './LensBox'
+import { useLayoutSettings } from '../context/LayoutSettingsContext'
+import type { SearchEngineId } from '../lib/types'
 
-/** 搜索 / URL 跳转：像 URL 则直跳（补 https://），否则 Google 搜索。
+/** 非 URL 查询的引擎跳转模板(「布局设置」·默认搜索引擎;id 与后端白名单一致)。 */
+const ENGINES: Record<SearchEngineId, string> = {
+  google: 'https://www.google.com/search?q=',
+  bing: 'https://www.bing.com/search?q=',
+  baidu: 'https://www.baidu.com/s?wd=',
+}
+
+/** 搜索 / URL 跳转：像 URL 则直跳（补 https://），否则按「布局设置」的默认搜索引擎搜索。
  *  L2 折射壳(ADR-0012):近透明底靠背景遮罩保证对比。focus 反馈用 outline ——
  *  .lens-panel 的 background/border 是 unlayered CSS,恒胜 Tailwind 的 layered
- *  utilities,只有 outline(独立属性域)能在容器上生效。 */
+ *  utilities,只有 outline(独立属性域)能在容器上生效。宽度/显隐由 DashboardPage 按
+ *  布局设置控制,本组件只管内容。 */
 export default function SearchBox() {
+  const { searchEngine } = useLayoutSettings()
   const [q, setQ] = useState('')
   function go(e: FormEvent) {
     e.preventDefault()
@@ -14,7 +25,7 @@ export default function SearchBox() {
     const isUrl = /^https?:\/\//i.test(v) || /^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(v)
     location.href = isUrl
       ? v.startsWith('http') ? v : `https://${v}`
-      : `https://www.google.com/search?q=${encodeURIComponent(v)}`
+      : ENGINES[searchEngine] + encodeURIComponent(v)
   }
   return (
     <form onSubmit={go}>
