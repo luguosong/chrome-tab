@@ -53,8 +53,8 @@ code {
 /* 图标层 soft 档(ADR-0012):坐 L0 页板上的图标/小组件底板——比 L1 regular 轻、
    视觉后退,拉开 glass-on-glass 层级(方向 C 裁决)。参数取原型定稿(blur 6 /
    saturate 150% / 亮 white·16% / 暗 white·10%)+ 顶部内高光与底部反内光给玻璃厚度。
-   nav squircle / widget 卡 / 分组文件夹共用本档,圆角由使用处自行声明
-   (squircle 24% / 文件夹 30% / 小组件 rounded-3xl)。 */
+   widget 卡 / 分组文件夹共用本档(ADR-0013 后 nav 裸 favicon 不再用),
+   圆角由使用处自行声明(文件夹 30% / 小组件 rounded-3xl)。 */
 .glass-soft {
   background: rgba(255, 255, 255, 0.16);
   backdrop-filter: blur(6px) saturate(150%);

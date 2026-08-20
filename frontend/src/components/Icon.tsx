@@ -21,8 +21,8 @@ import { ApiError } from '../api/client'
  * 单个图标渲染(见 CONTEXT.md「图标」/ spec §前端架构 IconGrid / ADR-0012 图标层换肤)。
  *
  * 视觉按类型分派:
- *   - nav:app 图标式 —— soft 档玻璃 squircle 底板(rounded 24%)包居中 favicon,
- *     名称外置底板下方(iOS 主屏式),三档仅尺寸不同
+ *   - nav:裸 favicon 直出、无底板(ADR-0013),名称外置图标下方(iOS 主屏式),
+ *     hover/active 轻缩放作反馈,三档仅尺寸不同
  *   - stock / weather / changelog:专属小组件 body(StockIcon / WeatherIcon / ChangelogIcon,
  *     各自按尺寸分档信息密度),外壳统一 soft 档玻璃卡容器
  *
@@ -41,7 +41,7 @@ import { ApiError } from '../api/client'
  * 编辑模式角标(EditActions)的交互按钮 onPointerDown stopPropagation,避免点角标误启拖拽。
  */
 /** 各档基础像素(=改造前 Tailwind p-2/w-8… 的 px 值);乘以 iconScale 得实际尺寸。
- *  fav = favicon 理想边长;nav/group 底板边长以 fav×1.5 为上限、按画格剩余高度自适应。 */
+ *  fav = favicon 理想边长(nav 裸图标即此边长);group 底板边长以 fav×1.5 为上限、按画格剩余高度自适应。 */
 const SIZE_BASE_PX: Record<IconSize, { pad: number; fav: number }> = {
   small: { pad: 8, fav: 32 },
   medium: { pad: 12, fav: 40 },
@@ -111,7 +111,7 @@ export default function Icon({
   const style: CSSProperties = {
     gridColumn: `span ${span.cols}`,
     gridRow: `span ${span.rows}`,
-    // padding 只给小组件卡;nav/group 的名称在底板外(iOS 主屏式),底板自吃画格剩余高度,
+    // padding 只给小组件卡;nav/group 的名称在图标区外(iOS 主屏式),图标区自吃画格剩余高度,
     // 再叠 padding 会挤爆 small 画格(flex 压缩把名称行高压没 → 文字被遮挡,实测复现)。
     padding: isWidget ? padPx : 0,
     // 拖拽变换仅作用于网格内本体(06);overlay 幽灵由 DragOverlay 负责定位,不重复套 transform。
@@ -162,7 +162,7 @@ export default function Icon({
         // medium/large 起 iOS 小组件大圆角,小卡沿用 2xl;body 左对齐铺满。
         (isWidget
           ? `glass-soft items-stretch justify-center gap-1 text-left ${icon.size === 'small' ? 'rounded-2xl' : 'rounded-3xl'} `
-          : // nav/group:无标签背景,底板自承玻璃(下方渲染处),名称贴底板下方
+          : // nav/group:无标签背景;group 底板自承玻璃(下方渲染处),nav 裸 favicon,名称贴图标下方
             'items-center justify-center gap-1 rounded-2xl ') +
         (interactive ? 'cursor-pointer' : 'cursor-default') +
         // 合并手势达标放大(dwell):目标非被拖项、无 dnd transform 冲突;transition 已有
@@ -191,34 +191,32 @@ export default function Icon({
         <ChangelogIconBody icon={icon} />
       ) : (
         <>
-          {/* nav:app 图标式 squircle 玻璃底板(soft 档、圆角 24% ≈ iOS 连续曲率)包居中 favicon。
-              网格内:底板吃画格剩余高度(aspect-square 正方形,fav×1.5 为上限)——small 画格
-              仅 ~70px,固定 fav×1.5(72px)+名称必超预算,flex 压缩会把名称行高压没(文字被遮挡)。
-              overlay 幽灵:DragOverlay 无画格约束(shrink-wrap),flex-1 会塌,退回固定边长。
-              favicon 理想 favPx、随底板 max 约束自适应缩。 */}
+          {/* nav:裸 favicon 直出、无底板(ADR-0013,对 ADR-0012 方向 C 的有限反转——
+              图标坐 L0 页板雾化层,可读性前提已变)。网格内:吃画格剩余高度(flex-1
+              aspect-square、favPx 为上限)防 small 画格 + 大 iconScale 溢出;overlay 幽灵
+              无画格约束(shrink-wrap),flex-1 会塌,退回固定 favPx。hover/active 轻缩放 =
+              替代原 glass-soft hover 提亮(接续 dwell scale-[1.15] 缩放语言),只缩图标不动名称。 */}
           {favicon && (
-            <span
-              className={
-                'glass-soft rounded-[24%] flex items-center justify-center ' +
-                (!overlay ? 'flex-1 min-h-0 aspect-square' : '')
-              }
+            <img
+              src={favicon}
+              alt=""
               style={
                 overlay
-                  ? { width: favPx * 1.5, height: favPx * 1.5 }
-                  : { maxWidth: favPx * 1.5, maxHeight: favPx * 1.5 }
+                  ? { width: favPx, height: favPx }
+                  : { maxWidth: favPx, maxHeight: favPx }
               }
-            >
-              <img
-                src={favicon}
-                alt=""
-                style={{ width: favPx, height: favPx }}
-                className="rounded-[22%] max-w-full max-h-full"
-                referrerPolicy="no-referrer"
-              />
-            </span>
+              className={
+                'rounded-[22%] ' +
+                // 缩放反馈仅网格态:overlay 幽灵恒处光标下方,:hover 会恒命中致幽灵尺寸失控
+                (!overlay
+                  ? 'flex-1 min-h-0 aspect-square transition-transform hover:scale-110 active:scale-95'
+                  : '')
+              }
+              referrerPolicy="no-referrer"
+            />
           )}
 
-          {/* 名称:外置底板下方(iOS 主屏式)。shrink-0 保证行高不被压缩。见 CONTEXT.md「尺寸」。 */}
+          {/* 名称:外置图标下方(iOS 主屏式)。shrink-0 保证行高不被压缩。见 CONTEXT.md「尺寸」。 */}
           {name && (
             <span className="shrink-0 text-xs text-white/90 max-w-full truncate text-center">
               {name}
@@ -263,8 +261,8 @@ export default function Icon({
 /**
  * 分组图标内容(ADR-0011):iOS 文件夹式玻璃容器内按组内序取**前 9 个**成员的 favicon
  * 作 3×3 迷你预览(不足 9 格留空,与 iOS 文件夹一致);成员从聚合缓存按 parentId 派生
- * (groupMembers)。材质 = soft 档玻璃 + 圆角 30%(ADR-0012 分组定稿,比 nav squircle
- * 24% 更钝);容器为吃画格剩余高度的正方形(fav×1.5 上限),与 nav squircle 尺寸策略一致。
+ * (groupMembers)。材质 = soft 档玻璃 + 圆角 30%(ADR-0012 分组定稿;ADR-0013 后
+ * 图标层唯一底板);容器为吃画格剩余高度的正方形(fav×1.5 上限)。
  * 在组件内(而非 Icon 主体)调 useConfig:仅 group 类型挂载时才订阅,['config'] 命中缓存
  * 无网络开销;overlay 拖拽幽灵同路径渲染(React 上下文随 React 树,不随 DOM)。
  */
@@ -286,7 +284,7 @@ function GroupBody({
     <div
       className={
         'glass-soft grid grid-cols-3 place-items-center gap-[6%] rounded-[30%] p-[10%] ' +
-        // 同 nav squircle:网格内吃画格剩余高度的正方形(fav×1.5 上限);overlay 固定边长
+        // 网格内吃画格剩余高度的正方形(fav×1.5 上限);overlay 固定边长
         (!overlay ? 'flex-1 min-h-0 aspect-square' : '')
       }
       style={
