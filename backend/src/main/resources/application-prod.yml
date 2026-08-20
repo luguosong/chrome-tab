@@ -1,10 +1,11 @@
 # 生产 profile：容器内 8080、cookie secure（HTTPS）、datasource 走容器网络。
+# COOKIE_SECURE：域名 + HTTPS 部署保持默认 true；裸 IP（HTTP）部署须传 false，否则浏览器丢弃会话 Cookie。
 server:
   port: 8080
   servlet:
     session:
       cookie:
-        secure: true
+        secure: ${COOKIE_SECURE:true}
 
 spring:
   datasource:

@@ -21,12 +21,20 @@ export default function ChangelogIconBody({ icon: _icon }: { icon: Icon }) {
   const versions = changelog?.slice(0, 3) ?? null
 
   return (
-    <div className="w-full flex flex-col gap-1.5">
+    // max-h-full overflow-hidden:兜底裁切——断点覆盖不到的极端组合(最小视口 + iconScale 1.5,
+    // 连 1 版都装不下)宁可裁也不穿出背景框。正常断点内不会触发。
+    <div className="w-full max-h-full overflow-hidden flex flex-col gap-1.5">
       <div className="uppercase tracking-wider text-white/60 truncate" style={{ fontSize: px(10) }}>
         {get('changelog')?.label ?? '更新日志'}
       </div>
       {versions ? (
-        versions.map((v, i) => <VersionRow key={i} v={v} px={px} />)
+        versions.map((v, i) => (
+          // cl-drop-*:画格高度不足时按容器查询逐级隐藏末位版本行(规则见 globals.css;
+          // 查询容器 = Icon.tsx 小组件外壳的 [container-type:size])
+          <div key={i} className={i === 2 ? 'cl-drop-3' : i === 1 ? 'cl-drop-2' : ''}>
+            <VersionRow v={v} px={px} />
+          </div>
+        ))
       ) : (
         // 加载中/失败降级:占位行(与旧摘要行 "--" 降级语义一致)
         <span className="font-mono text-white/40" style={{ fontSize: px(12) }}>
@@ -49,7 +57,7 @@ function VersionRow({ v, px }: { v: ChangelogVersion; px: (n: number) => number 
       />
       {first && (
         <div
-          className="text-white/75 truncate"
+          className="text-white/75 truncate cl-drop-1"
           style={{ fontSize: px(11) }}
           dangerouslySetInnerHTML={{ __html: inline(first) }}
         />

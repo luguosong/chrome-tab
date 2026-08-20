@@ -128,6 +128,7 @@ code {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 .dark .page-panel {
+  /* RGB 与 DashboardPage 的 PAGE_PANEL_RGB 同源(布局设置·雾化只改 alpha,inline 覆盖此处) */
   background: rgba(18, 18, 23, 0.36);
 }
 
@@ -189,5 +190,25 @@ code {
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+/* 更新日志图标:画格高度(content-box)不足时逐级减信息密度(修「文字穿出背景框」)。
+   查询容器 = Icon.tsx 小组件外壳 [container-type:size];断点按 content-box 高度
+   (不含外壳 padding),Playwright 实测校准:3 版需 139px、2 版需 97px、仅版本号需 48px。 */
+@container (max-height: 140px) {
+  .cl-drop-3 {
+    display: none;
+  }
+}
+@container (max-height: 99px) {
+  .cl-drop-2 {
+    display: none;
+  }
+}
+/* 极端组合(最小视口 + iconScale 1.5):连单版两行都装不下,隐首条只留版本号 */
+@container (max-height: 55px) {
+  .cl-drop-1 {
+    display: none;
   }
 }

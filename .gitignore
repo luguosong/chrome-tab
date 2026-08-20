@@ -14,6 +14,19 @@ target/
 .idea/
 .vscode/
 *.iml
+.classpath
+.factorypath
+.project
+.settings/
+
+# 本地构建/工具残留(vite 缓存、损坏的 node_modules 副本、增量构建信息、根 node_modules 空文件)
+.vite/
+node_modules
+node_modules.root-broken/
+*.tsbuildinfo
 
 # agent tooling (ZCode CLI 本地会话/计划状态)
 .zcode/
+
+# Claude Code 本地会话配置与 skill（仅本地，不入库）
+.claude/

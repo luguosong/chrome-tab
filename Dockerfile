@@ -2,12 +2,16 @@
 # build context 为项目根（compose 指定 dockerfile: Dockerfile）。
 # 第一阶段 node 构建前端，第二阶段 caddy 托管 dist 并反代后端。
 
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
-COPY frontend/package*.json ./
-RUN npm ci
+ENV CI=true
+RUN corepack enable
+# pnpm-workspace.yaml 必须先进来：内含 esbuild 构建脚本审批（allowBuilds），
+# frozen-lockfile 下缺它 pnpm 会以 ERR_PNPM_IGNORED_BUILDS 拒绝安装。
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
 COPY frontend/ ./
-RUN npm run build
+RUN pnpm run build
 
 FROM caddy:2-alpine
 COPY Caddyfile /etc/caddy/Caddyfile
