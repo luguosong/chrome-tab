@@ -4,7 +4,6 @@ import com.personal.newtab.configversion.ConfigVersionService;
 import com.personal.newtab.icon.Icon;
 import com.personal.newtab.icon.IconRepository;
 import com.personal.newtab.icon.IconType;
-import com.personal.newtab.icon.Size;
 import com.personal.newtab.page.Page;
 import com.personal.newtab.page.PageRepository;
 import com.personal.newtab.user.User;
@@ -28,8 +27,8 @@ import java.util.Map;
  * 首启建管理员 + 业务默认数据（默认页 / 默认图标）。每张表按自身 count==0 判断，互不依赖、可断点续 seed。
  *
  * <p>03 ticket 起：旧的 nav_links/stock_watches 已删除，默认数据直接以 Icon 模型 seed
- * （3 个默认页 + 12 nav small + 1 changelog large + 13 stock medium）。容量 8×8=64 格下
- * 13 只 medium(52 格) 单页可容纳，不再溢出；超 16 只时仍会溢出到"行情(续)"页（见 seedStocks 逻辑）。
+ * （3 个默认页 + 12 nav + 1 changelog + 13 stock，图标一律 1 格，ADR-0016）。容量 8×8=64 格下
+ * 13 只股票单页可容纳；超 64 只时溢出到"行情(续)"页（见 seedStocks 逻辑）。
  * seed 完成后给 config_version 一个初始时间戳(ADR-0006),使种子数据对前端镜像可比、首拉即确定版本。</p>
  */
 @Slf4j
@@ -116,20 +115,20 @@ public class DataBootstrap {
         Page stockPage = pageRepository.save(makePage(uid, PAGE_STOCK, 2));
         List<Page> pages = new ArrayList<>(List.of(navPage, changelogPage, stockPage));
 
-        // 2. nav → icons(small)
+        // 2. nav → icons
         int so = 0;
         for (Map.Entry<String, String> n : DEFAULT_NAV) {
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("name", n.getKey());
             data.put("url", n.getValue());
-            iconRepository.save(makeIcon(uid, navPage.getId(), IconType.NAV, Size.SMALL, so++, data));
+            iconRepository.save(makeIcon(uid, navPage.getId(), IconType.NAV, so++, data));
         }
 
-        // 3. changelog → 1 个 large 单例 icon
-        iconRepository.save(makeIcon(uid, changelogPage.getId(), IconType.CHANGELOG, Size.LARGE, 0, null));
+        // 3. changelog → 1 个单例 icon
+        iconRepository.save(makeIcon(uid, changelogPage.getId(), IconType.CHANGELOG, 0, null));
 
-        // 4. stocks → icons(medium)，超容量溢出到追加页
-        int perPage = DEFAULT_CAPACITY_CELLS / Size.MEDIUM.cells();   // 64 / 4 = 16
+        // 4. stocks → icons(每图标 1 格,ADR-0016)，超容量溢出到追加页
+        int perPage = DEFAULT_CAPACITY_CELLS;   // 64
         Page current = stockPage;
         int currentIdx = 0;
         int pageOrder = 3;
@@ -144,7 +143,7 @@ public class DataBootstrap {
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("symbol", s[0]);
             data.put("name", s[1]);
-            iconRepository.save(makeIcon(uid, current.getId(), IconType.STOCK, Size.MEDIUM, so++, data));
+            iconRepository.save(makeIcon(uid, current.getId(), IconType.STOCK, so++, data));
             currentIdx++;
         }
         // 种子数据落一个初始 config_version 时间戳:首拉即有确定版本,前端镜像可比(ADR-0006)。
@@ -161,12 +160,11 @@ public class DataBootstrap {
         return p;
     }
 
-    private Icon makeIcon(Long userId, Long pageId, IconType type, Size size, int sortOrder, Map<String, Object> data) {
+    private Icon makeIcon(Long userId, Long pageId, IconType type, int sortOrder, Map<String, Object> data) {
         Icon i = new Icon();
         i.setUserId(userId);
         i.setPageId(pageId);
         i.setType(type);
-        i.setSize(size);
         i.setSortOrder(sortOrder);
         i.setData(data);
         return i;

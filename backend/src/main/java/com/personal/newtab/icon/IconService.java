@@ -20,9 +20,9 @@ import java.util.Set;
 /**
  * Icon 写操作的业务层（见 issue 04）。承载核心约束：
  * <ul>
- *   <li>页面容量（ADR-0002）：目标页 {@code sum(size.cells)} + 新增格子 &gt; {@link DataBootstrap#DEFAULT_CAPACITY_CELLS}
- *       → 409，message 带剩余格数。分组（ADR-0011）修订：只计页面<b>顶层</b>行（组行按其
- *       {@code size=SMALL} 占 1 格），组内成员不计容量、自身 size 保留，移出时按保留 size 计入。</li>
+ *   <li>页面容量（ADR-0002，ADR-0016 单档化）：每图标恒占 1 格，目标页顶层行数 + 新增 &gt;
+ *       {@link DataBootstrap#DEFAULT_CAPACITY_CELLS} → 409，message 带剩余格数。分组（ADR-0011）：
+ *       只计页面<b>顶层</b>行，组内成员不计容量，移出时开始占格。</li>
  *   <li>单例类型（CONTEXT.md）：{@link IconType#isSingleton()} 且该 user 已有实例 → 409。</li>
  *   <li>分组（ADR-0011）：组行只能经 {@link #merge} 创建；<b>空组不存活</b>——任何路径使组变空
  *       都在事务内自动删组行；含成员的组行 DELETE → 409「先解散」。</li>
@@ -57,8 +57,8 @@ public class IconService {
             throw new OperationConflictException(409, "该类型图标已存在，且为单例类型");
         }
 
-        // 3. 容量校验（只计顶层行；新图标总在顶层）
-        requireCapacity(userId, page.getId(), req.size().cells(), "页面");
+        // 3. 容量校验（只计顶层行；新图标总在顶层，占 1 格）
+        requireCapacity(userId, page.getId(), 1, "页面");
 
         // 4. 末尾追加（sortOrder = max + 1）
         List<Icon> siblings = topLevel(userId, page.getId());
@@ -68,7 +68,6 @@ public class IconService {
         icon.setUserId(userId);
         icon.setPageId(page.getId());
         icon.setType(req.type());
-        icon.setSize(req.size());
         icon.setSortOrder(nextOrder);
         icon.setData(req.data());
         Icon saved = iconRepository.save(icon);
@@ -81,18 +80,6 @@ public class IconService {
         Icon icon = iconRepository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new OperationConflictException(404, "图标不存在"));
 
-        // 改 size 时重新校验容量（差值 > 0 才需校验：缩小不触发）
-        if (req.size() != null && req.size() != icon.getSize()) {
-            if (icon.getType() == IconType.GROUP) {
-                throw new OperationConflictException(409, "分组不可更改尺寸");
-            }
-            int delta = req.size().cells() - icon.getSize().cells();
-            // 组内成员不占页面容量：免校验（移出分组时才按保留 size 计入）
-            if (icon.getParentId() == null && delta > 0) {
-                requireCapacity(userId, icon.getPageId(), delta, "页面");
-            }
-            icon.setSize(req.size());
-        }
         // data 仅在提供时覆盖（部分更新；null 表示不动）
         if (req.data() != null) {
             icon.setData(req.data());
@@ -218,11 +205,11 @@ public class IconService {
         Page target = requirePage(userId, req.toPageId());
         boolean wasInGroup = icon.getParentId() != null;
         boolean crossPage = !icon.getPageId().equals(target.getId());
-        // 同页顶层纯重排不校验容量（占用不变）；跨页、或从组内移出（保留 size 开始占格）才校验
+        // 同页顶层纯重排不校验容量（占用不变）；跨页、或从组内移出（开始占格）才校验
         if (crossPage || wasInGroup) {
-            int needed = icon.getSize().cells();
+            int needed = 1;
             if (wasInGroup && !crossPage) {
-                // 同页移出且源组因此变空：组行让出 1 格，净占 size-1（对齐 dissolve 的 -1）
+                // 同页移出且源组因此变空：组行让出 1 格，净占 0（对齐 dissolve 的 -1）
                 List<Icon> siblings = iconRepository.findByUserIdAndParentIdOrderBySortOrderAscIdAsc(
                         userId, icon.getParentId());
                 if (siblings.size() == 1) needed -= 1;
@@ -284,7 +271,6 @@ public class IconService {
         group.setUserId(userId);
         group.setPageId(page.getId());
         group.setType(IconType.GROUP);
-        group.setSize(Size.SMALL);
         group.setSortOrder(0);
         group.setData(Map.of("name", "新建分组"));
         group = iconRepository.save(group);
@@ -313,7 +299,7 @@ public class IconService {
     }
 
     /**
-     * 解散分组：成员按各自保留 size 自组行 sort_order 位置起、按组内序洒回本页顶层。
+     * 解散分组：成员自组行 sort_order 位置起、按组内序洒回本页顶层（各占 1 格）。
      * 容量不足 409（message 提示先移出部分图标）；组行删除。
      */
     @Transactional
@@ -324,9 +310,8 @@ public class IconService {
             throw new OperationConflictException(409, "该图标不是分组");
         }
         List<Icon> members = iconRepository.findByUserIdAndParentIdOrderBySortOrderAscIdAsc(userId, group.getId());
-        int memberCells = members.stream().mapToInt(m -> m.getSize().cells()).sum();
-        // 组行自身让出 1 格；成员按保留 size 落回顶层
-        if (cellsUsed(userId, group.getPageId()) - 1 + memberCells > DataBootstrap.DEFAULT_CAPACITY_CELLS) {
+        // 组行自身让出 1 格；成员落回顶层各占 1 格
+        if (cellsUsed(userId, group.getPageId()) - 1 + members.size() > DataBootstrap.DEFAULT_CAPACITY_CELLS) {
             throw new OperationConflictException(409, "页面容量不足，请先移出部分图标后再解散");
         }
 
@@ -378,10 +363,9 @@ public class IconService {
         return iconRepository.findByUserIdAndPageIdAndParentIdIsNullOrderBySortOrderAscIdAsc(userId, pageId);
     }
 
-    /** 该页已占用格子之和（只计顶层行；组内成员不计，ADR-0011）。 */
+    /** 该页已占用格子数 = 顶层行数（每图标 1 格；组内成员不计，ADR-0011/0016）。 */
     private int cellsUsed(Long userId, Long pageId) {
-        return topLevel(userId, pageId).stream()
-                .mapToInt(i -> i.getSize().cells()).sum();
+        return topLevel(userId, pageId).size();
     }
 
     /**
@@ -412,12 +396,11 @@ public class IconService {
     public record CreateRequest(
             @NotNull Long pageId,
             @NotNull IconType type,
-            @NotNull Size size,
             Map<String, Object> data) {
     }
 
-    /** Icon 部分更新请求；size/data 均可为 null（表示不改）。 */
-    public record UpdateRequest(Size size, Map<String, Object> data) {
+    /** Icon 部分更新请求；data 可为 null（表示不改）。 */
+    public record UpdateRequest(Map<String, Object> data) {
     }
 
     /** Icon 移动/重排请求。toIndex 为目标页内目标位序；parentId 可空——null=落页面序列、非空=目标组行。 */

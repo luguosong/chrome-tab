@@ -43,15 +43,15 @@ class ConfigControllerTest {
                 .andExpect(jsonPath("$.pages").isArray())
                 .andExpect(jsonPath("$.icons").isArray())
                 .andExpect(jsonPath("$.setting").doesNotExist())
-                // 8×8=64 容量下 13 只 medium(52 格) 单页可容纳 → 共 3 页
+                // 8×8=64 容量下 13 只股票单页可容纳 → 共 3 页
                 .andExpect(jsonPath("$.pages.length()").value(3))
                 .andExpect(jsonPath("$.pages[0].name").value(DataBootstrap.PAGE_NAV))
                 .andExpect(jsonPath("$.pages[0].sortOrder").value(0))
-                // 12 nav(small) + 1 changelog(large) + 13 stock(medium) = 26 icons
+                // 12 nav + 1 changelog + 13 stock = 26 icons
                 .andExpect(jsonPath("$.icons.length()").value(26))
-                // 第一个 icon 是 nav，small，含 data.name + data.url
+                // 第一个 icon 是 nav,含 data.name + data.url;图标无 size 字段(ADR-0016)
                 .andExpect(jsonPath("$.icons[0].type").value("NAV"))
-                .andExpect(jsonPath("$.icons[0].size").value("SMALL"))
+                .andExpect(jsonPath("$.icons[0].size").doesNotExist())
                 .andExpect(jsonPath("$.icons[0].data.name").exists())
                 .andExpect(jsonPath("$.icons[0].data.url").exists())
                 .andExpect(jsonPath("$.icons[0].pageId").exists())

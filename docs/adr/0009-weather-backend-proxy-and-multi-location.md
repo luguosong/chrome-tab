@@ -1,5 +1,7 @@
 # 天气图标:后端代理 + 多位置 + 经纬度统一取数
 
+> **注记(2026-08-20)**:后端代理与经纬度统一取数不变;WeatherIcon 三档密度已被 [ADR-0016](0016-icon-single-size-minimal-density.md) 取代——网格仅剩 small(状况图标 + 温度),空气/预警归详情 Modal。
+
 「天气」作为扩展图标类型加入注册表(ADR-0001),**非单例**:每个实例绑定一个用户选择的城市,展示该位置的实况、空气质量、灾害预警。与「自选股」同为多实例富数据类型,但取数走**后端代理**而非前端直连——和风天气 API 必须带 Key,前端直连会泄露 Key,且和风不保证 CORS;这与 ADR-0005 否决「前端直连翻译 API」是同一条理由。后端 `weather/` 包克隆 `changelog/`/`wallpaper/` 的代理范式:`@ConfigurationProperties("newtab.weather")` 绑定 `api-key`(走 `QWEATHER_API_KEY` 环境变量、不入库)+ `api-host`(个人专用主机 `xxx.qweatherapi.com`),`RestClient` 发请求,内存 TTL 缓存。
 
 **经纬度作为统一坐标**是本 ADR 的关键取舍。城市经和风 GeoAPI(`/geo/v2/city/lookup`)搜索、按 adm1/adm2 消歧后,解析出的 **lat/lon** 存入图标 `data`(`{ name, adm1, adm2, lat, lon }`);三套数据全部用这组经纬度取数,不再保留 Location ID。原因:和风的**空气质量 v1(`/airquality/v1/current/{lat}/{lon}`)与天气预警 v1(`/weatheralert/v1/current/{lat}/{lon}`)只接受 lat/lon 路径参数**,而实况 `/v7/weather/now` 虽以 Location ID 为主、但也接受 `lon,lat`——统一到经纬度后三端点入参一致、GeoAPI 仅在选位置时调用一次。Location ID 在这种入参模型下没有额外价值(YAGNI),弃用。

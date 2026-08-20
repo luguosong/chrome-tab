@@ -4,15 +4,14 @@ import {
   get,
   listTypes,
   register,
-  sizesFor,
   type IconTypeDefinition,
   type SummaryInput,
 } from './iconTypeRegistry'
 import type { Quote } from './quoteParser'
 import type { IconTypeId } from './types'
 
-// 内置三类型由模块加载时登记;此处断言其元数据 + 纯查询函数。
-// 对齐 spec §接缝2:canAdd(单例判断)、sizesFor 纯函数输入输出断言。
+// 内置类型由模块加载时登记;此处断言其元数据 + 纯查询函数。
+// 对齐 spec §接缝2:canAdd(单例判断)纯函数输入输出断言。图标无尺寸档位(ADR-0016)。
 
 describe('内置类型登记', () => {
   it('get() 按 id 取定义', () => {
@@ -41,24 +40,6 @@ describe('canAdd — 单例判断', () => {
 
   it('未登记类型拒绝', () => {
     expect(canAdd('unknown' as never, [])).toBe(false)
-  })
-})
-
-describe('sizesFor — 尺寸档查询', () => {
-  it('nav 支持 small/medium/large', () => {
-    expect(sizesFor('nav')).toEqual(['small', 'medium', 'large'])
-  })
-
-  it('stock 为 small/medium/large 三档(专属分档信息密度,见 ADR-0007)', () => {
-    expect(sizesFor('stock')).toEqual(['small', 'medium', 'large'])
-  })
-
-  it('changelog 仅 large(单尺寸)', () => {
-    expect(sizesFor('changelog')).toEqual(['large'])
-  })
-
-  it('未登记类型返回空数组', () => {
-    expect(sizesFor('unknown' as never)).toEqual([])
   })
 })
 
@@ -113,11 +94,10 @@ describe('summarize — 纯数据提取(无需 DOM)', () => {
 })
 
 describe('天气类型 weather(ADR-0009)', () => {
-  it('登记为扩展、非单例、三档、detail=modal', () => {
+  it('登记为扩展、非单例、detail=modal', () => {
     expect(get('weather')?.label).toBe('天气')
     expect(get('weather')?.kind).toBe('extension')
     expect(get('weather')?.singleton).toBe(false)
-    expect(sizesFor('weather')).toEqual(['small', 'medium', 'large'])
     expect(get('weather')?.detail).toBe('modal')
   })
 
@@ -162,10 +142,9 @@ describe('天气类型 weather(ADR-0009)', () => {
 })
 
 describe('分组类型 group(ADR-0011 / issue 07)', () => {
-  it('登记:kind=group(不入新增抽屉 base/extension 分区)、仅 small、无 editor、无摘要', () => {
+  it('登记:kind=group(不入新增抽屉 base/extension 分区)、无 editor、无摘要', () => {
     const g = get('group')
     expect(g?.kind).toBe('group')
-    expect(sizesFor('group')).toEqual(['small'])
     expect(g?.editor).toEqual([])
     expect(g?.summarize(null, {})).toBeNull()
   })
@@ -188,8 +167,6 @@ describe('register — 扩展点(spec 契约:register(typeId, definition))', () 
       label: '测试类型',
       kind: 'extension',
       singleton: false,
-      sizes: ['small'],
-      defaultSize: 'small',
       refresh: { kind: 'none' },
       detail: 'none',
       editor: [],

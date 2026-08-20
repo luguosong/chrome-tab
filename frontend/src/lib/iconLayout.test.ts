@@ -1,24 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { faviconPx } from './iconLayout'
+import { FAV_BASE_PX, GRID_COLUMNS, GRID_ROWS, faviconPx } from './iconLayout'
 
-// ADR-0014 favicon 自相似拼版推导:fav = cols×32 + (cols−1)×gap,再乘 iconScale。
-// 三档在任何 gap/scale 取值下保持推导关系。
+// ADR-0016 单档化:fav = FAV_BASE_PX × iconScale,无档位、不随 gap。
 
 describe('faviconPx', () => {
-  it('默认 gap=8:小/中/大 = 32/72/112', () => {
-    expect(faviconPx('small', 8)).toBe(32)
-    expect(faviconPx('medium', 8)).toBe(72)
-    expect(faviconPx('large', 8)).toBe(112)
+  it('默认 scale=1 → 基准 32', () => {
+    expect(faviconPx()).toBe(32)
+    expect(FAV_BASE_PX).toBe(32)
   })
 
-  it('gap 用户可调,推导随动(gap=0 紧拼 / gap=24 上限)', () => {
-    expect(faviconPx('medium', 0)).toBe(64)
-    expect(faviconPx('large', 0)).toBe(96)
-    expect(faviconPx('large', 24)).toBe(3 * 32 + 2 * 24)
+  it('iconScale 同比缩放', () => {
+    expect(faviconPx(1.5)).toBe(48)
+    expect(faviconPx(0.75)).toBe(24)
+    expect(faviconPx(2)).toBe(64)
   })
+})
 
-  it('iconScale 同比缩放,推导关系不破', () => {
-    expect(faviconPx('medium', 8, 1.5)).toBe(72 * 1.5)
-    expect(faviconPx('small', 8, 0.75)).toBe(24)
+describe('固定网格', () => {
+  it('8×8', () => {
+    expect(GRID_COLUMNS).toBe(8)
+    expect(GRID_ROWS).toBe(8)
   })
 })

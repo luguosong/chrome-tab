@@ -98,7 +98,6 @@ function TypeCard({
       await create.mutateAsync({
         pageId,
         type: def.id,
-        size: def.defaultSize,
         data: buildIconData(def.editor, values),
       })
       setValues(Object.fromEntries(def.editor.map((f) => [f.name, ''])))

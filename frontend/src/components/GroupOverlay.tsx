@@ -223,7 +223,7 @@ function MemberTile({ member, onClose }: { member: Icon; onClose: () => void }) 
   const del = useDeleteIcon()
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: member.id,
-    data: { pageId: member.pageId, size: member.size },
+    data: { pageId: member.pageId },
     disabled: !editing, // 组内排序/移出仅编辑模式(CONTEXT.md「分组」)
   })
 
@@ -234,7 +234,7 @@ function MemberTile({ member, onClose }: { member: Icon; onClose: () => void }) 
   const body = (
     <>
       {/* squircle 玻璃底板 + 居中 favicon。固定迷你尺寸、不随「布局设置·iconScale」:
-          组内是统一迷你渲染(CONTEXT.md「分组」),成员 size 只在移出落回时计容量 */}
+          组内是统一迷你渲染(CONTEXT.md「分组」) */}
       <span className="glass-soft rounded-[24%] flex items-center justify-center w-[60px] h-[60px] mx-auto">
         {src && (
           <img

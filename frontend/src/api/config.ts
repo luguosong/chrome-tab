@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from './client'
-import type { Config, Icon, IconSize, IconTypeId, LayoutSettings, Page } from '../lib/types'
+import type { Config, Icon, IconTypeId, LayoutSettings, Page } from '../lib/types'
 import { moveIcon, type MoveAction } from '../lib/iconReducer'
 import { dissolveGroup, mergeIcons, moveIntoGroup, type MergeAction } from '../lib/groupReducer'
 import type { WireConfig } from '../lib/mirror/backup'
@@ -9,8 +9,8 @@ import type { WireConfig } from '../lib/mirror/backup'
 export type ReorderItem = { id: number; sortOrder: number }
 
 /**
- * 后端返回的原始聚合(JSON)。与 Config 不同处:icons 的 type/size 是大写枚举串
- * ("NAV"/"SMALL"…),这里镜像后端 wire format,normalize 后再交给 Config。
+ * 后端返回的原始聚合(JSON)。与 Config 不同处:icons 的 type 是大写枚举串
+ * ("NAV"…),这里镜像后端 wire format,normalize 后再交给 Config。
  */
 type RawConfig = Omit<Config, 'icons'> & {
   icons: Array<{
@@ -18,7 +18,6 @@ type RawConfig = Omit<Config, 'icons'> & {
     pageId: number
     parentId: number | null
     type: string
-    size: string
     sortOrder: number
     data: Record<string, unknown> | null
   }>
@@ -29,7 +28,6 @@ function normalizeIcon(i: RawConfig['icons'][number]): Icon {
   return {
     ...i,
     type: i.type.toLowerCase() as IconTypeId,
-    size: i.size.toLowerCase() as IconSize,
   }
 }
 
@@ -84,14 +82,9 @@ export function useReplaceConfig() {
   })
 }
 
-// ── Icon 写操作（issue 05 编辑模式:删除 / 改尺寸）──────────────────────────
+// ── Icon 写操作（issue 05 编辑模式:删除）───────────────────────────────────
 // 乐观更新模式（react-query onMutate）:先改 ['config'].icons 到目标态,失败回滚快照,
 // 完成后 invalidate 拉取权威数据。容量超限等约束由服务端 409 把关,前端乐观失败即回滚。
-
-/** 前端小写 size → 后端大写枚举串(对齐 Jackson 默认枚举序列化,见后端 Size 枚举)。 */
-function toWireSize(size: IconSize): string {
-  return size.toUpperCase()
-}
 
 /** 删除图标:乐观从缓存移除,失败回滚。DELETE 返回 204 无体。 */
 export function useDeleteIcon() {
@@ -119,39 +112,10 @@ export function useDeleteIcon() {
   })
 }
 
-/** 改图标尺寸:乐观更新 size,失败回滚(容量超限由服务端 409 把关)。 */
-export function useUpdateIconSize() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (vars: { id: number; size: IconSize }) =>
-      apiFetch<void>(`/api/icons/${vars.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ size: toWireSize(vars.size) }),
-      }),
-    onMutate: async ({ id, size }) => {
-      await qc.cancelQueries({ queryKey: ['config'] })
-      const prev = qc.getQueryData<Config>(['config'])
-      if (prev) {
-        qc.setQueryData<Config>(['config'], {
-          ...prev,
-          icons: prev.icons.map((i) => (i.id === id ? { ...i, size } : i)),
-        })
-      }
-      return { prev }
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev) qc.setQueryData<Config>(['config'], ctx.prev)
-    },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: ['config'] })
-    },
-  })
-}
-
 /**
- * 改图标配置(data):乐观更新 icons[i].data,失败回滚。对齐 {@link useUpdateIconSize}
- * 的 onMutate 模式。后端 PATCH /api/icons/{id} body={data}(部分更新:size 不传则不动)。
- * 编辑模式 ✎ 入口用。data 归一化(url 补 https://)由调用方经 buildIconData 完成。
+ * 改图标配置(data):乐观更新 icons[i].data,失败回滚。
+ * 后端 PATCH /api/icons/{id} body={data}。编辑模式 ✎ 入口用。
+ * data 归一化(url 补 https://)由调用方经 buildIconData 完成。
  */
 export function useUpdateIconData() {
   const qc = useQueryClient()
@@ -261,16 +225,15 @@ export function useReorderPages() {
 
 // ── Icon 新建(issue 09 新增抽屉)──────────────────────────────────────────
 
-/** POST /api/icons 新建图标请求体。type/size 为前端小写 id,在 mutation 内转大写。 */
+/** POST /api/icons 新建图标请求体。type 为前端小写 id,在 mutation 内转大写。 */
 export type CreateIconBody = {
   pageId: number
   type: IconTypeId
-  size: IconSize
   data: Record<string, unknown> | null
 }
 
 /**
- * 新建图标(spec §后端 API 契约 / issue 09)。type/size 在请求边界转大写对齐后端枚举,
+ * 新建图标(spec §后端 API 契约 / issue 09)。type 在请求边界转大写对齐后端枚举,
  * 成功后失效聚合查询使新图标即时出现在当前页末尾。容量超限/单例重复由服务端返回 409,
  * 抛 {@link ApiError};由 AddDrawer 转译为用户提示("此页已满…")。
  */
@@ -283,7 +246,6 @@ export function useCreateIcon() {
         body: JSON.stringify({
           pageId: body.pageId,
           type: body.type.toUpperCase(),
-          size: toWireSize(body.size),
           data: body.data,
         }),
       }),

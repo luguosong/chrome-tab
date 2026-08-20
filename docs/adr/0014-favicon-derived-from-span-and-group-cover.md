@@ -1,5 +1,7 @@
 # favicon 边长自跨度推导 + 分组封面化
 
+> **注记(2026-08-20)**:三档自相似推导已被 [ADR-0016](0016-icon-single-size-minimal-density.md) 取代——单档 favicon = `FAV_BASE_PX`(32)×iconScale 恒定,gridGap 不再参与。分组封面化部分此前已由 ADR-0015 反转,本文仅存历史。
+
 裸 favicon 类型(nav / 分组)的 favicon 边长不再是三档独立像素常量(32/40/48,改造前 Tailwind 的遗留),改为**自相似拼版推导**:`fav = cols×32 + (cols−1)×gridGap`,再乘 iconScale(默认 gap=8 → 32/72/112)。语义:中图标 favicon ≈ 两个小 favicon 紧拼(含一个 gap)、大图标同理,推导在运行时实时读 gap/scale,任何「布局设置」组合下三档推导关系保持。取代 `SIZE_BASE_PX` 常量(其 pad 部分保留为 `WIDGET_PAD_PX`,仅小组件卡内边距沿用,与本次无关)。
 
 动机:常量与画格完全脱钩——默认参数下 medium 画格宽约 250px 而 favicon 仅 40px(1/6),large 画格宽约 379px 而 favicon 仅 48px(1/8),中/大图标在画格里小而空、边缘与相邻小图标参差。推导化后 favicon 边长与占格跨度同源,整排图标的视觉节奏成系统。

@@ -1,32 +1,32 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { get, sizesFor, type EditorField, type IconTypeDefinition } from '../lib/iconTypeRegistry'
+import { get, type EditorField, type IconTypeDefinition } from '../lib/iconTypeRegistry'
 import StockIconBody from './StockIcon'
 import WeatherIconBody from './WeatherIcon'
 import ChangelogIconBody from './ChangelogIcon'
 import LocationPicker from './LocationPicker'
-import type { Icon as IconModel, IconSize } from '../lib/types'
+import type { Icon as IconModel } from '../lib/types'
 import { useEditMode } from '../context/EditModeContext'
 import { useGroupGesture } from '../context/GroupGestureContext'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
-import { SIZE_CELLS, faviconPx } from '../lib/iconLayout'
+import { faviconPx } from '../lib/iconLayout'
 import { extractString, buildIconData, faviconUrl } from '../lib/iconData'
 import { groupMembers } from '../lib/groupReducer'
 import { readWeatherLocation, type WeatherLocation } from '../lib/weather'
-import { useConfig, useDeleteIcon, useDissolveGroup, useUpdateIconSize, useUpdateIconData } from '../api/config'
+import { useConfig, useDeleteIcon, useDissolveGroup, useUpdateIconData } from '../api/config'
 import { ApiError } from '../api/client'
 
 /**
  * 单个图标渲染(见 CONTEXT.md「图标」/ spec §前端架构 IconGrid / ADR-0012 图标层换肤)。
  *
- * 视觉按类型分派(ADR-0015 全容器化:所有类型统一 soft 玻璃块外壳,块缘铺满画格 =
- * 格线对齐,iPhone 主屏语言;nav/分组的外壳即本组件 Tag,小组件沿用既有卡):
- *   - nav:favicon 居中块内(边长推导 ADR-0014 作上限),名称外置图标下方(iOS 主屏式),
- *     hover/active 轻缩放作反馈,三档仅尺寸不同
+ * 所有图标一律占 1 格(ADR-0016 单档化)。视觉按类型分派(ADR-0015 容器分层:
+ * nav/分组的外壳即本组件 Tag,小组件沿用既有卡):
+ *   - nav:favicon 居中块内(边长 = faviconPx),名称外置图标下方(iOS 主屏式),
+ *     hover/active 轻缩放作反馈
  *   - group:iOS 文件夹式——块内成员 favicon 3×2 迷你预览(GroupBody,ADR-0011)
  *   - stock / weather / changelog:专属小组件 body(StockIcon / WeatherIcon / ChangelogIcon,
- *     各自按尺寸分档信息密度),body 左对齐铺满块
+ *     单档极简密度),body 左对齐铺满块
  *
  * 点击行为(按 detail 字段派发 —— ADR-0001 契约:容器形态由类型定义声明,
  * 新增复用 modal/drawer 的类型无需改本组件):
@@ -34,28 +34,15 @@ import { ApiError } from '../api/client'
  *   - detail='none':nav 渲染为 <a>(新标签打开目标 URL,spec user story 13)
  *   - detail='modal'/'drawer':查看态点击 → onOpenDetail(icon),父组件按 detail 渲染面板
  *
- * 拖拽(06):本组件是网格画格(grid item,拥有 gridColumn/gridRow span),故 useSortable
- * 直接挂在此处——sortable 节点必须即画格节点,否则 grid 跨度会失效。查看模式与编辑模式均可拖。
- * 激活策略由 DashboardPage 的 Mouse/TouchSensor 决定(鼠标移动即拖、触控长按拖),点击(轻点)
- * 因激活阈值/延迟与拖拽分流,链接/详情照常打开。attributes 仅在编辑模式注入(保留 nav `<a>`
- * 原生 role=link 语义与无障碍行为),listeners 在两种模式都注入(实际驱动拖拽)。
- * data 带 pageId/size 供 DndContext handler 读取(跨页 07 用)。
+ * 拖拽(06):本组件是网格画格(grid item),故 useSortable 直接挂在此处。
+ * 查看模式与编辑模式均可拖。激活策略由 DashboardPage 的 Mouse/TouchSensor 决定(鼠标移动即拖、
+ * 触控长按拖),点击(轻点)因激活阈值/延迟与拖拽分流,链接/详情照常打开。attributes 仅在
+ * 编辑模式注入(保留 nav `<a>` 原生 role=link 语义与无障碍行为),listeners 在两种模式都注入。
+ * data 带 pageId 供 DndContext handler 读取(跨页 07 用)。
  * 编辑模式角标(EditActions)的交互按钮 onPointerDown stopPropagation,避免点角标误启拖拽。
  */
-/** 图标块内边距(原 Tailwind p-* 的 px 值),乘 iconScale 得实际值。
- *  ADR-0015 全容器化:所有类型统一玻璃块外壳,块内边距统一;favicon 边长推导见 faviconPx(ADR-0014)。 */
-const ICON_PAD_PX: Record<IconSize, number> = {
-  small: 8,
-  medium: 12,
-  large: 16,
-}
-
-/** 编辑模式尺寸菜单与角标的中文标签(spec user story 28:大/中/小三档)。 */
-const SIZE_LABEL: Record<IconSize, string> = {
-  small: '小',
-  medium: '中',
-  large: '大',
-}
+/** 小组件卡内边距(原 Tailwind p-* 的 px 值),乘 iconScale 得实际值。 */
+const WIDGET_PAD_PX = 8
 
 /**
  * 图标名称(见 CONTEXT.md「图标名称」):外置块下方的一行文字,iOS 主屏式——
@@ -94,9 +81,8 @@ export default function Icon({
 }) {
   const def = get(icon.type)
   const { editing } = useEditMode()
-  const { iconScale, gridGap } = useLayoutSettings()
+  const { iconScale } = useLayoutSettings()
   const delIcon = useDeleteIcon()
-  const resizeIcon = useUpdateIconSize()
   const editIcon = useUpdateIconData()
   // 分组 × = 解散(POST dissolve),区别于普通图标 × 的删除;容量 409 提示见下方浮层
   const dissolve = useDissolveGroup()
@@ -107,30 +93,26 @@ export default function Icon({
   }, [dissolve.isError])
   // 合并手势悬停达标(编辑模式拖 A 悬停本图标达阈值):放大反馈,松手建组/入组
   const dwellTarget = useGroupGesture()
-  const [menuOpen, setMenuOpen] = useState(false)
-  // 编辑配置 popover(✎):与尺寸菜单互斥,开一个关另一个。
+  // 编辑配置 popover(✎)。
   const [editOpen, setEditOpen] = useState(false)
 
-  // 拖拽(06):查看模式与编辑模式均启用;data 带 pageId/size 供 DndContext handler 读取(见 issue 06 checklist)。
+  // 拖拽(06):查看模式与编辑模式均启用;data 带 pageId 供 DndContext handler 读取(见 issue 06 checklist)。
   // overlay 副本强制 disabled,避免在 DragOverlay(脱离 SortableContext)里重复注册可拖节点。
   // 点击与拖拽的分流由 DashboardPage 的 Mouse/TouchSensor 激活策略负责(鼠标移动即拖、触控长按)。
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: icon.id,
-    data: { pageId: icon.pageId, size: icon.size },
+    data: { pageId: icon.pageId },
     disabled: overlay,
   })
 
-  const span = SIZE_CELLS[icon.size]
-  const padPx = ICON_PAD_PX[icon.size] * iconScale
-  // favicon 边长自相似推导(ADR-0014):小=32 基准,中=2×32+gap,大=3×32+2×gap,随 iconScale 同比
-  const favPx = faviconPx(icon.size, gridGap, iconScale)
+  const padPx = WIDGET_PAD_PX * iconScale
+  // favicon 边长(ADR-0016 单档):基准 32 × iconScale。
+  const favPx = faviconPx(iconScale)
 
   // 小组件类型(stock/weather/changelog):专属 body 左对齐铺满;nav/group 内容居中。
   const isWidget = icon.type === 'stock' || icon.type === 'weather' || icon.type === 'changelog'
 
   const style: CSSProperties = {
-    gridColumn: `span ${span.cols}`,
-    gridRow: `span ${span.rows}`,
     // padding 只给小组件卡(卡内即全部内容);nav/group 的玻璃块在图标层(TileFrame,
     // 只包 favicon/预览),名称在块外画格上(iOS 主屏式:块=图标本体,文字=壁纸层)。
     padding: isWidget ? padPx : 0,
@@ -179,14 +161,14 @@ export default function Icon({
       className={
         'relative flex flex-col transition ' +
         // 小组件类型:soft 玻璃卡容器(ADR-0012,hover 提亮在 .glass-soft 自身规则里),
-        // medium/large 起 iOS 小组件大圆角,小卡沿用 2xl;body 左对齐铺满。
+        // 单档一律 2xl 圆角;body 左对齐铺满。
         // [container-type:size]:作容器查询的查询容器(画格高度随视口缩放,body 按卡高
-        // 自适应信息密度,如 changelog 逐级减版本行;size containment 对 grid item 无布局
-        // 影响——高度由轨道定,不依赖内容)。不能加 overflow-hidden:编辑角标定位在卡外。
+        // 自适应;size containment 对 grid item 无布局影响——高度由轨道定,不依赖内容)。
+        // 不能加 overflow-hidden:编辑角标定位在卡外。
         // nav/group:画格透明,玻璃块在图标层(TileFrame)——块只包图标本身(ADR-0015b),
         // 名称外置块下方(iOS 主屏式)。
         (isWidget
-          ? `glass-soft items-stretch justify-center gap-1 text-left [container-type:size] ${icon.size === 'small' ? 'rounded-2xl' : 'rounded-3xl'} `
+          ? 'glass-soft items-stretch justify-center gap-1 text-left [container-type:size] rounded-2xl '
           : 'items-center justify-center gap-1 ') +
         (interactive ? 'cursor-pointer' : 'cursor-default') +
         // 合并手势达标放大(dwell):目标非被拖项、无 dnd transform 冲突;transition 已有
@@ -236,23 +218,19 @@ export default function Icon({
         </span>
       )}
 
-      {/* 编辑模式角标:尺寸切换菜单 + 删除 ×(spec user story 27/28)。
-          仅展示该类型支持的尺寸(sizesFor);点击 PATCH 改 size,× 点击 DELETE,
-          乐观更新 + 失败回滚见 api/config.ts。stopPropagation 避免冒泡到 Tag。
-          overlay 幽灵不渲染角标(拖拽副本不带交互控件)。 */}
+      {/* 编辑模式角标:编辑配置 ✎ + 删除 ×(spec user story 27/28;尺寸切换已随
+          ADR-0016 单档化移除)。× 点击 DELETE,乐观更新 + 失败回滚见 api/config.ts。
+          stopPropagation 避免冒泡到 Tag。overlay 幽灵不渲染角标(拖拽副本不带交互控件)。 */}
       {editing && !overlay && (
         <EditActions
           icon={icon}
           def={def}
-          menuOpen={menuOpen}
-          setMenuOpen={setMenuOpen}
           editOpen={editOpen}
           setEditOpen={setEditOpen}
-          busy={delIcon.isPending || resizeIcon.isPending || editIcon.isPending || dissolve.isPending}
+          busy={delIcon.isPending || editIcon.isPending || dissolve.isPending}
           onDelete={() =>
             icon.type === 'group' ? dissolve.mutate(icon.id) : delIcon.mutate(icon.id)
           }
-          onResize={(size) => resizeIcon.mutate({ id: icon.id, size })}
           onEdit={(data) => editIcon.mutate({ id: icon.id, data })}
         />
       )}
@@ -354,9 +332,8 @@ function GroupBody({
 }
 
 /**
- * 编辑模式角标集群(右上角):尺寸切换菜单 + 删除 ×。
- * 尺寸菜单仅列该类型支持的尺寸(sizesFor,spec:仅展示该类型支持的尺寸)。
- * 菜单用 fixed 透明遮罩实现 click-outside 关闭(无需 document 监听)。
+ * 编辑模式角标集群(右上角):编辑配置 ✎ + 删除 ×。
+ * (尺寸切换菜单已随 ADR-0016 单档化移除。)
  * 所有点击 stopPropagation,避免冒泡到图标 Tag(编辑态 Tag 本就无 onClick,纯防御)。
  * onPointerDown 也 stopPropagation(06 拖拽):否则在角标上长按会触发 PointerSensor
  * 启动拖拽而非点击角标;阻止指针事件冒泡到挂载 listeners 的 Tag。
@@ -364,30 +341,21 @@ function GroupBody({
 function EditActions({
   icon,
   def,
-  menuOpen,
-  setMenuOpen,
   editOpen,
   setEditOpen,
   busy,
   onDelete,
-  onResize,
   onEdit,
 }: {
   icon: IconModel
   def: IconTypeDefinition | undefined
-  menuOpen: boolean
-  setMenuOpen: (v: boolean) => void
   editOpen: boolean
   setEditOpen: (v: boolean) => void
   busy: boolean
   onDelete: () => void
-  onResize: (size: IconSize) => void
   onEdit: (data: Record<string, unknown> | null) => void
 }) {
-  const allowed = sizesFor(icon.type)
-  // 单尺寸类型(如 changelog 仅 large)无需切换,不渲染尺寸按钮,只留删除 ×。
-  const showSizeMenu = allowed.length > 1
-  // 仅 editor 非空的类型(nav/stock)出现编辑配置 ✎;changelog(editor=[])无配置可改。
+  // 仅 editor 非空的类型(nav/stock/weather)出现编辑配置 ✎;changelog(editor=[])无配置可改。
   const editor = def?.editor ?? []
   const showEdit = editor.length > 0
   return (
@@ -396,14 +364,13 @@ function EditActions({
         className="absolute -top-2 -right-2 z-20 flex gap-1"
         onPointerDown={(e) => e.stopPropagation()}
       >
-        {/* 编辑配置 ✎:打开 popover(字段预填),与尺寸菜单互斥 */}
+        {/* 编辑配置 ✎:打开 popover(字段预填) */}
         {showEdit && (
           <button
             type="button"
             disabled={busy}
             onClick={(e) => {
               e.stopPropagation()
-              setMenuOpen(false)
               setEditOpen(!editOpen)
             }}
             onContextMenu={(e) => e.stopPropagation()}
@@ -411,23 +378,6 @@ function EditActions({
             title="编辑"
           >
             ✎
-          </button>
-        )}
-        {/* 尺寸切换:显示当前档位,点击展开菜单(仅多尺寸类型出现) */}
-        {showSizeMenu && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={(e) => {
-              e.stopPropagation()
-              setEditOpen(false)
-              setMenuOpen(!menuOpen)
-            }}
-            onContextMenu={(e) => e.stopPropagation()}
-            className="glass-panel w-6 h-6 rounded-full text-[11px] font-semibold text-white/90 flex items-center justify-center hover:bg-white/40 disabled:opacity-50"
-            title="切换尺寸"
-          >
-          {SIZE_LABEL[icon.size]}
           </button>
         )}
         {/* 删除 × */}
@@ -446,52 +396,7 @@ function EditActions({
         </button>
       </div>
 
-      {/* 尺寸菜单:展开时列出该类型支持的尺寸,当前档位高亮 */}
-      {menuOpen && (
-        <>
-          {/* 透明遮罩:点击任意处关闭菜单 */}
-          <button
-            type="button"
-            aria-hidden
-            tabIndex={-1}
-            onClick={(e) => {
-              e.stopPropagation()
-              setMenuOpen(false)
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-            className="fixed inset-0 z-30 cursor-default"
-          />
-          <div
-            className="absolute top-5 right-0 z-40 glass-panel rounded-lg py-1 min-w-[64px]"
-            onClick={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            {allowed.map((s) => {
-              const current = s === icon.size
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  disabled={busy || current}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onResize(s)
-                    setMenuOpen(false)
-                  }}
-                  className={
-                    'block w-full text-left px-3 py-1 text-xs text-white/90 hover:bg-white/30 ' +
-                    (current ? 'text-accent font-semibold' : '')
-                  }
-                >
-                  {SIZE_LABEL[s]}
-                </button>
-              )
-            })}
-          </div>
-        </>
-      )}
-
-      {/* 编辑配置 popover:仅 editor 非空的类型(nav/stock)打开时渲染 */}
+      {/* 编辑配置 popover:仅 editor 非空的类型(nav/stock/weather)打开时渲染 */}
       {editOpen && (
         <EditForm
           fields={editor}
@@ -513,7 +418,7 @@ function EditActions({
  * (nav=name+url / stock=symbol+name),保存走 useUpdateIconData(PATCH /api/icons/{id} body={data}),
  * 取消直接关闭。与 AddDrawer 共用 buildIconData 归一化 + 输入样式,使「新增」与「编辑」表单一致。
  *
- * 容器与尺寸菜单同模式:`fixed inset-0` 透明遮罩(z-30,click-outside 取消)+ absolute 面板(z-40)。
+ * 容器用 `fixed inset-0` 透明遮罩(z-30,click-outside 取消)+ absolute 面板(z-40)。
  * onPointerDown stopPropagation 防止冒泡到 Tag 触发拖拽(同 EditActions 角标,见 06)。
  */
 function EditForm({

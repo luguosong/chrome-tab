@@ -35,9 +35,20 @@ public class ChangelogConfig {
         return RestClient.builder().baseUrl("https://raw.githubusercontent.com").build();
     }
 
+    /** npm registry packument(ADR-0016 发布日期源)。 */
+    @Bean
+    RestClient npmRegistryRestClient() {
+        return RestClient.builder().baseUrl("https://registry.npmjs.org").build();
+    }
+
     @Bean
     RestClient llmRestClient(ChangelogProperties props) {
         return RestClient.builder().baseUrl(props.getLlm().getBaseUrl()).build();
+    }
+
+    @Bean
+    NpmReleaseDateService npmReleaseDateService(@Qualifier("npmRegistryRestClient") RestClient npm) {
+        return new NpmReleaseDateService(npm);
     }
 
     @Bean

@@ -21,7 +21,7 @@ export function topLevelOf(icons: readonly Icon[], pageId: number): Icon[] {
 export type MergeAction = { pageId: number; memberIds: number[]; groupId: number }
 
 /**
- * 建组(镜像 IconService.merge):组行(type='group'/size='small'/data={name})落在
+ * 建组(镜像 IconService.merge):组行(type='group'/data={name})落在
  * 末位成员 B 的顶层位序上,其余成员脱离页面序列,页面重排 0..n-1;成员挂
  * parentId=groupId、组内序按 memberIds 顺序 0..n-1。未知成员 id 原样返回(防御式)。
  */
@@ -38,7 +38,6 @@ export function mergeIcons(icons: readonly Icon[], action: MergeAction): Icon[] 
     pageId,
     parentId: null,
     type: 'group',
-    size: 'small',
     sortOrder: 0,
     data: { name: '新建分组' },
   }
@@ -69,7 +68,7 @@ export function mergeIcons(icons: readonly Icon[], action: MergeAction): Icon[] 
 
 /**
  * 解散分组(镜像 IconService.dissolve):组行删除,成员(parentId=null)按组内序
- * 自组行原顶层位序展开洒回本页,页面重排 0..n-1;成员保留各自 size。
+ * 自组行原顶层位序展开洒回本页,页面重排 0..n-1。
  * 组不存在 / 无成员时原样返回副本。
  */
 export function dissolveGroup(icons: readonly Icon[], groupId: number): Icon[] {

@@ -6,7 +6,7 @@ export default function ChangelogTile() {
   const { data, isLoading, error } = useChangelog()
   const [q, setQ] = useState('')
 
-  const versions = data ?? []
+  const versions = data?.versions ?? []
 
   const shown = useMemo(() => {
     const kw = q.trim().toLowerCase()

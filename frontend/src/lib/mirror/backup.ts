@@ -3,9 +3,11 @@ import type { Config, LayoutSettings } from '../types'
 /**
  * 备份文件 schema 版本;结构变更时递增。
  * v2(ADR-0011):icons 增 id(客户端键)与 parentId(分组成员指向组行,顶层为 null)。
- * 导入双接受 v1/v2(v1 无 id/parentId,解析时按 null 兼容,不写文件转换器)。
+ * v3(ADR-0016):icons 删 size(图标单档化,无尺寸概念)。
+ * 导入接受 v1/v2/v3(v1 无 id/parentId,解析时按 null 兼容;v2 的 size 为多余字段,
+ * 后端 Jackson 忽略,不写文件转换器)。
  */
-export const BACKUP_SCHEMA_VERSION = 2
+export const BACKUP_SCHEMA_VERSION = 3
 
 /** 兼容 v1/v2 的导入行(v1 无 id/parentId);仅 parseBackupPayload 内部使用。 */
 type V1OrV2Icon = Omit<WireConfig['icons'][number], 'id' | 'parentId'> &
@@ -15,7 +17,7 @@ type V1OrV2Icon = Omit<WireConfig['icons'][number], 'id' | 'parentId'> &
  * PUT /api/config 请求体(后端 ConfigReplaceService.ReplaceRequest)。
  * pages/icons 都带 id(客户端键,可来自服务端或离线临时,服务端整体重建重分配);
  * icons.parentId 引用某 GROUP 行的 id,顶层为 null(ADR-0011);
- * type/size 为大写枚举名(对齐 GET 输出);layoutSettings 可空。
+ * type 为大写枚举名(对齐 GET 输出);layoutSettings 可空。
  */
 export type WireConfig = {
   pages: { id: number; name: string; sortOrder: number }[]
@@ -24,7 +26,6 @@ export type WireConfig = {
     pageId: number
     parentId: number | null
     type: string
-    size: string
     sortOrder: number
     data: Record<string, unknown> | null
   }[]
@@ -41,7 +42,6 @@ export function toWireConfig(c: Config): WireConfig {
       pageId: i.pageId,
       parentId: i.parentId,
       type: i.type.toUpperCase(),
-      size: i.size.toUpperCase(),
       sortOrder: i.sortOrder,
       data: i.data,
     })),
@@ -65,13 +65,15 @@ export function toBackupPayload(c: Config): BackupPayload {
 }
 
 /**
- * 解析导入文件:双接受 v1/v2,失败抛 Error(调用方转用户提示)。
+ * 解析导入文件:接受 v1/v2/v3,失败抛 Error(调用方转用户提示)。
  * v1(无组时代)在内存中最小升级:icons 按序补客户端 id、parentId=null;不改写原文件。
+ * v2 的 size 字段(ADR-0016 前)为多余属性:「完全替换」路径原样透传由后端 Jackson 忽略,
+ * 「合并」路径(mergeBlobs 逐字段重建)自然丢弃。
  */
 export function parseBackupPayload(raw: unknown): BackupPayload {
   if (typeof raw !== 'object' || raw === null) throw new Error('文件格式不正确')
   const r = raw as Record<string, unknown>
-  if (r.schemaVersion !== 1 && r.schemaVersion !== BACKUP_SCHEMA_VERSION)
+  if (![1, 2, BACKUP_SCHEMA_VERSION].includes(r.schemaVersion as number))
     throw new Error('备份版本不兼容(schemaVersion=' + String(r.schemaVersion) + ')')
   const cfg = (r.config ?? null) as Record<string, unknown> | null
   if (!cfg || !Array.isArray(cfg.pages) || !Array.isArray(cfg.icons))
@@ -108,7 +110,6 @@ export function mergeBlobs(current: Config, imported: WireConfig): WireConfig {
     pageId: i.pageId,
     parentId: i.parentId,
     type: i.type.toUpperCase(),
-    size: i.size.toUpperCase(),
     sortOrder: i.sortOrder,
     data: i.data,
   }))
@@ -132,7 +133,6 @@ export function mergeBlobs(current: Config, imported: WireConfig): WireConfig {
       pageId: pid,
       parentId: newParent,
       type: i.type.toUpperCase(),
-      size: i.size.toUpperCase(),
       sortOrder: i.sortOrder,
       data: i.data,
     })

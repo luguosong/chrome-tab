@@ -4,9 +4,9 @@ import type { Icon, IconTypeId } from './types'
 
 // 纯函数输入输出断言,无 DOM。镜像后端 IconService.move 语义(issue 06 同页排序)。
 
-/** 测试用图标构造器:默认 nav/small 顶层,sortOrder 即页内位序。 */
+/** 测试用图标构造器:默认 nav 顶层,sortOrder 即页内位序。 */
 function icon(id: number, pageId: number, sortOrder: number, type: IconTypeId = 'nav'): Icon {
-  return { id, pageId, parentId: null, type, size: 'small', sortOrder, data: null }
+  return { id, pageId, parentId: null, type, sortOrder, data: null }
 }
 
 /** 断言「页内顶层按 sortOrder 升序的 id 序列」(组内成员不参与页面序列,ADR-0011)。 */

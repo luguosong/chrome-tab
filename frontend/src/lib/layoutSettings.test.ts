@@ -19,10 +19,14 @@ describe('withDefaults', () => {
   })
 
   it('fills expanded fields (old server payload / old backup) with defaults', () => {
-    // 旧后端/旧备份只带三字段的 blob:新字段全部补默认,升级零视觉变化
-    expect(withDefaults({ gridWidth: 1024, gridGap: 8, iconScale: 1.0 })).toEqual(
+    // 旧后端/旧备份只带三字段的 blob:新字段全部补默认
+    expect(withDefaults({ gridWidth: 1024, gridGap: 8, iconScale: 1.5 })).toEqual(
       DEFAULT_LAYOUT_SETTINGS,
     )
+  })
+
+  it('iconScale 默认 1.5、上限 2.0(ADR-0016 整体放大)', () => {
+    expect(DEFAULT_LAYOUT_SETTINGS.iconScale).toBe(1.5)
   })
 
   it('keeps provided expanded fields (0 雾化、false 显隐都是合法值)', () => {

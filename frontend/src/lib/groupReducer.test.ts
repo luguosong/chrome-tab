@@ -8,7 +8,7 @@ import {
   moveIntoGroup,
 } from './groupReducer'
 import { moveIcon } from './iconReducer'
-import type { Icon, IconSize } from './types'
+import type { Icon } from './types'
 
 // 纯函数输入输出断言,无 DOM。镜像后端 IconService.merge / dissolve / move(parentId)语义。
 
@@ -24,7 +24,6 @@ function icon(
     pageId,
     parentId: null,
     type: 'nav',
-    size: 'small',
     sortOrder,
     data: null,
     ...over,
@@ -61,26 +60,16 @@ describe('mergeIcons — 建组', () => {
     // 组行字段
     const g = next.find((i) => i.id === -1)!
     expect(g.type).toBe('group')
-    expect(g.size).toBe('small')
     expect(g.data).toEqual({ name: '新建分组' })
     // 组行落在 B 的相对位置;A 在 B 前消失,renumber 后数值位序 0(对齐后端 renumber(seq))
     expect(g.sortOrder).toBe(0)
-    // 成员:A、B 挂 parentId,组内序按 memberIds(0,1),size 保留
+    // 成员:A、B 挂 parentId,组内序按 memberIds(0,1)
     const a = next.find((i) => i.id === 1)!
     const b = next.find((i) => i.id === 2)!
     expect(a.parentId).toBe(-1)
     expect(a.sortOrder).toBe(0)
     expect(b.parentId).toBe(-1)
     expect(b.sortOrder).toBe(1)
-  })
-
-  it('成员保留各自 size(进组不改尺寸)', () => {
-    const icons = [
-      icon(1, PAGE, 0, { size: 'medium' as IconSize }),
-      icon(2, PAGE, 1),
-    ]
-    const next = mergeIcons(icons, { pageId: PAGE, memberIds: [1, 2], groupId: -1 })
-    expect(next.find((i) => i.id === 1)!.size).toBe('medium')
   })
 
   it('悬停目标(末位)是首位的邻居前一格:位置继承语义不受距离影响', () => {
@@ -132,18 +121,17 @@ describe('dissolveGroup — 解散', () => {
     const next = dissolveGroup(icons, 9)
     expect(next.find((i) => i.id === 9)).toBeUndefined()
     expect(topLevelOf(next, PAGE)).toEqual([10, 1, 2, 11])
-    // 成员归顶层、保留 size
+    // 成员归顶层
     expect(next.find((i) => i.id === 1)!.parentId).toBeNull()
     expect(next.find((i) => i.id === 2)!.parentId).toBeNull()
   })
 
-  it('成员保留各自 size 洒回(medium 成员还原 medium)', () => {
+  it('单个成员的组解散:成员洒回顶层', () => {
     const icons = [
       group(9, PAGE, 0),
-      icon(1, PAGE, 0, { parentId: 9, size: 'large' as IconSize }),
+      icon(1, PAGE, 0, { parentId: 9 }),
     ]
     const next = dissolveGroup(icons, 9)
-    expect(next.find((i) => i.id === 1)!.size).toBe('large')
     expect(topLevelOf(next, PAGE)).toEqual([1])
   })
 
@@ -314,18 +302,17 @@ describe('groupPageSlice / groupPageCount — 组内弹层分页(票 08,9 个/�
 // 的删除由服务端在事务内完成(invalidate 校正),乐观态短暂可见空组,与「源页序号
 // 留洞」同款预期瞬态,不是 bug。
 describe('moveIcon — move-out(成员拖出)', () => {
-  it('成员落本页顶层:parentId 清空、按 toIndex 落位、保留 size,组行留存', () => {
+  it('成员落本页顶层:parentId 清空、按 toIndex 落位,组行留存', () => {
     // 页 [X(0), 组(1)];组内 [A(0), B(1)];A 拖出到 X 前(toIndex=0)
     const icons = [
       icon(10, PAGE, 0),
       group(9, PAGE, 1),
-      icon(1, PAGE, 0, { parentId: 9, size: 'medium' as IconSize }),
+      icon(1, PAGE, 0, { parentId: 9 }),
       icon(2, PAGE, 1, { parentId: 9 }),
     ]
     const next = moveIcon(icons, { id: 1, toPageId: PAGE, toIndex: 0 })
     const a = next.find((i) => i.id === 1)!
     expect(a.parentId).toBeNull()
-    expect(a.size).toBe('medium') // 保留 size 落回,移出后按原尺寸计容量
     expect(topLevelOf(next, PAGE)).toEqual([1, 10, 9]) // A 落 0 位,组行留存(瞬态)
     // 组内剩 B,组内序不变
     expect(groupMembers(next, 9).map((i) => i.id)).toEqual([2])

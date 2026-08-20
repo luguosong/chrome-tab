@@ -1,67 +1,38 @@
-import { useIconData } from '../context/IconDataContext'
+import { useChangelog } from '../hooks/useChangelog'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
-import { inline } from '../lib/changelogParser'
-import type { ChangelogVersion } from '../lib/changelogParser'
-import { get } from '../lib/iconTypeRegistry'
 import type { Icon } from '../lib/types'
 
 /**
- * 更新日志图标的专属网格渲染(单例、仅 large 3×2;ADR-0012 图标层换肤为小组件式版本列表)。
+ * 更新日志图标的专属网格渲染(单例;ADR-0016 单档极简:1×1 只显示 最新版本号 + 发布日期)。
+ * 完整版本列表走底部 Drawer(ChangelogDrawer)。数据直接订阅 useChangelog(与
+ * IconDataContext 同 queryKey,命中缓存零额外请求,同 GroupBody 用 useConfig 的先例);
+ * 发布日期来自后端 npm registry 代理(ADR-0016),失败/无数据降级 —。
  *
- * 与 stock/weather 同范式:由 Icon.tsx 作为外壳在 type==='changelog' 时委托调用。
- * 数据来自 IconDataContext 集中下发的 changelog(与 ChangelogDrawer 同源,零额外请求)。
- * 排版:iOS 小组件信息层级 —— 顶部小标签 + 最近 3 个版本(版本号 accent 大字 + 首条
- * 更新项截断),无数据降级占位行。字号随 iconScale 同比缩放(px(n)=n×iconScale)。
+ * 防遮蔽防溢出:两行均 truncate(不穿框);画格高度极端不足时容器查询隐日期行
+ * 保版本号(cl-date,断点见 globals.css)。字号随 iconScale 同比缩放。
  */
 export default function ChangelogIconBody({ icon: _icon }: { icon: Icon }) {
-  const { changelog } = useIconData()
   const { iconScale } = useLayoutSettings()
   const px = (n: number) => n * iconScale
-
-  const versions = changelog?.slice(0, 3) ?? null
+  const { data } = useChangelog()
+  const latest = data?.versions[0]?.title ?? null
+  // ISO(UTC)前 10 位 = YYYY-MM-DD
+  const date = data?.releasedAt ? data.releasedAt.slice(0, 10) : null
 
   return (
-    // max-h-full overflow-hidden:兜底裁切——断点覆盖不到的极端组合(最小视口 + iconScale 1.5,
-    // 连 1 版都装不下)宁可裁也不穿出背景框。正常断点内不会触发。
-    <div className="w-full max-h-full overflow-hidden flex flex-col gap-1.5">
-      <div className="uppercase tracking-wider text-white/60 truncate" style={{ fontSize: px(10) }}>
-        {get('changelog')?.label ?? '更新日志'}
-      </div>
-      {versions ? (
-        versions.map((v, i) => (
-          // cl-drop-*:画格高度不足时按容器查询逐级隐藏末位版本行(规则见 globals.css;
-          // 查询容器 = Icon.tsx 小组件外壳的 [container-type:size])
-          <div key={i} className={i === 2 ? 'cl-drop-3' : i === 1 ? 'cl-drop-2' : ''}>
-            <VersionRow v={v} px={px} />
-          </div>
-        ))
-      ) : (
-        // 加载中/失败降级:占位行(与旧摘要行 "--" 降级语义一致)
-        <span className="font-mono text-white/40" style={{ fontSize: px(12) }}>
-          --
-        </span>
-      )}
-    </div>
-  )
-}
-
-/** 单版本行:版本号(accent,inline markdown 同 Drawer)+ 首条更新项截断。 */
-function VersionRow({ v, px }: { v: ChangelogVersion; px: (n: number) => number }) {
-  const first = v.top[0] ?? v.sections.flatMap((s) => s.items)[0] ?? null
-  return (
-    <div className="min-w-0">
-      <div
-        className="font-mono text-accent truncate"
-        style={{ fontSize: px(12) }}
-        dangerouslySetInnerHTML={{ __html: inline(v.title) }}
-      />
-      {first && (
-        <div
-          className="text-white/75 truncate cl-drop-1"
-          style={{ fontSize: px(11) }}
-          dangerouslySetInnerHTML={{ __html: inline(first) }}
-        />
-      )}
+    <div className="w-full max-h-full overflow-hidden min-w-0 flex flex-col justify-center gap-1">
+      <span
+        className="font-mono text-accent leading-none truncate"
+        style={{ fontSize: px(14) }}
+      >
+        {latest ?? '--'}
+      </span>
+      <span
+        className="cl-date font-mono text-white/60 leading-none truncate"
+        style={{ fontSize: px(9) }}
+      >
+        {date ?? '—'}
+      </span>
     </div>
   )
 }

@@ -35,7 +35,7 @@ class LayoutSettingControllerWriteApiTest {
                 .andExpect(jsonPath("$.layoutSettings.gridWidth").value(1024))
                 .andExpect(jsonPath("$.layoutSettings.gridGap").value(8))
                 .andExpect(jsonPath("$.layoutSettings.gridGapY").value(8))
-                .andExpect(jsonPath("$.layoutSettings.iconScale").value(1.0))
+                .andExpect(jsonPath("$.layoutSettings.iconScale").value(1.5))
                 .andExpect(jsonPath("$.layoutSettings.panelFog").value(36))
                 .andExpect(jsonPath("$.layoutSettings.searchBarWidth").value(576))
                 .andExpect(jsonPath("$.layoutSettings.searchBarVisible").value(true))

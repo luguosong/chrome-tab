@@ -9,7 +9,7 @@ export const LAYOUT_LIMITS = {
   gridWidth: { min: 640, max: 1536, step: 16, default: 1024 },
   gridGap: { min: 0, max: 24, step: 1, default: 8 },
   gridGapY: { min: 0, max: 32, step: 1, default: 8 },
-  iconScale: { min: 0.75, max: 1.5, step: 0.05, default: 1.0 },
+  iconScale: { min: 0.75, max: 2, step: 0.05, default: 1.5 },
   panelFog: { min: 0, max: 60, step: 1, default: 36 },
   searchBarWidth: { min: 320, max: 1024, step: 16, default: 576 },
   clockFont: { min: 28, max: 72, step: 2, default: 48 },

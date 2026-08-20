@@ -1,14 +1,14 @@
 import type { ChangelogVersion } from './changelogParser'
 import type { Quote } from './quoteParser'
-import type { IconSize, IconTypeId } from './types'
+import type { IconTypeId } from './types'
 import { locationKey, readWeatherLocation, type WeatherBundle } from './weather'
 
 /**
  * 图标类型注册表(见 CONTEXT.md「图标类型」/ ADR-0001)。
  *
- * 注册表存纯数据 + 纯函数(无 JSX):元数据(kind/singleton/sizes/defaultSize/refresh/detail/
+ * 注册表存纯数据 + 纯函数(无 JSX):元数据(kind/singleton/refresh/detail/
  * editor) + 纯 summarize。实际渲染由组件层按 type/detail 分发,使本模块 DOM-free、
- * 可 Vitest 纯函数测试(spec §接缝2)。
+ * 可 Vitest 纯函数测试(spec §接缝2)。图标无尺寸档位(ADR-0016),一律占 1 格。
  */
 export type IconTypeKind = 'base' | 'extension' | 'group'
 
@@ -45,8 +45,6 @@ export interface IconTypeDefinition {
   label: string
   kind: IconTypeKind
   singleton: boolean
-  sizes: IconSize[]
-  defaultSize: IconSize
   refresh: RefreshConfig
   detail: DetailContainer
   editor: EditorField[]
@@ -84,11 +82,6 @@ export function canAdd(typeId: IconTypeId, existingTypeIds: IconTypeId[]): boole
   return !existingTypeIds.includes(typeId)
 }
 
-/** 该类型支持的尺寸档。未登记返回空数组。 */
-export function sizesFor(typeId: IconTypeId): IconSize[] {
-  return registry.get(typeId)?.sizes ?? []
-}
-
 /**
  * 全部已登记类型定义,按登记顺序(基础类型先于扩展类型,内置 nav/stock/changelog 顺序稳定)。
  * issue 09 新增抽屉按基础/扩展分区渲染卡片时遍历用。
@@ -104,8 +97,6 @@ export const NAV_DEF: IconTypeDefinition = {
   label: '网站链接',
   kind: 'base',
   singleton: false,
-  sizes: ['small', 'medium', 'large'],
-  defaultSize: 'small',
   refresh: { kind: 'none' },
   detail: 'none',
   editor: [
@@ -115,14 +106,12 @@ export const NAV_DEF: IconTypeDefinition = {
   summarize: () => null, // nav 无实时摘要
 }
 
-/** 自选股:扩展类型,data={symbol,name}。三档各有专属信息密度(见 ADR-0007 / StockIcon)。详情=Modal。 */
+/** 自选股:扩展类型,data={symbol,name}。网格只显示名称+当前价,详情=Modal(ADR-0016)。 */
 export const STOCK_DEF: IconTypeDefinition = {
   id: 'stock',
   label: '自选股',
   kind: 'extension',
   singleton: false,
-  sizes: ['small', 'medium', 'large'],
-  defaultSize: 'medium',
   refresh: { kind: 'quotes' },
   detail: 'modal',
   editor: [
@@ -141,14 +130,12 @@ export const STOCK_DEF: IconTypeDefinition = {
   },
 }
 
-/** 更新日志:扩展类型,单例,data=null。详情=底部 Drawer(版本列表,10 ticket)。 */
+/** 更新日志:扩展类型,单例,data=null。网格显示最新版本号+发布日期,详情=底部 Drawer(ADR-0016)。 */
 export const CHANGELOG_DEF: IconTypeDefinition = {
   id: 'changelog',
   label: '更新日志',
   kind: 'extension',
   singleton: true,
-  sizes: ['large'],
-  defaultSize: 'large',
   refresh: { kind: 'changelog' },
   detail: 'drawer',
   editor: [],
@@ -162,14 +149,12 @@ export const CHANGELOG_DEF: IconTypeDefinition = {
 }
 
 /** 天气:扩展类型,非单例,data={location:{name,adm1,adm2,lat,lon}}。取数走后端代理(ADR-0009),详情=Modal。
- *  多实例 → 取数在 IconDataContext 集中批量;网格渲染走专属 WeatherIconBody(三档密度,见 ADR-0009)。 */
+ *  多实例 → 取数在 IconDataContext 集中批量;网格渲染走专属 WeatherIconBody(单档极简,ADR-0016)。 */
 export const WEATHER_DEF: IconTypeDefinition = {
   id: 'weather',
   label: '天气',
   kind: 'extension',
   singleton: false,
-  sizes: ['small', 'medium', 'large'],
-  defaultSize: 'medium',
   refresh: { kind: 'weather' },
   detail: 'modal',
   editor: [{ name: 'location', label: '城市', placeholder: '搜索城市' }],
@@ -186,7 +171,7 @@ export const WEATHER_DEF: IconTypeDefinition = {
  * 分组(ADR-0011):iOS 文件夹式收纳容器(块内成员 favicon 3×2 迷你预览,ADR-0015)。
  * kind='group' 不属于 base/extension 任一分区,
  * 新增抽屉按分区渲染时自然不列出——组只能经编辑模式合并手势诞生(POST /icons/merge),
- * 后端拒绝直接 POST type=group(空组不存活)。固定 small(1 格)、无 editor(改名走
+ * 后端拒绝直接 POST type=group(空组不存活)。固定占 1 格、无 editor(改名走
  * 08 票分组弹层点名称)、无实时摘要。弹层打开/翻页/组内拖出在 08 票接入。
  */
 export const GROUP_DEF: IconTypeDefinition = {
@@ -194,8 +179,6 @@ export const GROUP_DEF: IconTypeDefinition = {
   label: '分组',
   kind: 'group',
   singleton: false,
-  sizes: ['small'],
-  defaultSize: 'small',
   refresh: { kind: 'none' },
   detail: 'none',
   editor: [],

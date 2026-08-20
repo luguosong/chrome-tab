@@ -11,13 +11,11 @@ import IconView from './Icon'
 /**
  * 单页图标网格(见 spec §前端架构 IconGrid)。
  *
- * 固定 8×8 CSS grid + dense 自动流,图标按 size 跨格(small=1×1 / medium=2×2 / large=3×2)。
+ * 固定 8×8 CSS grid,每图标占 1 格(ADR-0016 单档化)。
  * section 自身透明(玻璃背景由 DashboardPage 的整页面板提供),走 h-full 填满走马灯 slide,
  * gridTemplateRows 显式锁定 8 行,故网格区域大小由视口布局决定、不随图标数量变化(空页与满页同尺寸)。
  * 拖拽(06):整页用一个 SortableContext 包裹,items=本页 iconId,grid 布局用
- * rectSortingStrategy(多尺寸 grid 的推荐 strategy);根 DndContext 由 DashboardPage 提供。
- *
- * 自动流策略:用 grid-auto-flow:dense 让小图标填充大图标之间的空隙。
+ * rectSortingStrategy;根 DndContext 由 DashboardPage 提供。
  */
 export default function IconGrid({
   page,
@@ -61,10 +59,8 @@ export default function IconGrid({
   const style: CSSProperties = {
     gridTemplateColumns: `repeat(${GRID_COLUMNS}, minmax(0, 1fr))`,
     gridTemplateRows: `repeat(${GRID_ROWS}, minmax(0, 1fr))`,
-    gridAutoFlow: 'dense',
     maxWidth: gridWidth,
-    // 「布局设置」间距拆分:横向(列)= gridGap,favicon 自相似推导只随它(ADR-0014);
-    // 竖向(行)= gridGapY,不参与推导,上限宽(固定画布防溢出)。
+    // 「布局设置」间距拆分:横向(列)= gridGap,竖向(行)= gridGapY(上限宽,固定画布防溢出)。
     columnGap: gridGap,
     rowGap: gridGapY,
   }

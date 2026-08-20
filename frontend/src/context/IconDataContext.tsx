@@ -79,7 +79,7 @@ export function IconDataProvider({
   const value = useMemo<IconDataValue>(
     () => ({
       quotes: quotesQ.data ?? {},
-      changelog: changelogQ.data ?? null,
+      changelog: changelogQ.data?.versions ?? null,
       weather: weatherQ.data ?? {},
       quotesError: quotesQ.isError ? (quotesQ.error as Error) : null,
       changelogError: changelogQ.isError ? (changelogQ.error as Error) : null,

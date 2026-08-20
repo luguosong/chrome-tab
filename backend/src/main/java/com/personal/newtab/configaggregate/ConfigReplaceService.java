@@ -6,7 +6,6 @@ import com.personal.newtab.configversion.ConfigVersionService;
 import com.personal.newtab.icon.Icon;
 import com.personal.newtab.icon.IconRepository;
 import com.personal.newtab.icon.IconType;
-import com.personal.newtab.icon.Size;
 import com.personal.newtab.layoutsetting.LayoutSettingService;
 import com.personal.newtab.page.Page;
 import com.personal.newtab.page.PageRepository;
@@ -121,14 +120,12 @@ public class ConfigReplaceService {
                     throw new OperationConflictException(409, "icons[" + idx + "] 分组成员必须与分组同页");
                 groupsWithMember.add(i.parentId());
             } else {
-                // 容量只计顶层行:组内成员不计(ADR-0011);组行按其 size(建组恒 SMALL=1 格)计入
-                int used = cellsByPage.merge(i.pageId(), i.size().cells(), Integer::sum);
+                // 容量只计顶层行:组内成员不计(ADR-0011);每图标 1 格(ADR-0016)
+                int used = cellsByPage.merge(i.pageId(), 1, Integer::sum);
                 if (used > DataBootstrap.DEFAULT_CAPACITY_CELLS)
                     throw new OperationConflictException(409, "页面(blob 内 " + i.pageId()
                             + ")容量超过 " + DataBootstrap.DEFAULT_CAPACITY_CELLS + " 格");
             }
-            if (i.type() == IconType.GROUP && i.size() != Size.SMALL)
-                throw new OperationConflictException(409, "icons[" + idx + "] 分组恒为 SMALL(占 1 格)");
             if (i.type().isSingleton() && singletonCount.merge(i.type(), 1, Integer::sum) > 1)
                 throw new OperationConflictException(409, "单例类型 " + i.type() + " 出现多次");
             idx++;
@@ -147,7 +144,6 @@ public class ConfigReplaceService {
         ic.setPageId(pageIdMap.get(ii.pageId()));
         ic.setParentId(newParentId);
         ic.setType(ii.type());
-        ic.setSize(ii.size());
         ic.setSortOrder(ii.sortOrder());
         ic.setData(ii.data());
         return iconRepository.save(ic);
@@ -169,13 +165,12 @@ public class ConfigReplaceService {
 
     /** blob 内的 icon。id 为**客户端键**(同 {@link PageItem#id} 先例,服务端整体重分配);
      *  pageId 引用 {@link PageItem#id};parentId 引用某 GROUP 行的 id,顶层为 null。
-     *  type/size 为大写枚举名(对齐 GET 输出)。 */
+     *  type 为大写枚举名(对齐 GET 输出)。旧备份(v2 前)多余的 size 字段由 Jackson 忽略。 */
     public record IconItem(
             @NotNull Long id,
             @NotNull Long pageId,
             Long parentId,
             @NotNull IconType type,
-            @NotNull Size size,
             @NotNull Integer sortOrder,
             Map<String, Object> data) {
     }

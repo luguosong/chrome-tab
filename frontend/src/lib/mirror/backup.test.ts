@@ -13,7 +13,7 @@ function cfg(): Config {
   return {
     pages: [{ id: 1, name: 'P1', sortOrder: 0 }],
     icons: [
-      { id: 7, pageId: 1, parentId: null, type: 'nav', size: 'small', sortOrder: 0, data: { name: 'a', url: 'https://x.com' } },
+      { id: 7, pageId: 1, parentId: null, type: 'nav', sortOrder: 0, data: { name: 'a', url: 'https://x.com' } },
     ],
     layoutSettings: { ...DEFAULT_LAYOUT_SETTINGS },
     updatedAt: '2026-08-12T10:00:00',
@@ -29,7 +29,6 @@ describe('toWireConfig', () => {
       pageId: 1,
       parentId: null,
       type: 'NAV',
-      size: 'SMALL',
       sortOrder: 0,
       data: { name: 'a', url: 'https://x.com' },
     })
@@ -38,10 +37,10 @@ describe('toWireConfig', () => {
 })
 
 describe('toBackupPayload / parseBackupPayload', () => {
-  it('往返:导出再解析得到等价 payload,schemaVersion=2', () => {
+  it('往返:导出再解析得到等价 payload', () => {
     const p = toBackupPayload(cfg())
     expect(p.schemaVersion).toBe(BACKUP_SCHEMA_VERSION)
-    expect(p.schemaVersion).toBe(2)
+    expect(p.schemaVersion).toBe(3)
     expect(typeof p.exportedAt).toBe('string')
     const parsed = parseBackupPayload(JSON.parse(JSON.stringify(p)))
     expect(parsed.config.pages).toEqual(p.config.pages)
@@ -56,6 +55,15 @@ describe('toBackupPayload / parseBackupPayload', () => {
     const parsed = parseBackupPayload(JSON.parse(JSON.stringify(v1)))
     expect(parsed.config.icons[0].id).toBe(1)
     expect(parsed.config.icons[0].parentId).toBeNull()
+  })
+  it('v2 备份(带 ADR-0016 前的 size 字段)接受:size 为多余字段透传、由后端忽略', () => {
+    const v2 = {
+      schemaVersion: 2,
+      exportedAt: '2026-01-01T00:00:00Z',
+      config: { pages: [{ id: 1, name: 'P', sortOrder: 0 }], icons: [{ id: 3, pageId: 1, parentId: null, type: 'NAV', size: 'LARGE', sortOrder: 0, data: null }], layoutSettings: null },
+    }
+    const parsed = parseBackupPayload(JSON.parse(JSON.stringify(v2)))
+    expect(parsed.config.icons[0].id).toBe(3)
   })
   it('schemaVersion 不符 → 抛', () => {
     expect(() => parseBackupPayload({ schemaVersion: 99, config: { pages: [], icons: [] } })).toThrow(
@@ -77,10 +85,10 @@ describe('mergeBlobs', () => {
     const current: Config = {
       ...cfg(),
       icons: [
-        { id: 7, pageId: 1, parentId: null, type: 'nav', size: 'small', sortOrder: 0, data: null },
+        { id: 7, pageId: 1, parentId: null, type: 'nav', sortOrder: 0, data: null },
         // 组(id 9)+ 一个成员(parentId 9):现有组的 id 不参与导入重映射,原样保留
-        { id: 9, pageId: 1, parentId: null, type: 'group', size: 'small', sortOrder: 1, data: { name: '组' } },
-        { id: 10, pageId: 1, parentId: 9, type: 'nav', size: 'small', sortOrder: 0, data: null },
+        { id: 9, pageId: 1, parentId: null, type: 'group', sortOrder: 1, data: { name: '组' } },
+        { id: 10, pageId: 1, parentId: 9, type: 'nav', sortOrder: 0, data: null },
       ],
     }
     const imported = {

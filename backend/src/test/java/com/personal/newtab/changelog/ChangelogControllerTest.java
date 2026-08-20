@@ -13,13 +13,14 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * ChangelogController HTTP 契约测试（见 ADR 0005 / TDD 接缝 3）。
+ * ChangelogController HTTP 契约测试（见 ADR 0005 / ADR-0016 / TDD 接缝 3）。
  *
  * <p>不触网：未认证断言在 Service 调用前即由安全链 401 拦截；已认证用例以 {@link MockBean}
- * 替换 Service，仅验证 200 / text/plain / 原样透传。</p>
+ * 替换两个 Service，仅验证 200 / JSON / markdown 与 releasedAt 字段透传。</p>
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -28,6 +29,7 @@ class ChangelogControllerTest {
 
     @Autowired private MockMvc mvc;
     @MockBean private ChangelogService changelogService;
+    @MockBean private NpmReleaseDateService npmReleaseDateService;
 
     @Test
     void changelogEndpointRequiresAuth() throws Exception {
@@ -37,11 +39,25 @@ class ChangelogControllerTest {
 
     @Test
     @WithUserDetails("admin")
-    void authenticatedReturnsMarkdownAsPlainText() throws Exception {
+    void authenticatedReturnsMarkdownAndReleaseDateAsJson() throws Exception {
         when(changelogService.get()).thenReturn("## 1.0\n- 测试条目\n");
+        when(npmReleaseDateService.latestReleaseDate()).thenReturn("2026-08-19T00:00:00.000Z");
         mvc.perform(get("/api/changelog"))
                 .andExpect(status().isOk())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
-                .andExpect(content().string("## 1.0\n- 测试条目\n"));
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.markdown").value("## 1.0\n- 测试条目\n"))
+                .andExpect(jsonPath("$.releasedAt").value("2026-08-19T00:00:00.000Z"));
+    }
+
+    @Test
+    @WithUserDetails("admin")
+    void releasedAtNullWhenNpmUnavailable() throws Exception {
+        // npm 拉取失败 → releasedAt null(前端日期行降级「—」),markdown 不受阻塞
+        when(changelogService.get()).thenReturn("## 1.0\n");
+        when(npmReleaseDateService.latestReleaseDate()).thenReturn(null);
+        mvc.perform(get("/api/changelog"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.markdown").value("## 1.0\n"))
+                .andExpect(jsonPath("$.releasedAt").value((String) null));
     }
 }

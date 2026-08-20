@@ -58,7 +58,7 @@ class ConfigReplaceControllerTest {
         assertThat(pageRepository.count()).isEqualTo(3);   // 种子 3 页
         String body = """
                 {"pages":[{"id":1,"name":"唯一页","sortOrder":0}],
-                 "icons":[{"id":1,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":0,"data":{"name":"a","url":"https://x.com"}}],
+                 "icons":[{"id":1,"pageId":1,"type":"NAV","sortOrder":0,"data":{"name":"a","url":"https://x.com"}}],
                  "layoutSettings":{"gridWidth":1024,"gridGap":8,"iconScale":1.0}}
                 """;
         mvc.perform(put("/api/config").contentType(JSON).content(body))
@@ -74,12 +74,25 @@ class ConfigReplaceControllerTest {
 
     @Test
     @WithUserDetails("admin")
-    void replaceRejectsCapacityOverflow409() throws Exception {
-        // 11 个 LARGE(6 格)= 66 > 64 → 第 11 个触发 409
+    void replaceAcceptsLegacyV2BlobWithSizeField() throws Exception {
+        // ADR-0016 前的 v2 备份 icons 带 size 字段:PUT 视其为未知属性忽略,整体替换仍成功
+        String body = """
+                {"pages":[{"id":1,"name":"P","sortOrder":0}],
+                 "icons":[{"id":1,"pageId":1,"type":"NAV","size":"LARGE","sortOrder":0,"data":{"name":"a","url":"https://x.com"}}]}
+                """;
+        mvc.perform(put("/api/config").contentType(JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.icons.length()").value(1))
+                .andExpect(jsonPath("$.icons[0].size").doesNotExist());
+    }
+
+    @Test
+    @WithUserDetails("admin")
+    void replaceRejectsCapacityOverflow409() throws Exception {        // 65 个 NAV(每图标 1 格)> 64 → 409
         StringBuilder icons = new StringBuilder();
-        for (int i = 0; i < 11; i++) {
+        for (int i = 0; i < 65; i++) {
             if (i > 0) icons.append(',');
-            icons.append("{\"id\":").append(i).append(",\"pageId\":1,\"type\":\"NAV\",\"size\":\"LARGE\",\"sortOrder\":")
+            icons.append("{\"id\":").append(i).append(",\"pageId\":1,\"type\":\"NAV\",\"sortOrder\":")
                     .append(i).append(",\"data\":{\"name\":\"n\",\"url\":\"https://x.com\"}}");
         }
         String body = "{\"pages\":[{\"id\":1,\"name\":\"P\",\"sortOrder\":0}],\"icons\":["
@@ -96,8 +109,8 @@ class ConfigReplaceControllerTest {
         String body = """
                 {"pages":[{"id":1,"name":"P","sortOrder":0}],
                  "icons":[
-                   {"id":1,"pageId":1,"type":"CHANGELOG","size":"LARGE","sortOrder":0,"data":null},
-                   {"id":2,"pageId":1,"type":"CHANGELOG","size":"LARGE","sortOrder":1,"data":null}
+                   {"id":1,"pageId":1,"type":"CHANGELOG","sortOrder":0,"data":null},
+                   {"id":2,"pageId":1,"type":"CHANGELOG","sortOrder":1,"data":null}
                  ]}
                 """;
         mvc.perform(put("/api/config").contentType(JSON).content(body))
@@ -111,7 +124,7 @@ class ConfigReplaceControllerTest {
         // 图标引用 pages 内不存在的 pageId=999
         String body = """
                 {"pages":[{"id":1,"name":"P","sortOrder":0}],
-                 "icons":[{"id":1,"pageId":999,"type":"NAV","size":"SMALL","sortOrder":0,"data":{"name":"a","url":"https://x.com"}}]}
+                 "icons":[{"id":1,"pageId":999,"type":"NAV","sortOrder":0,"data":{"name":"a","url":"https://x.com"}}]}
                 """;
         mvc.perform(put("/api/config").contentType(JSON).content(body))
                 .andExpect(status().isConflict())
@@ -127,10 +140,10 @@ class ConfigReplaceControllerTest {
         String body = """
                 {"pages":[{"id":1,"name":"P","sortOrder":0}],
                  "icons":[
-                   {"id":10,"pageId":1,"type":"GROUP","size":"SMALL","sortOrder":0,"data":{"name":"组"}},
-                   {"id":11,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":0,"parentId":10,"data":{"name":"a","url":"https://x.com"}},
-                   {"id":12,"pageId":1,"type":"NAV","size":"MEDIUM","sortOrder":1,"parentId":10,"data":{"name":"b","url":"https://y.com"}},
-                   {"id":13,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":1,"data":{"name":"c","url":"https://z.com"}}
+                   {"id":10,"pageId":1,"type":"GROUP","sortOrder":0,"data":{"name":"组"}},
+                   {"id":11,"pageId":1,"type":"NAV","sortOrder":0,"parentId":10,"data":{"name":"a","url":"https://x.com"}},
+                   {"id":12,"pageId":1,"type":"NAV","sortOrder":1,"parentId":10,"data":{"name":"b","url":"https://y.com"}},
+                   {"id":13,"pageId":1,"type":"NAV","sortOrder":1,"data":{"name":"c","url":"https://z.com"}}
                  ]}
                 """;
         mvc.perform(put("/api/config").contentType(JSON).content(body))
@@ -162,26 +175,23 @@ class ConfigReplaceControllerTest {
         }
         List<Case> cases = List.of(
                 new Case("孤儿 parentId", """
-                        {"id":1,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":0,"parentId":999,"data":null}"""),
+                        {"id":1,"pageId":1,"type":"NAV","sortOrder":0,"parentId":999,"data":null}"""),
                 new Case("parentId 指向非组行", """
-                        {"id":1,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":0,"data":null},
-                        {"id":2,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":1,"parentId":1,"data":null}"""),
+                        {"id":1,"pageId":1,"type":"NAV","sortOrder":0,"data":null},
+                        {"id":2,"pageId":1,"type":"NAV","sortOrder":1,"parentId":1,"data":null}"""),
                 new Case("成员非 NAV", """
-                        {"id":1,"pageId":1,"type":"GROUP","size":"SMALL","sortOrder":0,"data":null},
-                        {"id":2,"pageId":1,"type":"STOCK","size":"SMALL","sortOrder":0,"parentId":1,"data":null}"""),
+                        {"id":1,"pageId":1,"type":"GROUP","sortOrder":0,"data":null},
+                        {"id":2,"pageId":1,"type":"STOCK","sortOrder":0,"parentId":1,"data":null}"""),
                 new Case("嵌套(组行自身带 parentId)", """
-                        {"id":1,"pageId":1,"type":"GROUP","size":"SMALL","sortOrder":0,"data":null},
-                        {"id":2,"pageId":1,"type":"GROUP","size":"SMALL","sortOrder":1,"parentId":1,"data":null},
-                        {"id":3,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":0,"parentId":2,"data":null}"""),
+                        {"id":1,"pageId":1,"type":"GROUP","sortOrder":0,"data":null},
+                        {"id":2,"pageId":1,"type":"GROUP","sortOrder":1,"parentId":1,"data":null},
+                        {"id":3,"pageId":1,"type":"NAV","sortOrder":0,"parentId":2,"data":null}"""),
                 new Case("空组", """
-                        {"id":1,"pageId":1,"type":"GROUP","size":"SMALL","sortOrder":0,"data":null},
-                        {"id":2,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":1,"data":null}"""),
+                        {"id":1,"pageId":1,"type":"GROUP","sortOrder":0,"data":null},
+                        {"id":2,"pageId":1,"type":"NAV","sortOrder":1,"data":null}"""),
                 new Case("成员与组跨页", """
-                        {"id":1,"pageId":1,"type":"GROUP","size":"SMALL","sortOrder":0,"data":null},
-                        {"id":2,"pageId":2,"type":"NAV","size":"SMALL","sortOrder":0,"parentId":1,"data":null}"""),
-                new Case("组行 size 非 SMALL", """
-                        {"id":1,"pageId":1,"type":"GROUP","size":"LARGE","sortOrder":0,"data":null},
-                        {"id":2,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":0,"parentId":1,"data":null}"""));
+                        {"id":1,"pageId":1,"type":"GROUP","sortOrder":0,"data":null},
+                        {"id":2,"pageId":2,"type":"NAV","sortOrder":0,"parentId":1,"data":null}"""));
         for (Case c : cases) {
             mvc.perform(put("/api/config").contentType(JSON).content(c.body()))
                     .andExpect(status().isConflict())
@@ -192,21 +202,21 @@ class ConfigReplaceControllerTest {
     @Test
     @WithUserDetails("admin")
     void replaceCapacityCountsTopLevelOnly() throws Exception {
-        // 顶层 10 LARGE(60 格)+ 组(1 格)=61 ≤ 64 通过;组内 2 个 MEDIUM 成员不计容量
-        // (若误把成员计入:61+8=69 > 64 → 409,本测即失败)
+        // 顶层 63 NAV(63 格)+ 组(1 格)= 64 ≤ 64 通过;组内 2 成员不计容量
+        // (若误把成员计入:64+2=66 > 64 → 409,本测即失败;每图标 1 格,ADR-0016)
         StringBuilder icons = new StringBuilder(
-                "{\"id\":100,\"pageId\":1,\"type\":\"GROUP\",\"size\":\"SMALL\",\"sortOrder\":0,\"data\":null}");
-        for (int i = 0; i < 10; i++) {
-            icons.append(",{\"id\":").append(i).append(",\"pageId\":1,\"type\":\"NAV\",\"size\":\"LARGE\",\"sortOrder\":")
+                "{\"id\":100,\"pageId\":1,\"type\":\"GROUP\",\"sortOrder\":0,\"data\":null}");
+        for (int i = 0; i < 63; i++) {
+            icons.append(",{\"id\":").append(i).append(",\"pageId\":1,\"type\":\"NAV\",\"sortOrder\":")
                     .append(i + 1).append(",\"data\":null}");
         }
-        icons.append(",{\"id\":200,\"pageId\":1,\"type\":\"NAV\",\"size\":\"MEDIUM\",\"sortOrder\":0,\"parentId\":100,\"data\":null}");
-        icons.append(",{\"id\":201,\"pageId\":1,\"type\":\"NAV\",\"size\":\"MEDIUM\",\"sortOrder\":1,\"parentId\":100,\"data\":null}");
+        icons.append(",{\"id\":200,\"pageId\":1,\"type\":\"NAV\",\"sortOrder\":0,\"parentId\":100,\"data\":null}");
+        icons.append(",{\"id\":201,\"pageId\":1,\"type\":\"NAV\",\"sortOrder\":1,\"parentId\":100,\"data\":null}");
         String body = "{\"pages\":[{\"id\":1,\"name\":\"P\",\"sortOrder\":0}],\"icons\":["
                 + icons + "],\"layoutSettings\":null}";
         mvc.perform(put("/api/config").contentType(JSON).content(body))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.icons.length()").value(13));
+                .andExpect(jsonPath("$.icons.length()").value(66));
     }
 
     @Test

@@ -277,8 +277,8 @@ function Dashboard() {
 
     // ── 组成员拖出(票 08)────────────────────────────────────────────
     // 被拖项在组内且 over 落在页面网格(图标或空页 droppable):乐观 move-out——
-    // moveIcon 清 parentId、按保留 size 计容量(成员原不计容量,canFit 直接判
-    // 「已用 + 尺寸 ≤ 容量」)、落 over 位序,图标拖拽中即现身目标页网格。落回弹层
+    // moveIcon 清 parentId、canFit 直接判「已用 + 1 ≤ 容量」(每图标 1 格,ADR-0016)、
+    // 落 over 位序,图标拖拽中即现身目标页网格。落回弹层
     // 已被上方守卫早退;搬移后 parentId 变 null,后续 onDragOver 走顶层同页早退,
     // 不往复搬移(防渲染循环,#735/#1421)。dwell 已挡成员(hook 判 parentId),不冲突。
     if (dragged.parentId != null) {
@@ -287,7 +287,7 @@ function Dashboard() {
       const targetIcons = cur.icons.filter(
         (i) => i.pageId === targetPageId && i.parentId === null,
       )
-      if (!canFit(targetIcons, DEFAULT_PAGE_CAPACITY, dragged.size)) {
+      if (!canFit(targetIcons, DEFAULT_PAGE_CAPACITY)) {
         showNotice('目标页已满,无法移出')
         return
       }
@@ -304,7 +304,7 @@ function Dashboard() {
       if (targetPageId === dragged.pageId) return
       // 容量只计顶层行(cellsUsed 内跳过组内成员,ADR-0011)
       const targetIcons = cur.icons.filter((i) => i.pageId === targetPageId)
-      if (!canFit(targetIcons, DEFAULT_PAGE_CAPACITY, dragged.size)) {
+      if (!canFit(targetIcons, DEFAULT_PAGE_CAPACITY)) {
         showNotice('目标页已满,无法移入')
         return
       }
@@ -324,7 +324,7 @@ function Dashboard() {
     const targetIcons = cur.icons.filter(
       (i) => i.pageId === targetPageId && i.parentId === null,
     )
-    if (!canFit(targetIcons, DEFAULT_PAGE_CAPACITY, dragged.size)) {
+    if (!canFit(targetIcons, DEFAULT_PAGE_CAPACITY)) {
       showNotice('目标页已满,无法移入')
       return
     }

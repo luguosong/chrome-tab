@@ -20,12 +20,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /**
- * Icon 写 API 测试（见 issue 04 / spec §接缝1）。
+ * Icon 写 API 测试（见 issue 04 / spec §接缝1）。图标恒占 1 格（ADR-0016）。
  *
  * <p>沿用 ConfigControllerTest 的接缝约定：{@code @Transactional} 每测回滚；
- * 上下文启动时已 seed（12 nav small + 1 changelog large + 13 stock medium，分布在 3 页）。
- * 种子页占用：nav=12 格、changelog=6 格、stock 行情页 13 只 medium=52 格（8×8=64 容量，未满）。
- * 满页拒绝类测试用 {@link #addMediumFillers} 把目标页补到 64 格后再断言 409。</p>
+ * 上下文启动时已 seed（12 nav + 1 changelog + 13 stock，分布在 3 页，每图标 1 格）。
+ * 种子页占用：nav=12、changelog=1、stock=13（8×8=64 容量，均未满）。
+ * 满页拒绝类测试用 {@link #addFillers} 把目标页补到 64 格后再断言 409。</p>
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -43,10 +43,10 @@ class IconControllerWriteApiTest {
     }
 
     /**
-     * 直接经仓库向 page 追加 n 个 medium 填充图标（绕过容量校验），
-     * 把种子页补到满容量以测 409。容量由 24→64 后种子页不再自然满，需显式补满。
+     * 直接经仓库向 page 追加 n 个填充图标（绕过容量校验），
+     * 把种子页补到满容量（每图标 1 格）以测 409。
      */
-    private void addMediumFillers(Page page, int n) {
+    private void addFillers(Page page, int n) {
         Long uid = page.getUserId();
         List<Icon> existing = iconRepository.findByUserIdAndPageIdOrderBySortOrderAscIdAsc(uid, page.getId());
         int nextOrder = existing.isEmpty() ? 0 : existing.get(existing.size() - 1).getSortOrder() + 1;
@@ -55,7 +55,6 @@ class IconControllerWriteApiTest {
             f.setUserId(uid);
             f.setPageId(page.getId());
             f.setType(IconType.STOCK);
-            f.setSize(Size.MEDIUM);
             f.setSortOrder(nextOrder + i);
             f.setData(Map.of("symbol", "fill" + i, "name", "填充" + i));
             iconRepository.save(f);
@@ -69,29 +68,27 @@ class IconControllerWriteApiTest {
     void createNavIconOnNavPageSucceeds() throws Exception {
         Page nav = pageByName("快速导航");
         String body = """
-                {"pageId":%d,"type":"NAV","size":"SMALL","data":{"name":"Test","url":"https://test.com"}}
+                {"pageId":%d,"type":"NAV","data":{"name":"Test","url":"https://test.com"}}
                 """.formatted(nav.getId());
         mvc.perform(post("/api/icons").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").exists())
                 .andExpect(jsonPath("$.pageId").value(nav.getId()))
                 .andExpect(jsonPath("$.type").value("NAV"))
-                .andExpect(jsonPath("$.size").value("SMALL"))
                 .andExpect(jsonPath("$.data.name").value("Test"))
                 .andExpect(jsonPath("$.sortOrder").value(12));   // 12 nav 之后追加
     }
 
     @Test
     @WithUserDetails("admin")
-    void createMediumIconOnChangelogPageSucceeds() throws Exception {
-        // changelog 页仅 1 个 large(6 格)，余 58 格（64-6），medium(4) 能放
+    void createIconOnChangelogPageSucceeds() throws Exception {
+        // changelog 页仅 1 个图标,余 63 格,再放 1 格
         Page cl = pageByName("日志更新");
         String body = """
-                {"pageId":%d,"type":"STOCK","size":"MEDIUM","data":{"symbol":"usTEST","name":"测试"}}
+                {"pageId":%d,"type":"STOCK","data":{"symbol":"usTEST","name":"测试"}}
                 """.formatted(cl.getId());
         mvc.perform(post("/api/icons").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.size").value("MEDIUM"))
                 .andExpect(jsonPath("$.sortOrder").value(1));   // 1 个 changelog 之后
     }
 
@@ -100,29 +97,15 @@ class IconControllerWriteApiTest {
     @Test
     @WithUserDetails("admin")
     void createIconOnFullPageReturns409WithRemainingCells() throws Exception {
-        // 行情页种子 13 只 medium=52 格；补 3 只 medium 到 64 格（满）→ 再 POST 应 409
+        // 行情页种子 13 个;补 51 个到 64(满)→ 再 POST → 409
         Page stock = pageByName("行情");
-        addMediumFillers(stock, 3);
+        addFillers(stock, 51);
         String body = """
-                {"pageId":%d,"type":"STOCK","size":"MEDIUM","data":{"symbol":"usNEW","name":"新"}}
+                {"pageId":%d,"type":"STOCK","data":{"symbol":"usNEW","name":"新"}}
                 """.formatted(stock.getId());
         mvc.perform(post("/api/icons").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.status").value(409))
-                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("剩余 0 格")));
-    }
-
-    @Test
-    @WithUserDetails("admin")
-    void createLargeIconWhenNotEnoughRemainingReturns409() throws Exception {
-        // nav 页种子 12 small=12 格；补 13 只 medium(52 格) 到 64 格（满，余 0）→ 再 POST large(需 6) → 409
-        Page nav = pageByName("快速导航");
-        addMediumFillers(nav, 13);
-        String over = """
-                {"pageId":%d,"type":"NAV","size":"LARGE","data":{"name":"L","url":"https://x.com"}}
-                """.formatted(nav.getId());
-        mvc.perform(post("/api/icons").contentType(MediaType.APPLICATION_JSON).content(over))
-                .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("剩余 0 格")));
     }
 
@@ -133,7 +116,7 @@ class IconControllerWriteApiTest {
     void createSecondChangelogReturns409Singleton() throws Exception {
         Page nav = pageByName("快速导航");
         String body = """
-                {"pageId":%d,"type":"CHANGELOG","size":"LARGE","data":null}
+                {"pageId":%d,"type":"CHANGELOG","data":null}
                 """.formatted(nav.getId());
         mvc.perform(post("/api/icons").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isConflict())
@@ -147,7 +130,7 @@ class IconControllerWriteApiTest {
     @WithUserDetails("admin")
     void createWithUnknownPageReturns404() throws Exception {
         String body = """
-                {"pageId":999999,"type":"NAV","size":"SMALL","data":{"name":"x","url":"https://x.com"}}
+                {"pageId":999999,"type":"NAV","data":{"name":"x","url":"https://x.com"}}
                 """;
         mvc.perform(post("/api/icons").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isNotFound());
@@ -157,44 +140,15 @@ class IconControllerWriteApiTest {
 
     @Test
     @WithUserDetails("admin")
-    void updateIconSizeShrinkSucceedsNoCapacityCheck() throws Exception {
-        // changelog 的 large → medium（缩小不触发容量校验）
-        Icon cl = iconRepository.findAll().stream()
-                .filter(i -> i.getType() == IconType.CHANGELOG).findFirst().orElseThrow();
-        String body = """
-                {"size":"MEDIUM"}
-                """;
-        mvc.perform(patch("/api/icons/" + cl.getId()).contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.size").value("MEDIUM"));
-    }
-
-    @Test
-    @WithUserDetails("admin")
-    void updateIconSizeGrowSucceedsWhenCapacityAllows() throws Exception {
-        // nav 页 12 small = 12 格占用，余 52。把其中一只 small→medium(+3) → 仍余 49，放得下
-        Icon nav0 = iconRepository.findAll().stream()
+    void patchWithLegacySizeFieldIsIgnored() throws Exception {
+        // ADR-0016 后 PATCH 不再有 size;旧客户端发来的 size 字段是未知属性,Jackson 忽略、data 不动
+        Icon nav = iconRepository.findAll().stream()
                 .filter(i -> i.getType() == IconType.NAV).findFirst().orElseThrow();
-        mvc.perform(patch("/api/icons/" + nav0.getId()).contentType(MediaType.APPLICATION_JSON).content("""
+        mvc.perform(patch("/api/icons/" + nav.getId()).contentType(MediaType.APPLICATION_JSON).content("""
                 {"size":"MEDIUM"}
                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.size").value("MEDIUM"));
-    }
-
-    @Test
-    @WithUserDetails("admin")
-    void updateIconSizeGrowRejectWhenOverCapacity() throws Exception {
-        // 行情页补满到 64 格。把其中一只 medium(4) 改 large(6)（+2 > 余 0）→ 409
-        Page stock = pageByName("行情");
-        addMediumFillers(stock, 3);
-        Icon first = iconRepository.findByPageIdOrderBySortOrderAscIdAsc(stock.getId()).get(0);
-        String body = """
-                {"size":"LARGE"}
-                """;
-        mvc.perform(patch("/api/icons/" + first.getId()).contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("剩余 0 格")));
+                .andExpect(jsonPath("$.data.name").value(nav.getData().get("name")));
     }
 
     @Test
@@ -215,9 +169,7 @@ class IconControllerWriteApiTest {
     @Test
     @WithUserDetails("admin")
     void updateUnknownIconReturns404() throws Exception {
-        mvc.perform(patch("/api/icons/999999").contentType(MediaType.APPLICATION_JSON).content("""
-                {"size":"SMALL"}
-                """))
+        mvc.perform(patch("/api/icons/999999").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isNotFound());
     }
 
@@ -272,7 +224,7 @@ class IconControllerWriteApiTest {
     @Test
     @WithUserDetails("admin")
     void moveIconCrossPageSucceedsWhenCapacityAllows() throws Exception {
-        // changelog 页（余 58 格）能容纳从 nav 页移过来的 1 个 small
+        // changelog 页（余 63 格）能容纳从 nav 页移过来的 1 个图标
         Page nav = pageByName("快速导航");
         Page cl = pageByName("日志更新");
         Icon mover = iconRepository.findByPageIdOrderBySortOrderAscIdAsc(nav.getId()).get(0);
@@ -296,9 +248,9 @@ class IconControllerWriteApiTest {
     @Test
     @WithUserDetails("admin")
     void moveIconCrossPageRejectWhenTargetFull() throws Exception {
-        // 试图把 changelog(large,6 格) 移到补满（64 格）的 stock 页（余 0）→ 409
+        // 试图把 changelog 图标移到补满（64 格）的 stock 页（余 0）→ 409
         Page stock = pageByName("行情");
-        addMediumFillers(stock, 3);
+        addFillers(stock, 51);
         Icon changelog = iconRepository.findAll().stream()
                 .filter(i -> i.getType() == IconType.CHANGELOG).findFirst().orElseThrow();
         String body = """

@@ -20,10 +20,11 @@ public final class LayoutLimits {
     public static final int GAP_Y_MAX = 32;
     public static final int GAP_Y_DEFAULT = 8;
 
-    /** @DecimalMin/@DecimalMax 取 String,需编译期常量字面量。 */
+    /** @DecimalMin/@DecimalMax 取 String,需编译期常量字面量。
+     *  ADR-0016:默认 1.5(整体放大)、上限 2.0——iconScale 是图标整体大小的唯一调节。 */
     public static final String SCALE_MIN = "0.75";
-    public static final String SCALE_MAX = "1.5";
-    public static final double SCALE_DEFAULT = 1.0;
+    public static final String SCALE_MAX = "2.0";
+    public static final double SCALE_DEFAULT = 1.5;
 
     public static final int FOG_MIN = 0;
     public static final int FOG_MAX = 60;
