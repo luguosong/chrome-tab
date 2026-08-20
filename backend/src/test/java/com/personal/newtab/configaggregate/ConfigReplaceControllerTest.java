@@ -2,7 +2,9 @@ package com.personal.newtab.configaggregate;
 
 import com.personal.newtab.configversion.ConfigVersion;
 import com.personal.newtab.configversion.ConfigVersionRepository;
+import com.personal.newtab.icon.Icon;
 import com.personal.newtab.icon.IconRepository;
+import com.personal.newtab.icon.IconType;
 import com.personal.newtab.page.PageRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +17,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -55,7 +58,7 @@ class ConfigReplaceControllerTest {
         assertThat(pageRepository.count()).isEqualTo(3);   // 种子 3 页
         String body = """
                 {"pages":[{"id":1,"name":"唯一页","sortOrder":0}],
-                 "icons":[{"pageId":1,"type":"NAV","size":"SMALL","sortOrder":0,"data":{"name":"a","url":"https://x.com"}}],
+                 "icons":[{"id":1,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":0,"data":{"name":"a","url":"https://x.com"}}],
                  "layoutSettings":{"gridWidth":1024,"gridGap":8,"iconScale":1.0}}
                 """;
         mvc.perform(put("/api/config").contentType(JSON).content(body))
@@ -76,7 +79,7 @@ class ConfigReplaceControllerTest {
         StringBuilder icons = new StringBuilder();
         for (int i = 0; i < 11; i++) {
             if (i > 0) icons.append(',');
-            icons.append("{\"pageId\":1,\"type\":\"NAV\",\"size\":\"LARGE\",\"sortOrder\":")
+            icons.append("{\"id\":").append(i).append(",\"pageId\":1,\"type\":\"NAV\",\"size\":\"LARGE\",\"sortOrder\":")
                     .append(i).append(",\"data\":{\"name\":\"n\",\"url\":\"https://x.com\"}}");
         }
         String body = "{\"pages\":[{\"id\":1,\"name\":\"P\",\"sortOrder\":0}],\"icons\":["
@@ -93,8 +96,8 @@ class ConfigReplaceControllerTest {
         String body = """
                 {"pages":[{"id":1,"name":"P","sortOrder":0}],
                  "icons":[
-                   {"pageId":1,"type":"CHANGELOG","size":"LARGE","sortOrder":0,"data":null},
-                   {"pageId":1,"type":"CHANGELOG","size":"LARGE","sortOrder":1,"data":null}
+                   {"id":1,"pageId":1,"type":"CHANGELOG","size":"LARGE","sortOrder":0,"data":null},
+                   {"id":2,"pageId":1,"type":"CHANGELOG","size":"LARGE","sortOrder":1,"data":null}
                  ]}
                 """;
         mvc.perform(put("/api/config").contentType(JSON).content(body))
@@ -108,11 +111,102 @@ class ConfigReplaceControllerTest {
         // 图标引用 pages 内不存在的 pageId=999
         String body = """
                 {"pages":[{"id":1,"name":"P","sortOrder":0}],
-                 "icons":[{"pageId":999,"type":"NAV","size":"SMALL","sortOrder":0,"data":{"name":"a","url":"https://x.com"}}]}
+                 "icons":[{"id":1,"pageId":999,"type":"NAV","size":"SMALL","sortOrder":0,"data":{"name":"a","url":"https://x.com"}}]}
                 """;
         mvc.perform(put("/api/config").contentType(JSON).content(body))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.status").value(409));
+    }
+
+    // ---------- 分组(ADR-0011):wire id/parentId 重映射 + 组关系校验 ----------
+
+    @Test
+    @WithUserDetails("admin")
+    void replaceWithGroupRemapsIconAndParentIds() throws Exception {
+        // 组(id=10)+ 两成员(parentId=10)+ 一顶层;客户端键全部重映射
+        String body = """
+                {"pages":[{"id":1,"name":"P","sortOrder":0}],
+                 "icons":[
+                   {"id":10,"pageId":1,"type":"GROUP","size":"SMALL","sortOrder":0,"data":{"name":"组"}},
+                   {"id":11,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":0,"parentId":10,"data":{"name":"a","url":"https://x.com"}},
+                   {"id":12,"pageId":1,"type":"NAV","size":"MEDIUM","sortOrder":1,"parentId":10,"data":{"name":"b","url":"https://y.com"}},
+                   {"id":13,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":1,"data":{"name":"c","url":"https://z.com"}}
+                 ]}
+                """;
+        mvc.perform(put("/api/config").contentType(JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.icons.length()").value(4));
+        // 经仓库断言重映射:成员 parentId == 组行新 DB id(不再是客户端键 10)
+        var groups = iconRepository.findAll().stream().filter(i -> i.getType() == IconType.GROUP).toList();
+        assertThat(groups).hasSize(1);
+        Icon g = groups.get(0);
+        assertThat(g.getParentId()).isNull();
+        assertThat(iconRepository.findAll().stream().filter(i -> i.getParentId() != null))
+                .hasSize(2)
+                .allSatisfy(m -> {
+                    assertThat(m.getParentId()).isEqualTo(g.getId());
+                    assertThat(m.getPageId()).isEqualTo(g.getPageId());
+                    assertThat(m.getType()).isEqualTo(IconType.NAV);
+                });
+    }
+
+    @Test
+    @WithUserDetails("admin")
+    void replaceRejectsGroupViolations409() throws Exception {
+        // 六种组关系违例 → 一律 409
+        record Case(String name, String icons) {
+            String body() {
+                return "{\"pages\":[{\"id\":1,\"name\":\"P1\",\"sortOrder\":0},{\"id\":2,\"name\":\"P2\",\"sortOrder\":1}],\"icons\":["
+                        + icons + "]}";
+            }
+        }
+        List<Case> cases = List.of(
+                new Case("孤儿 parentId", """
+                        {"id":1,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":0,"parentId":999,"data":null}"""),
+                new Case("parentId 指向非组行", """
+                        {"id":1,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":0,"data":null},
+                        {"id":2,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":1,"parentId":1,"data":null}"""),
+                new Case("成员非 NAV", """
+                        {"id":1,"pageId":1,"type":"GROUP","size":"SMALL","sortOrder":0,"data":null},
+                        {"id":2,"pageId":1,"type":"STOCK","size":"SMALL","sortOrder":0,"parentId":1,"data":null}"""),
+                new Case("嵌套(组行自身带 parentId)", """
+                        {"id":1,"pageId":1,"type":"GROUP","size":"SMALL","sortOrder":0,"data":null},
+                        {"id":2,"pageId":1,"type":"GROUP","size":"SMALL","sortOrder":1,"parentId":1,"data":null},
+                        {"id":3,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":0,"parentId":2,"data":null}"""),
+                new Case("空组", """
+                        {"id":1,"pageId":1,"type":"GROUP","size":"SMALL","sortOrder":0,"data":null},
+                        {"id":2,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":1,"data":null}"""),
+                new Case("成员与组跨页", """
+                        {"id":1,"pageId":1,"type":"GROUP","size":"SMALL","sortOrder":0,"data":null},
+                        {"id":2,"pageId":2,"type":"NAV","size":"SMALL","sortOrder":0,"parentId":1,"data":null}"""),
+                new Case("组行 size 非 SMALL", """
+                        {"id":1,"pageId":1,"type":"GROUP","size":"LARGE","sortOrder":0,"data":null},
+                        {"id":2,"pageId":1,"type":"NAV","size":"SMALL","sortOrder":0,"parentId":1,"data":null}"""));
+        for (Case c : cases) {
+            mvc.perform(put("/api/config").contentType(JSON).content(c.body()))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.status").value(409));
+        }
+    }
+
+    @Test
+    @WithUserDetails("admin")
+    void replaceCapacityCountsTopLevelOnly() throws Exception {
+        // 顶层 10 LARGE(60 格)+ 组(1 格)=61 ≤ 64 通过;组内 2 个 MEDIUM 成员不计容量
+        // (若误把成员计入:61+8=69 > 64 → 409,本测即失败)
+        StringBuilder icons = new StringBuilder(
+                "{\"id\":100,\"pageId\":1,\"type\":\"GROUP\",\"size\":\"SMALL\",\"sortOrder\":0,\"data\":null}");
+        for (int i = 0; i < 10; i++) {
+            icons.append(",{\"id\":").append(i).append(",\"pageId\":1,\"type\":\"NAV\",\"size\":\"LARGE\",\"sortOrder\":")
+                    .append(i + 1).append(",\"data\":null}");
+        }
+        icons.append(",{\"id\":200,\"pageId\":1,\"type\":\"NAV\",\"size\":\"MEDIUM\",\"sortOrder\":0,\"parentId\":100,\"data\":null}");
+        icons.append(",{\"id\":201,\"pageId\":1,\"type\":\"NAV\",\"size\":\"MEDIUM\",\"sortOrder\":1,\"parentId\":100,\"data\":null}");
+        String body = "{\"pages\":[{\"id\":1,\"name\":\"P\",\"sortOrder\":0}],\"icons\":["
+                + icons + "],\"layoutSettings\":null}";
+        mvc.perform(put("/api/config").contentType(JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.icons.length()").value(13));
     }
 
     @Test

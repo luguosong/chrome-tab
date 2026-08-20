@@ -25,6 +25,10 @@ public class Icon {
     @Column(name = "page_id", nullable = false)
     private Long pageId;
 
+    /** 分组成员的所属组行 id（ADR-0011）；顶层图标为 null。与 user_id/page_id 同款 plain column，FK 只在迁移脚本。 */
+    @Column(name = "parent_id")
+    private Long parentId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     private IconType type;

@@ -22,4 +22,10 @@ public interface IconRepository extends JpaRepository<Icon, Long> {
 
     /** 按页加载（含 user 维度，避免越权），按 sortOrder、id 稳定排序。 */
     List<Icon> findByUserIdAndPageIdOrderBySortOrderAscIdAsc(Long userId, Long pageId);
+
+    /** 页面顶层序列（ADR-0011）：该页 parent_id IS NULL 的行，容量与页序计算用。 */
+    List<Icon> findByUserIdAndPageIdAndParentIdIsNullOrderBySortOrderAscIdAsc(Long userId, Long pageId);
+
+    /** 组内序列：同 parent_id 的成员行，每组独立 0..n。 */
+    List<Icon> findByUserIdAndParentIdOrderBySortOrderAscIdAsc(Long userId, Long parentId);
 }

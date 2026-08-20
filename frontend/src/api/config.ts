@@ -15,6 +15,7 @@ type RawConfig = Omit<Config, 'icons'> & {
   icons: Array<{
     id: number
     pageId: number
+    parentId: number | null
     type: string
     size: string
     sortOrder: number

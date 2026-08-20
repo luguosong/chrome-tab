@@ -35,6 +35,20 @@ public class IconController {
         return IconResponse.of(iconService.move(user.getId(), req));
     }
 
+    /** 建组（ADR-0011）：memberIds 有序，首位=被拖图标、末位=悬停目标（组行继承其 sort_order）。返回新组行。 */
+    @PostMapping("/merge")
+    public IconResponse merge(@Valid @RequestBody IconService.MergeRequest req,
+                              @AuthenticationPrincipal User user) {
+        return IconResponse.of(iconService.merge(user.getId(), req));
+    }
+
+    /** 解散分组：成员按保留 size 自组位置洒回本页；容量不足 409。成功 200 无体（前端 invalidate 聚合重拉）。 */
+    @PostMapping("/{id}/dissolve")
+    public void dissolve(@PathVariable Long id,
+                         @AuthenticationPrincipal User user) {
+        iconService.dissolve(user.getId(), id);
+    }
+
     @PatchMapping("/{id}")
     public IconResponse update(@PathVariable Long id,
                                @RequestBody IconService.UpdateRequest req,

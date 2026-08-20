@@ -5,7 +5,7 @@ export type Me = { id: number; username: string }
  * 图标类型 id,对齐后端 IconType 枚举(小写串)。后端 Jackson 默认序列化为大写
  * ("NAV"/"STOCK"/"CHANGELOG"),前端在 config.ts 解析时归一化为小写,使注册表查询干净。
  */
-export type IconTypeId = 'nav' | 'stock' | 'changelog' | 'weather'
+export type IconTypeId = 'nav' | 'stock' | 'changelog' | 'weather' | 'group'
 
 /**
  * 三档尺寸,对齐后端 Size 枚举(小写)。后端 Jackson 默认序列化为大写
@@ -17,10 +17,12 @@ export type IconSize = 'small' | 'medium' | 'large'
 /** 走马灯一屏:图标的容器(见 CONTEXT.md「页面」)。 */
 export type Page = { id: number; name: string; sortOrder: number }
 
-/** 图标实例(见 CONTEXT.md「图标」)。data 为类型专属配置(nav={name,url} / stock={symbol,name} / changelog=null)。 */
+/** 图标实例(见 CONTEXT.md「图标」)。data 为类型专属配置(nav={name,url} / stock={symbol,name} / changelog=null)。
+ *  parentId:分组成员的组行 id(ADR-0011),顶层图标为 null。 */
 export type Icon = {
   id: number
   pageId: number
+  parentId: number | null
   type: IconTypeId
   size: IconSize
   sortOrder: number
