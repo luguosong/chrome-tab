@@ -9,6 +9,7 @@ import {
 } from 'react'
 import { useDndContext, useDroppable } from '@dnd-kit/core'
 import PageTabs from './PageTabs'
+import { LensBox } from './LensBox'
 import { resolveWrapPage } from '../lib/carouselNav'
 import { pageTransitionFrame } from '../lib/pageTransition'
 
@@ -251,10 +252,13 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
     return () => window.removeEventListener('keydown', onKey)
   }, [active, goTo])
 
-  const arrowCls =
-    'absolute top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full ' +
-    'glass-panel flex items-center justify-center text-white/90 hover:bg-white/40 ' +
-    'dark:text-white/90 dark:hover:bg-white/20 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent'
+  // 翻页箭头 L2 折射壳(ADR-0012):LensBox 定位 + 提供材质,button 填满承载
+  // 交互语义(button 内不能嵌 LensBox 的 div,反向包裹则 HTML 合法)。
+  const arrowShell = 'absolute top-1/2 -translate-y-1/2 z-20'
+  const arrowBtn =
+    'w-11 h-11 rounded-full flex items-center justify-center text-white/90 text-xl ' +
+    'hover:bg-white/40 dark:hover:bg-white/20 transition ' +
+    'focus:outline-none focus-visible:ring-2 focus-visible:ring-accent'
 
   return (
     <CarouselApiContext.Provider value={{ active, count: labels.length, goTo }}>
@@ -289,25 +293,19 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
         {/* 左箭头(环形,ADR-0008):不再在首页隐藏——首页点此环形跳到末页。
             仅单页时无处可去(环形=自身 no-op)才隐藏,避免死按钮。拖拽中隐藏让位给 EdgeDropZone。 */}
         {labels.length > 1 && !dragActive && (
-          <button
-            type="button"
-            onClick={() => goTo(active - 1)}
-            className={`left-1 sm:left-4 ${arrowCls}`}
-            aria-label="上一页"
-          >
-            ‹
-          </button>
+          <LensBox radius={22} className={`left-1 sm:left-4 ${arrowShell}`}>
+            <button type="button" onClick={() => goTo(active - 1)} className={arrowBtn} aria-label="上一页">
+              ‹
+            </button>
+          </LensBox>
         )}
         {/* 右箭头(环形,ADR-0008):不再在末页隐藏——末页点此环形跳到首页。 */}
         {labels.length > 1 && !dragActive && (
-          <button
-            type="button"
-            onClick={() => goTo(active + 1)}
-            className={`right-1 sm:right-4 ${arrowCls}`}
-            aria-label="下一页"
-          >
-            ›
-          </button>
+          <LensBox radius={22} className={`right-1 sm:right-4 ${arrowShell}`}>
+            <button type="button" onClick={() => goTo(active + 1)} className={arrowBtn} aria-label="下一页">
+              ›
+            </button>
+          </LensBox>
         )}
 
         {/* 常驻页签条:切换/重排/增删改页面(替换原圆点指示器,页签条信息更丰富) */}

@@ -10,6 +10,7 @@ import {
 import { ApiError } from '../api/client'
 import { useEditMode } from '../context/EditModeContext'
 import { useCarousel } from './Carousel'
+import { LensBox } from './LensBox'
 import { moveItem } from '../lib/arrayUtil'
 
 /**
@@ -125,10 +126,15 @@ export default function PageTabs() {
     })
   }
 
-  // w-fit + mx-auto:页签少时居中;max-w-full + overflow-x-auto:多时横向滚动(页数无上限)
+  // 容器 L2 折射壳(ADR-0012);w-fit + mx-auto:页签少时居中,
+  // max-w-full + overflow-x-auto:多时横向滚动(页数无上限)。
+  // 页签项不上玻璃:active = 实心白凸起、其余裸文字(原型 prototype/liquid-glass 裁决)。
   return (
     <div className="mt-5 w-full">
-      <div className="flex gap-1.5 mx-auto w-fit max-w-full overflow-x-auto no-scrollbar px-1 py-0.5">
+      <LensBox
+        radius={21}
+        className="flex items-center gap-1 p-1 rounded-full mx-auto w-fit max-w-full overflow-x-auto no-scrollbar"
+      >
         {pages.map((p, i) => {
           const isActive = i === active
           const isDragging = dragId === p.id
@@ -146,11 +152,11 @@ export default function PageTabs() {
               onClick={() => goTo(i)}
               title={editing ? `${p.name} · 双击重命名 · 拖拽排序` : p.name}
               className={
-                'group flex items-center gap-1 px-3 py-1.5 rounded-full text-sm whitespace-nowrap ' +
+                'group flex items-center gap-1 px-3 py-1 rounded-full text-[13px] whitespace-nowrap ' +
                 'transition select-none ' +
                 (isActive
-                  ? 'bg-accent text-white shadow '
-                  : 'bg-white/15 text-white/80 hover:bg-white/30 ') +
+                  ? 'bg-white/75 text-zinc-900 font-medium shadow-sm '
+                  : 'text-white/80 hover:text-white ') +
                 (editing ? 'cursor-grab active:cursor-grabbing ' : 'cursor-pointer ') +
                 (isOver ? 'ring-2 ring-white/70 ' : '') +
                 (isDragging ? 'opacity-40 ' : '')
@@ -218,12 +224,12 @@ export default function PageTabs() {
               }}
               onContextMenu={(e) => e.stopPropagation()}
               title="新建页"
-              className="shrink-0 w-8 h-8 rounded-full bg-white/15 hover:bg-white/30 text-white/90 flex items-center justify-center"
+              className="shrink-0 px-3 py-1 rounded-full text-[13px] text-white/80 hover:text-white flex items-center justify-center"
             >
               +
             </button>
           ))}
-      </div>
+      </LensBox>
 
       {/* 错误提示(删非空页 409 等):行内浮层,下一次操作清掉。
           与 DashboardPage 容量提示同族(glass-panel rounded-full),统一提示样式。 */}

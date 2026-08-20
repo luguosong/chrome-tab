@@ -28,6 +28,8 @@ import { IconDataProvider } from '../context/IconDataContext'
 import { LayoutSettingsProvider } from '../context/LayoutSettingsContext'
 import SearchBox from '../components/SearchBox'
 import Background from '../components/Background'
+import Clock from '../components/Clock'
+import { LensBox } from '../components/LensBox'
 import Carousel, { EDGE_DROP_ID } from '../components/Carousel'
 import IconGrid from '../components/IconGrid'
 import IconView from '../components/Icon'
@@ -369,48 +371,52 @@ function Dashboard() {
         </div>
       )}
 
-      {/* 右上角固定控件:归组进一条玻璃胶囊,统一视觉权重(+/⚙/用户名/登出)。
-          容器自身是 glass-panel,内部按钮不再各自带玻璃底,改 hover 轻晕。 */}
-      <div className="absolute top-4 right-4 z-30 glass-panel rounded-full flex items-center gap-0.5 pl-1 pr-1 py-1">
-        {/* 新增图标入口(issue 09):与编辑模式分离,点开侧抽屉选类型即填即加 */}
-        <button
-          type="button"
-          onClick={() => setAddDrawerOpen(true)}
-          aria-label="新增图标"
-          className="w-8 h-8 rounded-full text-white/90 hover:bg-white/25 flex items-center justify-center text-lg leading-none transition"
-        >
-          +
-        </button>
-        {/* 布局设置入口:整体宽度 / 图标间距 / 图标缩放 */}
-        <button
-          type="button"
-          onClick={() => setSettingsOpen(true)}
-          aria-label="布局设置"
-          title="布局设置"
-          className="w-8 h-8 rounded-full text-white/90 hover:bg-white/25 flex items-center justify-center text-base leading-none transition"
-        >
-          ⚙
-        </button>
-        <span className="mx-1 h-4 w-px bg-white/20" />
-        <span className="text-sm text-white/85 px-1 select-none">{user?.username}</span>
-        <button
-          onClick={logout}
-          className="px-2.5 py-1 rounded-full text-sm text-white/85 hover:bg-white/25 transition"
-        >
-          登出
-        </button>
-      </div>
-
       {/* 整体半透明面板(简约大气风格):铺满整个视口、100% 遮蔽、四边零留白,
           统一承载搜索框 + 走马灯 + 页签。用 page-panel(轻模糊+轻着色)而非 glass-panel,
           既能看清壁纸、又压住亮度保证图标可读;overflow-hidden 裁住内部滚动;无圆角避免边角露白。 */}
       <LayoutSettingsProvider value={layout}>
       <main className="relative z-10 flex-1 min-h-0 flex flex-col page-panel overflow-hidden">
-        {/* 顶部常驻:仅搜索框(时钟已移除)。
-            pt-16:搜索框整体下移,与底部 pb-16 对称,让搜索框 + 图标区向视口中部聚拢,
-            而非搜索贴顶、图标铺到底边。 */}
-        <div className="px-4 pt-16 pb-4">
-          <div className="w-full max-w-xl mx-auto">
+        {/* 顶部常驻(issue 11):时钟(iOS 锁屏式大字裸排)居左 + 右上胶囊 L2 折射壳,
+            下接搜索框 —— 顶行布局按原型 prototype/liquid-glass @3f10ddf 定稿。
+            pt-8:与编辑模式提示条(顶部 ~32px)不叠。 */}
+        <div className="px-4 pt-8 pb-4">
+          <div className="flex items-start justify-between gap-4">
+            <Clock />
+            {/* 右上控件:归组进 L2 胶囊,统一视觉权重(+/⚙/用户名/登出),hover 轻晕 */}
+            <LensBox
+              radius={22}
+              className="shrink-0 rounded-full flex items-center gap-0.5 pl-1 pr-1 py-1"
+            >
+              {/* 新增图标入口(issue 09):与编辑模式分离,点开侧抽屉选类型即填即加 */}
+              <button
+                type="button"
+                onClick={() => setAddDrawerOpen(true)}
+                aria-label="新增图标"
+                className="w-8 h-8 rounded-full text-white/90 hover:bg-white/25 flex items-center justify-center text-lg leading-none transition"
+              >
+                +
+              </button>
+              {/* 布局设置入口:整体宽度 / 图标间距 / 图标缩放 */}
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                aria-label="布局设置"
+                title="布局设置"
+                className="w-8 h-8 rounded-full text-white/90 hover:bg-white/25 flex items-center justify-center text-base leading-none transition"
+              >
+                ⚙
+              </button>
+              <span className="mx-1 h-4 w-px bg-white/20" />
+              <span className="text-sm text-white/85 px-1 select-none">{user?.username}</span>
+              <button
+                onClick={logout}
+                className="px-2.5 py-1 rounded-full text-sm text-white/85 hover:bg-white/25 transition"
+              >
+                登出
+              </button>
+            </LensBox>
+          </div>
+          <div className="mt-4 w-full max-w-xl mx-auto">
             <SearchBox />
           </div>
         </div>
