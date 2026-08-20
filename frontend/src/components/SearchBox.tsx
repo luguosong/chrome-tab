@@ -2,7 +2,9 @@ import { useState, type FormEvent } from 'react'
 import { LensBox } from './LensBox'
 
 /** 搜索 / URL 跳转：像 URL 则直跳（补 https://），否则 Google 搜索。
- *  L2 折射壳(ADR-0012):近透明底靠背景遮罩保证对比,focus 时提亮边框反馈。 */
+ *  L2 折射壳(ADR-0012):近透明底靠背景遮罩保证对比。focus 反馈用 outline ——
+ *  .lens-panel 的 background/border 是 unlayered CSS,恒胜 Tailwind 的 layered
+ *  utilities,只有 outline(独立属性域)能在容器上生效。 */
 export default function SearchBox() {
   const [q, setQ] = useState('')
   function go(e: FormEvent) {
@@ -18,7 +20,7 @@ export default function SearchBox() {
     <form onSubmit={go}>
       <LensBox
         radius={26}
-        className="rounded-full flex items-center w-full px-5 py-3 focus-within:border-white/45 focus-within:bg-white/10 transition"
+        className="rounded-full flex items-center w-full px-5 py-3 focus-within:outline-2 focus-within:outline-white/45 focus-within:outline-offset-2"
       >
         <svg
           width="16"

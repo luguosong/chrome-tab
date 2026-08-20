@@ -257,7 +257,8 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
   const arrowShell = 'absolute top-1/2 -translate-y-1/2 z-20'
   const arrowBtn =
     'w-11 h-11 rounded-full flex items-center justify-center text-white/90 text-xl ' +
-    'hover:bg-white/40 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent'
+    'hover:bg-white/40 dark:hover:bg-white/20 transition ' +
+    'focus:outline-none focus-visible:ring-2 focus-visible:ring-accent'
 
   return (
     <CarouselApiContext.Provider value={{ active, count: labels.length, goTo }}>
