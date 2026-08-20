@@ -3,7 +3,7 @@
 Type: task
 Status: ready-for-human
 Blocked by: 06 — 后端分组 API(merge / dissolve / move parentId)
-落地:78353cd(代码/测试/双轴 review 完成;余 1 项实机手动走查)
+落地:52b765c(代码/测试/双轴 review 完成;余 1 项实机手动走查)
 
 **Review 修订(双轴对抗校验后):** ① move-out 经 moveIcon 落地即成(被移项恒清 parentId,镜像后端 move 分支三)+2 测试;② 合并手势同页判定改用**起点页**(onDragOver 跨页乐观只写缓存,悬停跨页目标 merge 必 409 → 禁判);③ dwell 达标后拖离目标不建组(!over 清反馈 + onDragEnd 校验 over);④ dwell 计时提为 useGroupGestureDwell hook(DashboardPage 膨胀让位);⑤ topLevelOf 聚拢「顶层序列」形状;⑥ MoveAction 不携 wire 层 parentId(hook 用 MoveIconVars 交叉类型)。**已知瞬态(预期非 bug):** merge 乐观用负数临时组 id,invalidate 后 React key 更替轻微闪动;move-out 源组变空时组行留待 invalidate 消失;merge 失败窗口内乐观跨页移动靠 onError 回滚 + invalidate 自愈。**stash 注记:**开工前工作区有票 10/11 半成品(破损无法编译,Icon.tsx 引用缺失的 ChangelogIcon),经用户裁决 stash 暂存为两份(图标层+chrome 换肤一份、StockIcon sparkline 一份);票 10/11 开工前 `git stash pop` 两份全恢复(另有配套 untracked 文件 frontend/src/components/ChangelogIcon.tsx 留在工作区未动)。
 
