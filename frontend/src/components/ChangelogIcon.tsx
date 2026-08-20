@@ -2,6 +2,7 @@ import { useIconData } from '../context/IconDataContext'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import { inline } from '../lib/changelogParser'
 import type { ChangelogVersion } from '../lib/changelogParser'
+import { get } from '../lib/iconTypeRegistry'
 import type { Icon } from '../lib/types'
 
 /**
@@ -22,7 +23,7 @@ export default function ChangelogIconBody({ icon: _icon }: { icon: Icon }) {
   return (
     <div className="w-full flex flex-col gap-1.5">
       <div className="uppercase tracking-wider text-white/60 truncate" style={{ fontSize: px(10) }}>
-        Claude Code 更新
+        {get('changelog')?.label ?? '更新日志'}
       </div>
       {versions ? (
         versions.map((v, i) => <VersionRow key={i} v={v} px={px} />)

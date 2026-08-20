@@ -28,7 +28,7 @@ export type RefreshConfig = {
   kind: 'quotes' | 'changelog' | 'weather' | 'none'
 }
 
-/** 实时摘要数据(由 IconDataContext 统一拉取后传入,见 components/Icon)。 */
+/** 实时摘要数据(见 summarize 注释:ADR-0001 契约字段,当前无网格消费方)。 */
 export type SummaryInput = {
   quotes?: Record<string, Quote | null>
   /** 更新日志的最新版本(changelog 单例只看最新一条)。 */
@@ -37,7 +37,7 @@ export type SummaryInput = {
   weather?: Record<string, WeatherBundle | null>
 }
 
-/** summarize 返回:大尺寸图标展示在 favicon+名称 之下的实时摘要行。null = 无摘要/降级。 */
+/** summarize 返回:摘要标题+正文+涨跌色。null = 无摘要/降级。 */
 export type Summary = { title?: string; text: string; tone?: 'up' | 'down' | 'neutral' }
 
 export interface IconTypeDefinition {
@@ -51,8 +51,10 @@ export interface IconTypeDefinition {
   detail: DetailContainer
   editor: EditorField[]
   /**
-   * 从图标 data + 实时数据取大尺寸摘要。纯函数,无 DOM。
-   * 返回 null 表示无摘要或刷新失败(组件层降级为灰色 "--")。
+   * 从图标 data + 实时数据取摘要。纯函数,无 DOM。返回 null 表示无摘要或刷新失败。
+   * 注:ADR-0001 契约字段。票 10 换肤后四个内置类型的网格渲染全部走专属 body
+   * (StockIcon/WeatherIcon/ChangelogIcon/Icon nav 分支),网格层暂无 summarize
+   * 消费方;保留契约与测试,供未来新类型复用通用摘要路径。
    */
   summarize: (data: Record<string, unknown> | null, live: SummaryInput) => Summary | null
 }
