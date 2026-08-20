@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { get, sizesFor, type EditorField, type IconTypeDefinition } from '../lib/iconTypeRegistry'
@@ -113,9 +113,9 @@ export default function Icon({
   const style: CSSProperties = {
     gridColumn: `span ${span.cols}`,
     gridRow: `span ${span.rows}`,
-    // 块内边距全类型统一(ADR-0015 容器化)。名称行在块外(shrink-0 不被压缩,9020806),
-    // favicon 区吃块内剩余高度,iconScale 偏大时由 maxHeight + flex 收缩防溢出。
-    padding: padPx,
+    // padding 只给小组件卡(卡内即全部内容);nav/group 的玻璃块在图标层(TileFrame,
+    // 只包 favicon/预览),名称在块外画格上(iOS 主屏式:块=图标本体,文字=壁纸层)。
+    padding: isWidget ? padPx : 0,
     // 拖拽变换仅作用于网格内本体(06);overlay 幽灵由 DragOverlay 负责定位,不重复套 transform。
     ...(!overlay
       ? {
@@ -160,15 +160,16 @@ export default function Icon({
       title={def?.label}
       className={
         'relative flex flex-col transition ' +
-        // ADR-0015 全容器化:所有类型统一 soft 玻璃块外壳(ADR-0012 材质,hover 提亮在
-        // .glass-soft 自身规则里),块缘铺满画格 = 格线对齐(iPhone 主屏语言,对齐由 grid
-        // 布局自动保证);small 沿用 2xl 圆角、medium/large 起 iOS 小组件 3xl。
+        // 小组件类型:soft 玻璃卡容器(ADR-0012,hover 提亮在 .glass-soft 自身规则里),
+        // medium/large 起 iOS 小组件大圆角,小卡沿用 2xl;body 左对齐铺满。
         // [container-type:size]:作容器查询的查询容器(画格高度随视口缩放,body 按卡高
         // 自适应信息密度,如 changelog 逐级减版本行;size containment 对 grid item 无布局
         // 影响——高度由轨道定,不依赖内容)。不能加 overflow-hidden:编辑角标定位在卡外。
-        `glass-soft justify-center gap-1 [container-type:size] ${icon.size === 'small' ? 'rounded-2xl' : 'rounded-3xl'} ` +
-        // widget body 左对齐铺满;nav/group 内容居中
-        (isWidget ? 'items-stretch text-left ' : 'items-center ') +
+        // nav/group:画格透明,玻璃块在图标层(TileFrame)——块只包图标本身(ADR-0015b),
+        // 名称外置块下方(iOS 主屏式)。
+        (isWidget
+          ? `glass-soft items-stretch justify-center gap-1 text-left [container-type:size] ${icon.size === 'small' ? 'rounded-2xl' : 'rounded-3xl'} `
+          : 'items-center justify-center gap-1 ') +
         (interactive ? 'cursor-pointer' : 'cursor-default') +
         // 合并手势达标放大(dwell):目标非被拖项、无 dnd transform 冲突;transition 已有
         (dwellTarget === icon.id && !overlay ? ' scale-[1.15] z-10 ' : '') +
@@ -185,7 +186,7 @@ export default function Icon({
         /* 分组(ADR-0011,ADR-0015 容器化):iOS 文件夹式——玻璃块内成员 favicon 迷你预览,
            名称外置下方。点组打开弹层看全部成员 = 票 08。 */
         <>
-          <GroupBody icon={icon} />
+          <GroupBody icon={icon} favPx={favPx} overlay={overlay} />
           {name && (
             <span className="shrink-0 text-xs text-white/90 max-w-full truncate text-center">
               {name}
@@ -196,9 +197,18 @@ export default function Icon({
         <ChangelogIconBody icon={icon} />
       ) : (
         <>
-          {/* nav:玻璃块 + favicon 居中(ADR-0015 全容器化,反转 ADR-0013 裸直出)。
-              favicon 边长推导(ADR-0014)作块内上限,渲染细节见 FaviconImg。 */}
-          {favicon && <FaviconImg src={favicon} favPx={favPx} overlay={overlay} />}
+          {/* nav:玻璃 squircle 块 = 图标本体(ADR-0015 修订:玻璃下沉到图标层,只包
+              favicon,名称外置块下方),favicon 铺满块内。 */}
+          {favicon && (
+            <TileFrame favPx={favPx} padPx={padPx} overlay={overlay}>
+              <img
+                src={favicon}
+                alt=""
+                referrerPolicy="no-referrer"
+                className="w-full h-full rounded-[22%] object-contain transition-transform hover:scale-110 active:scale-95"
+              />
+            </TileFrame>
+          )}
 
           {/* 名称:外置图标下方(iOS 主屏式)。shrink-0 保证行高不被压缩。见 CONTEXT.md「尺寸」。 */}
           {name && (
@@ -243,79 +253,89 @@ export default function Icon({
 // ── 辅助 ──────────────────────────────────────────────────────────────────
 
 /**
- * nav 图标的 favicon 渲染(ADR-0015 块内居中):网格内吃块内剩余高度(flex-1 min-h-0
- * aspect-square,favPx 为上限)防 small 块 + 大 iconScale 溢出;overlay 幽灵无画格约束
- * (shrink-wrap),flex-1 会塌,固定 favPx。hover/active 轻缩放叠加块的 glass-soft 提亮
- * (接续 dwell scale-[1.15] 缩放语言),仅网格态(幽灵恒处光标下方,:hover 会恒命中)。
+ * 图标本体玻璃块(ADR-0015 修订):squircle 玻璃容器只包图标内容(favicon / 分组预览),
+ * 名称在块外画格上(iOS 主屏层级:块=图标本体,文字=壁纸层)。块边 = min(推导上限
+ * faviconPx + 2×pad, 画格可用高度)——maxWidth/maxHeight 双上限 + aspect-square 与
+ * favicon 时代的收缩机制同款(同档位画格等高,收缩全体一致);overlay 幽灵无画格约束
+ * (shrink-wrap),固定上限值。hover 提亮由 .glass-soft 自身规则承担(ADR-0012)。
  */
-function FaviconImg({
-  src,
+function TileFrame({
   favPx,
+  padPx,
   overlay,
+  className = '',
+  children,
 }: {
-  src: string
   favPx: number
+  padPx: number
   overlay: boolean
+  className?: string
+  children: ReactNode
 }) {
-  const style = overlay ? { width: favPx, height: favPx } : { maxWidth: favPx, maxHeight: favPx }
-  return src ? (
-    <img
-      src={src}
-      alt=""
-      style={style}
+  const bound = favPx + padPx * 2
+  return (
+    <div
       className={
-        'rounded-[22%] ' +
-        (!overlay
-          ? 'flex-1 min-h-0 aspect-square transition-transform hover:scale-110 active:scale-95'
-          : '')
+        'glass-soft rounded-[22%] ' +
+        (!overlay ? 'flex-1 min-h-0 aspect-square ' : '') +
+        className
       }
-      referrerPolicy="no-referrer"
-    />
-  ) : (
-    // 防御式兜底:空 src 占位灰块(分组首成员无 url 时;组成员后端只允许 nav)
-    <span
-      className={
-        'rounded-[22%] bg-white/20 ' +
-        (!overlay ? 'flex-1 min-h-0 aspect-square max-w-full' : '')
+      style={
+        overlay
+          ? { width: bound, height: bound, padding: padPx }
+          : { maxWidth: bound, maxHeight: bound, padding: padPx }
       }
-      style={style}
-    />
+    >
+      {children}
+    </div>
   )
 }
 
 /**
- * 分组图标内容(ADR-0011,ADR-0015 容器化):iOS 文件夹式迷你预览——块内 3×2 网格,
- * 按组内序取**前 6 个**成员的 favicon(不足留空)。取 3×2 而非 iOS 原版 3×3:块为横条形
- * (画格列宽 > 行高),3×3 每子仅约 10px 不可辨认;3×2 每子约 20px 是辨认下限。
+ * 分组图标内容(ADR-0011,ADR-0015 修订):iOS 文件夹式——玻璃块(TileFrame)内
+ * 3×2 网格,按组内序取**前 6 个**成员的 favicon(不足留空)。取 3×2 而非 iOS 原版
+ * 3×3:块受画格高度所限(正方形块 ~48px),3×3 每子仅约 10px 不可辨认,3×2 每子
+ * 约 19px 是辨认下限;块内 pad 用小固定值(3px,不随 scale),为子图标争取空间
+ * (iOS 文件夹块内边距同样小于 app 图标)。
  * 成员从聚合缓存按 parentId 派生(groupMembers)。
  * 在组件内(而非 Icon 主体)调 useConfig:仅 group 类型挂载时才订阅,['config'] 命中缓存
  * 无网络开销;overlay 拖拽幽灵同路径渲染(React 上下文随 React 树,不随 DOM)。
  */
-function GroupBody({ icon }: { icon: IconModel }) {
+function GroupBody({
+  icon,
+  favPx,
+  overlay,
+}: {
+  icon: IconModel
+  favPx: number
+  overlay: boolean
+}) {
   const { data } = useConfig()
   const members = useMemo(
     () => groupMembers(data?.icons ?? [], icon.id).slice(0, 6),
     [data?.icons, icon.id],
   )
   return (
-    <div className="flex-1 min-h-0 w-full grid grid-cols-3 grid-rows-2 place-items-center gap-[6%]">
-      {members.map((m) => {
-        // 组成员只能是 nav(后端把关),但防御式兜底非 nav/无 url 的占位灰块
-        const url = m.type === 'nav' ? extractString(m.data, 'url') : ''
-        const src = url ? faviconUrl(url) : ''
-        return src ? (
-          <img
-            key={m.id}
-            src={src}
-            alt=""
-            referrerPolicy="no-referrer"
-            className="w-full h-full rounded-[2px] object-contain"
-          />
-        ) : (
-          <span key={m.id} className="w-full h-full rounded-[2px] bg-white/20" />
-        )
-      })}
-    </div>
+    <TileFrame favPx={favPx} padPx={3} overlay={overlay}>
+      <div className="grid w-full h-full grid-cols-3 grid-rows-2 place-items-center gap-[6%]">
+        {members.map((m) => {
+          // 组成员只能是 nav(后端把关),但防御式兜底非 nav/无 url 的占位灰块
+          const url = m.type === 'nav' ? extractString(m.data, 'url') : ''
+          const src = url ? faviconUrl(url) : ''
+          return src ? (
+            <img
+              key={m.id}
+              src={src}
+              alt=""
+              referrerPolicy="no-referrer"
+              className="w-full h-full rounded-[2px] object-contain"
+            />
+          ) : (
+            <span key={m.id} className="w-full h-full rounded-[2px] bg-white/20" />
+          )
+        })}
+      </div>
+    </TileFrame>
   )
 }
 
