@@ -1,8 +1,8 @@
-import type { CSSProperties, ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useDroppable } from '@dnd-kit/core'
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable'
 import type { Icon, Page } from '../lib/types'
-import { GRID_COLUMNS, GRID_ROWS } from '../lib/iconLayout'
+import { GRID_COLUMNS, iconCellGeometry, labelBlockPx } from '../lib/iconLayout'
 import { DEFAULT_PAGE_CAPACITY, cellsUsed } from '../lib/iconCapacity'
 import { useEditMode } from '../context/EditModeContext'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
@@ -13,7 +13,10 @@ import IconView from './Icon'
  *
  * 固定 8×8 CSS grid,每图标占 1 格(ADR-0016 单档化)。
  * section 自身透明(玻璃背景由 DashboardPage 的整页面板提供),走 h-full 填满走马灯 slide,
- * gridTemplateRows 显式锁定 8 行,故网格区域大小由视口布局决定、不随图标数量变化(空页与满页同尺寸)。
+ * grid 元素 flex-1 仍占满画布(空页与满页网格区域同尺寸),但**行轨道不再平分画布**:
+ * gridAutoRows = 图标几何行高(实际占用的行才存在,簇 align-content:center 居中)——
+ * 旧行为 repeat(8,1fr) 把画布强切 8 行,矮视口下图标被「画布高/8」钳死,iconScale 失效
+ * (见 iconCellGeometry)。
  * 拖拽(06):整页用一个 SortableContext 包裹,items=本页 iconId,grid 布局用
  * rectSortingStrategy;根 DndContext 由 DashboardPage 提供。
  */
@@ -30,10 +33,35 @@ export default function IconGrid({
   onOpenGroup?: (icon: Icon) => void
 }) {
   const { editing } = useEditMode()
-  const { gridWidth, gridGap, gridGapY } = useLayoutSettings()
+  const { gridWidth, gridGap, gridGapY, iconScale, labelVisible, labelSize } = useLayoutSettings()
   // 剩余格数角标(spec user story 42):容量取 DEFAULT_PAGE_CAPACITY(与后端最终校验一致),
   // 纯函数 cellsUsed 累加本页图标占用(icons 已由调用方按 pageId 过滤)。
   const remaining = DEFAULT_PAGE_CAPACITY - cellsUsed(icons)
+
+  // 画布实测(ResizeObserver):图标几何要钳制在真实轨道宽/画布高内(视口/设置变化即重算)。
+  const gridRef = useRef<HTMLDivElement>(null)
+  const [box, setBox] = useState({ w: 0, h: 0 })
+  useEffect(() => {
+    const el = gridRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() =>
+      setBox({ w: el.clientWidth, h: el.clientHeight }),
+    )
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const usedRows = Math.ceil(icons.length / GRID_COLUMNS)
+  // edge 不直接进 style:它经 rowH 驱动 TileFrame 的 flex 填充高度,块再被
+  // maxHeight(标称)与 maxWidth min(标称,100%) 双向钳制(见 Icon.tsx TileFrame)
+  const { rowH } = iconCellGeometry({
+    iconScale,
+    labelBlock: labelBlockPx(labelVisible, labelSize),
+    gapY: gridGapY,
+    usedRows,
+    trackW: box.w > 0 ? (box.w - (GRID_COLUMNS - 1) * gridGap) / GRID_COLUMNS : 0,
+    gridH: box.h,
+  })
 
   if (icons.length === 0) {
     return (
@@ -54,11 +82,11 @@ export default function IconGrid({
     )
   }
 
-  // 固定 8×8:列与行都显式锁定 8 条轨道(1fr)。行用 minmax(0,1fr) 允许在固定画布内收缩,
-  // 配合外层 h-full,无论图标多少背景高度恒定。
   const style: CSSProperties = {
     gridTemplateColumns: `repeat(${GRID_COLUMNS}, minmax(0, 1fr))`,
-    gridTemplateRows: `repeat(${GRID_ROWS}, minmax(0, 1fr))`,
+    // 行 = 图标几何行高(仅实际占用行存在);不再 repeat(8,1fr) 平分画布。
+    gridAutoRows: rowH,
+    alignContent: 'center',
     maxWidth: gridWidth,
     // 「布局设置」间距拆分:横向(列)= gridGap,竖向(行)= gridGapY(上限宽,固定画布防溢出)。
     columnGap: gridGap,
@@ -71,7 +99,7 @@ export default function IconGrid({
         {page.name}
         {editing && <CapacityBadge remaining={remaining} />}
       </h2>
-      <div className="grid flex-1 min-h-0 w-full mx-auto" style={style} role="grid">
+      <div ref={gridRef} className="grid flex-1 min-h-0 w-full mx-auto" style={style} role="grid">
         {/* id=页 id 字符串:dnd-kit 把它作为本页 sortable 项的 containerId 写入其 data,
             DashboardPage 的 onDragOver 据 over.data.current.sortable.containerId 判断跨页(issue 07)。 */}
         <SortableContext id={String(page.id)} items={icons.map((i) => i.id)} strategy={rectSortingStrategy}>

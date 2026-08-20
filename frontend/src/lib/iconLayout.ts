@@ -16,3 +16,60 @@ export const FAV_BASE_PX = 32
 export function faviconPx(iconScale = 1): number {
   return FAV_BASE_PX * iconScale
 }
+
+/** 分组块内边距(见 Icon.tsx GroupBody):块边 = favicon + 2×pad,是宽度钳制要预留的最坏块。 */
+export const GROUP_PAD_PX = 3
+
+/**
+ * 图标名称行占据的画格高度(labelSize 字号 × 1.5 行高 + 与块的 gap-1)。
+ * 与 IconLabel 渲染口径一致(Tailwind 默认行高 1.5);label 隐藏时为 0。
+ */
+export function labelBlockPx(labelVisible: boolean, labelSize: number): number {
+  return labelVisible ? Math.ceil(labelSize * 1.5) + 4 : 0
+}
+
+/**
+ * 单档图标几何(ADR-0016 修订:iconScale 是图标大小的唯一调节,必须真实生效)。
+ *
+ * 旧行为的 bug:网格行轨道 = repeat(8, 1fr) 平分固定画布,图标本体被「画布高/8 − 名称行」
+ * 钳死——矮视口下钳制值低于一切标称边长,iconScale 拉满也不动(见 scripts/scale-repro.mjs)。
+ * 新模型:行高由图标推导(仅实际占用的行参与分高),图标边长 = min(标称, 轨道宽, 行可用高):
+ *   - 标称 = FAV_BASE_PX × iconScale(用户唯一大小调节)
+ *   - 轨道宽上限:防重叠(用户要求「整体宽度最小时图标不要重叠」)——预留分组块
+ *     2×GROUP_PAD_PX,使分组最宽块也不侵入相邻画格
+ *   - 行可用高:usedRows 行铺进画布 gridH 后每行分到的高度(满 8 行的矮视口才压缩,
+ *     稀疏页放行标称值;压缩全体一致,整齐的本质是一致性)
+ *
+ * 测量缺失(trackW/gridH ≤ 0,首帧 ResizeObserver 未回报)时退化为只按标称,
+ * 观察者回报后立即校正——避免首帧图标闪没。
+ */
+export function iconCellGeometry({
+  iconScale,
+  labelBlock,
+  gapY,
+  usedRows,
+  trackW,
+  gridH,
+}: {
+  iconScale: number
+  labelBlock: number
+  gapY: number
+  /** 页面实际占用的行数(ceil(顶层图标数 / 8)),≥1。 */
+  usedRows: number
+  /** 列轨道像素宽(grid 元素实测)。 */
+  trackW: number
+  /** 画布像素高(grid 元素实测)。 */
+  gridH: number
+}): { edge: number; rowH: number } {
+  const nominal = faviconPx(iconScale)
+  const rows = Math.max(1, usedRows)
+  // 行开销 = 名称行 + 分组块上下各 GROUP_PAD_PX(nav 块在行内居中,余量即呼吸;
+  // 分组块边 = edge + 2×pad,恰好不侵入相邻画格)
+  const rowOverhead = labelBlock + GROUP_PAD_PX * 2
+  const widthFit = trackW > 0 ? trackW - GROUP_PAD_PX * 2 : nominal
+  const heightFit =
+    gridH > 0 ? (gridH - rows * rowOverhead - (rows - 1) * gapY) / rows : nominal
+  // heightFit 为负(极端矮画布)时钳到 0:行高塌到开销,块不渲染,不留负尺寸
+  const edge = Math.max(0, Math.min(nominal, widthFit, heightFit))
+  return { edge, rowH: edge + rowOverhead }
+}

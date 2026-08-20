@@ -10,7 +10,7 @@ import type { Icon as IconModel } from '../lib/types'
 import { useEditMode } from '../context/EditModeContext'
 import { useGroupGesture } from '../context/GroupGestureContext'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
-import { faviconPx } from '../lib/iconLayout'
+import { GROUP_PAD_PX, faviconPx } from '../lib/iconLayout'
 import { extractString, buildIconData, faviconUrl } from '../lib/iconData'
 import { groupMembers } from '../lib/groupReducer'
 import { readWeatherLocation, type WeatherLocation } from '../lib/weather'
@@ -275,7 +275,14 @@ function TileFrame({
       style={
         overlay
           ? { width: bound, height: bound, padding: padPx }
-          : { maxWidth: bound, maxHeight: bound, padding: padPx }
+          : {
+              // maxWidth 取 min(推导值, 画格宽):行高改由图标几何推导(iconCellGeometry)
+              // 后轨道宽是防重叠的硬上限——极端窄轨(如 gridWidth 最小 + 大间距)时块
+              // 宁可收缩也不侵入相邻画格;min() 是兜底,常规由几何层先钳。
+              maxWidth: `min(${bound}px, 100%)`,
+              maxHeight: bound,
+              padding: padPx,
+            }
       }
     >
       {children}
@@ -308,7 +315,7 @@ function GroupBody({
     [data?.icons, icon.id],
   )
   return (
-    <TileFrame favPx={favPx} padPx={3} overlay={overlay}>
+    <TileFrame favPx={favPx} padPx={GROUP_PAD_PX} overlay={overlay}>
       <div className="grid w-full h-full grid-cols-3 grid-rows-2 place-items-center gap-[6%]">
         {members.map((m) => {
           // 组成员只能是 nav(后端把关),但防御式兜底非 nav/无 url 的占位灰块
