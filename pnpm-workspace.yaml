@@ -1,6 +1,7 @@
-# pnpm 11 的构建脚本审批：esbuild 需跑 postinstall 安装平台二进制，显式批准。
-# （package.json 的 pnpm.onlyBuiltDependencies 字段 pnpm 11 已不再读取）
+# pnpm 11 的构建脚本审批（package.json 的 pnpm.onlyBuiltDependencies 字段 pnpm 11 已不再读取）：
+# esbuild 装 postinstall 平台二进制；better-sqlite3 跑 prebuild-install（无匹配预编译时回落 node-gyp 编译）。
 allowBuilds:
+  better-sqlite3: true
   esbuild: true
 packages:
   - frontend

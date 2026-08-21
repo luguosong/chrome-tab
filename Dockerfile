@@ -13,7 +13,9 @@ COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY frontend/package.json ./frontend/
 COPY shared/package.json ./shared/
 COPY backend/package.json ./backend/
-RUN pnpm install --frozen-lockfile
+# 只装 frontend(+shared)依赖:backend 的 better-sqlite3 是原生模块且 musl 无预编译,
+# caddy 镜像用不到它,全量 install 会在无编译工具的本阶段失败(票 02)
+RUN pnpm --filter chrome-tab-frontend... install --frozen-lockfile
 COPY frontend/ ./frontend/
 COPY shared/ ./shared/
 RUN pnpm --filter chrome-tab-frontend run build

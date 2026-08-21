@@ -2,5 +2,29 @@
   "name": "chrome-tab-backend",
   "private": true,
   "version": "0.1.0",
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node24 --format=esm --outfile=dist/index.js --external:better-sqlite3",
+    "start": "node --expose-gc dist/index.js",
+    "measure": "node scripts/measure-rss.mjs"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^13.0.3",
+    "hono": "^4.13.3",
+    "kysely": "^0.29.5",
+    "node-cron": "^4.6.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.2.0",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  }
 }

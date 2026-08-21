@@ -1,0 +1,26 @@
+# Node 后端栈:caddy(前端构建 + TLS 反代,根 Dockerfile 零改动)+ Node backend,无 mysql。
+# 用途:阶段 A 骨架验证(票 02)、服务器演练(票 11);切换日(票 12)按此形态改写 prod compose。
+# 注意:backend build context 必须是仓库根(pnpm workspace 的 lockfile 与包清单在根,
+# 「backend/ 路径」由 dockerfile 路径沿用),caddy 服务定义与 prod 零差异(端口映射除外)。
+services:
+  caddy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      # 本地/演练用映射,避免与线上 80/443 冲突;容器内仍为标准 80/443
+      - "8081:80"
+      - "8443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    expose:
+      - "8080"
+    restart: unless-stopped

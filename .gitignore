@@ -4,6 +4,9 @@ dist/
 target/
 *.log
 
+# 运行时 SQLite 数据(backend Node 服务默认 DB_PATH 落点)
+backend/data/
+
 # secrets（含所有 .env 变体，仅保留 example）
 .env
 .env.*
