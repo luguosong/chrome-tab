@@ -2,3 +2,7 @@
 # （package.json 的 pnpm.onlyBuiltDependencies 字段 pnpm 11 已不再读取）
 allowBuilds:
   esbuild: true
+packages:
+  - frontend
+  - shared
+  - backend

@@ -6,14 +6,19 @@ FROM node:24-alpine AS build
 WORKDIR /app
 ENV CI=true
 RUN corepack enable
-# pnpm-workspace.yaml 必须先进来：内含 esbuild 构建脚本审批（allowBuilds），
+# workspace 清单与根 lockfile 必须先进来（frozen-lockfile 要求全部在场）；
+# pnpm-workspace.yaml 内含 esbuild 构建脚本审批（allowBuilds），
 # frozen-lockfile 下缺它 pnpm 会以 ERR_PNPM_IGNORED_BUILDS 拒绝安装。
-COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY frontend/package.json ./frontend/
+COPY shared/package.json ./shared/
+COPY backend/package.json ./backend/
 RUN pnpm install --frozen-lockfile
-COPY frontend/ ./
-RUN pnpm run build
+COPY frontend/ ./frontend/
+COPY shared/ ./shared/
+RUN pnpm --filter chrome-tab-frontend run build
 
 FROM caddy:2-alpine
 COPY Caddyfile /etc/caddy/Caddyfile
-COPY --from=build /app/dist /srv/frontend
+COPY --from=build /app/frontend/dist /srv/frontend
 EXPOSE 80 443
