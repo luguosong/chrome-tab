@@ -1,8 +1,14 @@
 import { Hono } from 'hono'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { sql } from 'kysely'
 import { meHandler, publicAuthRoutes, requireAuth, sessionMiddleware, type AuthEnv } from './auth'
 import { changelogRoutes, type ChangelogService } from './changelog'
+import { ConflictError } from './common'
+import { configRoutes } from './config'
 import type { Db } from './db'
+import { iconRoutes } from './icons'
+import { layoutRoutes } from './layout'
+import { pageRoutes } from './pages'
 
 /**
  * 应用工厂。测试 seam = app.request()(Hono 免端口,spec Testing Decisions 定版)。
@@ -36,10 +42,19 @@ export function createApp({
   app.use('/api/*', requireAuth())
   if (changelog) app.route('/', changelogRoutes(changelog))
   app.get('/api/me', meHandler)
-  // 兜底 500(照 Java GlobalExceptionHandler):如 changelog 冷启动兜底刷新失败
+  app.route('/', pageRoutes(db))
+  app.route('/', iconRoutes(db))
+  app.route('/', layoutRoutes(db))
+  app.route('/', configRoutes(db))
+  // 统一错误体 {status, message}(api-contract §0):业务/校验冲突按自带 status;
+  // 未映射路径(含旧端点 /api/nav-links)404 资源不存在;兜底 500 服务器错误(留栈)。
   app.onError((err, c) => {
+    if (err instanceof ConflictError) {
+      return c.json({ status: err.status, message: err.message }, err.status as ContentfulStatusCode)
+    }
     console.error(err)
     return c.json({ status: 500, message: '服务器错误' }, 500)
   })
+  app.notFound((c) => c.json({ status: 404, message: '资源不存在' }, 404))
   return app
 }
