@@ -46,6 +46,11 @@ describe('GET /api/config', () => {
       labelVisible: true, labelSize: 12, labelColor: '#ffffff',
     })
     expect(typeof json.updatedAt).toBe('string')
+    // 负向字段(test-align-map):顶层恰 4 字段,无旧 setting/navLinks;icon 无 ADR-0016 已删的 size
+    expect(Object.keys(json).sort()).toEqual(['icons', 'layoutSettings', 'pages', 'updatedAt'])
+    for (const i of json.icons) {
+      expect(Object.keys(i).sort()).toEqual(['data', 'id', 'pageId', 'parentId', 'sortOrder', 'type'])
+    }
   })
 
   it('未认证 401 空体', async () => {

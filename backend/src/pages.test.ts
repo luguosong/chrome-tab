@@ -137,4 +137,12 @@ describe('未映射路径', () => {
     await expectError(await req('DELETE', '/api/nav-links', { cookie }), 404, '资源不存在')
     await expectError(await req('GET', '/api/stock-watches', { cookie }), 404, '资源不存在')
   })
+
+  it('修正白名单①:GET /api/ping 已删 → 404 资源不存在(放行面只剩 login/logout)', async () => {
+    await expectError(await req('GET', '/api/ping', { cookie }), 404, '资源不存在')
+    // 未认证:guard 先于路由判定,落 401 空体(照 §0 拦截面,与 Java filter 链同序)
+    const anon = await req('GET', '/api/ping')
+    expect(anon.status).toBe(401)
+    expect(await anon.text()).toBe('')
+  })
 })

@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from './app'
 import { openDb, type Db } from './db'
 import { bootstrap } from './seed'
+import { expectError, setupApp } from './testUtils'
 import {
   extractContent,
   ChangelogService,
@@ -309,22 +310,21 @@ describe('POST /api/changelog/translate(按需补译,ADR-0017)', () => {
   })
 })
 
+describe('releasedAt 成功路径(npm dist-tags.latest time 条目透传)', () => {
+  it('200:ISO 串原样下发(非 null),失败路径才显式 null', async () => {
+    const db = openDb(':memory:').db
+    const { req, login } = await setupApp(makeService(db, { fetchReleasedAt: async () => '2026-08-01T00:00:00.000Z' }))
+    const res = await req('GET', '/api/changelog', { cookie: await login() })
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as { releasedAt: string | null }
+    expect(json.releasedAt).toBe('2026-08-01T00:00:00.000Z')
+  })
+})
+
 describe('冷启动兜底失败 → 500', () => {
   it('内存空且拉取失败:get 上抛经全局兜底 → {status:500, message:"服务器错误"}', async () => {
     const db = openDb(':memory:').db
-    await bootstrap(db, { username: 'admin', password: 'admin-pw' })
-    const coldApp = createApp({
-      db,
-      changelog: makeService(db, { fetchMarkdown: async () => { throw new Error('GitHub 不可达') } }),
-    })
-    const login = await coldApp.request('/api/login', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username: 'admin', password: 'admin-pw' }),
-    })
-    const kv = login.headers.getSetCookie()[0]!.split(';')[0]!
-    const res = await coldApp.request('/api/changelog', { headers: { cookie: kv } })
-    expect(res.status).toBe(500)
-    await expect(res.json()).resolves.toEqual({ status: 500, message: '服务器错误' })
+    const { req, login } = await setupApp(makeService(db, { fetchMarkdown: async () => { throw new Error('GitHub 不可达') } }))
+    await expectError(await req('GET', '/api/changelog', { cookie: await login() }), 500, '服务器错误')
   })
 })
