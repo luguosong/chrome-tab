@@ -1,5 +1,6 @@
-# 生产栈：caddy（含前端构建 + 反代）+ backend + mysql
-# 用法：docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+# 生产栈(Node):caddy(前端构建 + TLS 反代)+ Node backend(SQLite),无 mysql。
+# 用法:docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+# 数据:./backend/data 下 SQLite(WAL);备份每日 VACUUM INTO(票 09),恢复 = 拷回文件。
 services:
   caddy:
     build:
@@ -16,39 +17,17 @@ services:
 
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: . # pnpm workspace:lockfile 与全部包清单必须在 context 内(票 02)
+      dockerfile: backend/Dockerfile
     environment:
-      SPRING_PROFILES_ACTIVE: prod
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-newtab}
-      DB_USER: ${DB_USER:-newtab}
-      DB_PASSWORD: ${DB_PASSWORD}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD} # 仅空库首启 seed 生效;已有数据全跳过
       AIHUBMIX_API_KEY: ${AIHUBMIX_API_KEY}
+      QWEATHER_API_KEY: ${QWEATHER_API_KEY}
+      QWEATHER_API_HOST: ${QWEATHER_API_HOST}
+    volumes:
+      - ./backend/data:/app/backend/data
     expose:
       - "8080"
-    depends_on:
-      mysql:
-        condition: service_healthy
     restart: unless-stopped
-
-  mysql:
-    image: mysql:8
-    environment:
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-newtab}
-      MYSQL_USER: ${DB_USER:-newtab}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      # ponytail: mysqladmin ping 够用作存活探针，无需更复杂的查询
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${DB_ROOT_PASSWORD}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-volumes:
-  mysql_data:

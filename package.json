@@ -1,5 +1,8 @@
 {
   "name": "chrome-tab",
   "private": true,
-  "packageManager": "pnpm@11.22.0"
+  "packageManager": "pnpm@11.22.0",
+  "scripts": {
+    "smoke": "pnpm --filter chrome-tab-backend run smoke"
+  }
 }

@@ -10,7 +10,8 @@
     "build": "esbuild src/index.ts --bundle --platform=node --target=node24 --format=esm --outfile=dist/index.js --external:better-sqlite3 && esbuild src/etl.cli.ts --bundle --platform=node --target=node24 --format=cjs --outfile=dist/etl.cjs --external:better-sqlite3",
     "start": "node --expose-gc dist/index.js",
     "etl": "tsx src/etl.cli.ts",
-    "measure": "node scripts/measure-rss.mjs"
+    "measure": "node scripts/measure-rss.mjs",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
