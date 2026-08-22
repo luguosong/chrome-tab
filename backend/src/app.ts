@@ -9,6 +9,8 @@ import type { Db } from './db'
 import { iconRoutes } from './icons'
 import { layoutRoutes } from './layout'
 import { pageRoutes } from './pages'
+import { createWallpaperHandler } from './wallpaper'
+import { weatherRoutes, type WeatherConfig } from './weather'
 
 /**
  * 应用工厂。测试 seam = app.request()(Hono 免端口,spec Testing Decisions 定版)。
@@ -20,10 +22,12 @@ export function createApp({
   db,
   cookieSecure = false,
   changelog,
+  weather,
 }: {
   db: Db
   cookieSecure?: boolean
   changelog?: ChangelogService
+  weather?: WeatherConfig
 }) {
   const app = new Hono<AuthEnv>()
     .get('/healthz', async (c) => {
@@ -46,6 +50,9 @@ export function createApp({
   app.route('/', iconRoutes(db))
   app.route('/', layoutRoutes(db))
   app.route('/', configRoutes(db))
+  // weather 恒挂载:未配置 → requireConfigured 抛 → 500「服务器错误」(契约 §7,非 404)
+  app.route('/', weatherRoutes(weather))
+  app.get('/api/wallpaper', createWallpaperHandler())
   // 统一错误体 {status, message}(api-contract §0):业务/校验冲突按自带 status;
   // 未映射路径(含旧端点 /api/nav-links)404 资源不存在;兜底 500 服务器错误(留栈)。
   app.onError((err, c) => {

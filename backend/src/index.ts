@@ -19,7 +19,16 @@ await bootstrap(db, {
 const cookieSecure =
   process.env.NODE_ENV === 'production' && process.env.COOKIE_SECURE !== 'false'
 const changelog = new ChangelogService(db, prodChangelogDeps())
-const app = createApp({ db, cookieSecure, changelog })
+// 和风天气(ADR-0009):Key/个人专用主机走环境变量、不入库;缺省未配置 → 端点 500
+const app = createApp({
+  db,
+  cookieSecure,
+  changelog,
+  weather: {
+    apiKey: process.env.QWEATHER_API_KEY ?? '',
+    apiHost: process.env.QWEATHER_API_HOST ?? '',
+  },
+})
 
 const port = Number(process.env.PORT ?? 8080)
 serve({ fetch: app.fetch, port }, (info) => console.log(`backend listening on :${info.port}`))
