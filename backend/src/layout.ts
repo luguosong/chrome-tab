@@ -1,0 +1,152 @@
+import { Hono } from 'hono'
+import type { AuthEnv } from './auth'
+import { BadRequest, touchVersion } from './common'
+import type { Db } from './db'
+
+/**
+ * 布局设置 upsert(api-contract §3):有行则改、无行则建;可空字段缺省落 LayoutLimits 默认
+ * (旧客户端/旧备份复用本请求体)。读经 GET /api/config 的 layoutSettings 字段,无独立读端点。
+ * 写后 bump config_version(ADR-0006)。PUT /api/config 的 layoutSettings 覆盖复用 updateLayout。
+ */
+
+export const LAYOUT_DEFAULTS = {
+  gridWidth: 1024,
+  gridGap: 8,
+  gridGapY: 8,
+  iconScale: 1.5,
+  panelFog: 36,
+  searchBarWidth: 576,
+  searchBarVisible: true,
+  searchEngine: 'google',
+  clockVisible: true,
+  clockFont: 48,
+  clock24h: true,
+  labelVisible: true,
+  labelSize: 12,
+  labelColor: '#ffffff',
+} as const
+
+/** const 断言的字面量类型拓宽回基本型(默认值对象仅在缺省时使用,变量仍是宽类型)。 */
+type Widen<T> = { [K in keyof T]: T[K] extends boolean ? boolean : T[K] extends string ? string : number }
+type LayoutWire = Widen<typeof LAYOUT_DEFAULTS>
+
+/** layout_settings 行(0/1 整数)→ 14 字段 wire(布尔);无行时返回 defaults()。 */
+export async function readLayout(db: Db, userId: number): Promise<LayoutWire> {
+  const row = await db.selectFrom('layout_settings').selectAll().where('user_id', '=', userId).executeTakeFirst()
+  if (!row) return { ...LAYOUT_DEFAULTS }
+  return {
+    gridWidth: row.grid_width,
+    gridGap: row.grid_gap,
+    gridGapY: row.grid_gap_y,
+    iconScale: row.icon_scale,
+    panelFog: row.panel_fog,
+    searchBarWidth: row.search_bar_width,
+    searchBarVisible: !!row.search_bar_visible,
+    searchEngine: row.search_engine,
+    clockVisible: !!row.clock_visible,
+    clockFont: row.clock_font,
+    clock24h: !!row.clock_24h,
+    labelVisible: !!row.label_visible,
+    labelSize: row.label_size,
+    labelColor: row.label_color,
+  }
+}
+
+/** 校验 + upsert(可空字段补默认);返回 14 字段 wire。调用方负责事务与 bump。 */
+export async function updateLayout(db: Db, userId: number, body: Record<string, unknown>): Promise<LayoutWire> {
+  const gridWidth = reqInt(body, 'gridWidth', 640, 1536)
+  const gridGap = reqInt(body, 'gridGap', 0, 24)
+  const gridGapY = optInt(body, 'gridGapY', 0, 32, LAYOUT_DEFAULTS.gridGapY)
+  const iconScale = reqScale(body)
+  const panelFog = optInt(body, 'panelFog', 0, 60, LAYOUT_DEFAULTS.panelFog)
+  const searchBarWidth = optInt(body, 'searchBarWidth', 320, 1024, LAYOUT_DEFAULTS.searchBarWidth)
+  const searchBarVisible = optBool(body, 'searchBarVisible', true)
+  const searchEngine = optEngine(body)
+  const clockVisible = optBool(body, 'clockVisible', true)
+  const clockFont = optInt(body, 'clockFont', 28, 72, LAYOUT_DEFAULTS.clockFont)
+  const clock24h = optBool(body, 'clock24h', true)
+  const labelVisible = optBool(body, 'labelVisible', true)
+  const labelSize = optInt(body, 'labelSize', 10, 16, LAYOUT_DEFAULTS.labelSize)
+  const labelColor = optColor(body)
+
+  const values = {
+    grid_width: gridWidth,
+    grid_gap: gridGap,
+    grid_gap_y: gridGapY,
+    icon_scale: iconScale,
+    panel_fog: panelFog,
+    search_bar_width: searchBarWidth,
+    search_bar_visible: searchBarVisible ? 1 : 0,
+    search_engine: searchEngine,
+    clock_visible: clockVisible ? 1 : 0,
+    clock_font: clockFont,
+    clock_24h: clock24h ? 1 : 0,
+    label_visible: labelVisible ? 1 : 0,
+    label_size: labelSize,
+    label_color: labelColor,
+  }
+  await db
+    .insertInto('layout_settings')
+    .values({ user_id: userId, ...values })
+    .onConflict((oc) => oc.column('user_id').doUpdateSet(values))
+    .execute()
+  return readLayout(db, userId)
+}
+
+export function layoutRoutes(db: Db) {
+  return new Hono<AuthEnv>().put('/api/layout-settings', async (c) => {
+    const userId = c.get('user')!.id
+    const body = await c.req.json().catch(() => null)
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      throw new BadRequest('请求体必须是布局设置对象')
+    }
+    const layout = await db.transaction().execute(async (tx) => {
+      const result = await updateLayout(tx, userId, body as Record<string, unknown>)
+      await touchVersion(tx, userId)
+      return result
+    })
+    return c.json(layout)
+  })
+}
+
+// ── 字段小件(范围/类型/pattern 违例 → 400)──────────────────────────────────
+
+function reqInt(b: Record<string, unknown>, key: string, min: number, max: number): number {
+  const v = b[key]
+  if (typeof v !== 'number' || !Number.isInteger(v)) throw new BadRequest(`${key}: must not be null`)
+  if (v < min || v > max) throw new BadRequest(`${key}: 必须在 ${min}~${max} 之间`)
+  return v
+}
+
+function optInt(b: Record<string, unknown>, key: string, min: number, max: number, def: number): number {
+  if (b[key] === undefined || b[key] === null) return def
+  return reqInt(b, key, min, max)
+}
+
+function reqScale(b: Record<string, unknown>): number {
+  const v = b.iconScale
+  if (typeof v !== 'number') throw new BadRequest('iconScale: must not be null')
+  if (v < 0.75 || v > 2.0) throw new BadRequest('iconScale: 必须在 0.75~2.0 之间')
+  return v
+}
+
+function optBool(b: Record<string, unknown>, key: string, def: boolean): boolean {
+  const v = b[key]
+  if (v === undefined || v === null) return def
+  if (typeof v !== 'boolean') throw new BadRequest(`${key}: 必须是布尔值`)
+  return v
+}
+
+function optEngine(b: Record<string, unknown>): string {
+  const v = b.searchEngine
+  if (v === undefined || v === null) return LAYOUT_DEFAULTS.searchEngine
+  if (v !== 'google' && v !== 'bing' && v !== 'baidu') throw new BadRequest('searchEngine: 必须是 google|bing|baidu')
+  return v
+}
+
+function optColor(b: Record<string, unknown>): string {
+  const v = b.labelColor
+  if (v === undefined || v === null) return LAYOUT_DEFAULTS.labelColor
+  if (typeof v !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(v)) throw new BadRequest('labelColor: 必须是 #rrggbb 十六进制色')
+  return v
+}
