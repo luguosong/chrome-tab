@@ -11,40 +11,22 @@ import org.springframework.web.client.RestClient;
  * packument，取 {@code dist-tags.latest} 对应的 {@code time} 条目（即最新版发布时间，
  * ISO 串），供更新日志图标的日期行展示。
  *
- * <p>内存缓存 1 小时（volatile 双字段，够单实例低频读）；npm 不可达/响应畸形 → 记 warn、
- * 返回 null（前端日期行降级「—」），**不阻塞** markdown 主链路。否决备选见 ADR-0016：
+ * <p>无缓存——调用方是 {@link ChangelogService#refresh()}(6 小时定时预取,ADR-0017),
+ * 结果随快照持久化,npm 最多 4 次/天。失败/响应畸形 → 记 warn、返回 null
+ * （前端日期行降级「—」），**不阻塞** markdown 主链路。否决备选见 ADR-0016：
  * GitHub commits API 的 CHANGELOG.md 最后提交时间只是版本日期的间接代理。</p>
  */
 @Slf4j
 public class NpmReleaseDateService {
 
-    private static final long TTL_MS = 60 * 60 * 1000L;
-
     private final RestClient npm;
-
-    private volatile String cachedAt;
-    private volatile String releasedAt;
 
     public NpmReleaseDateService(@Qualifier("npmRegistryRestClient") RestClient npm) {
         this.npm = npm;
     }
 
     /** 最新版发布时间（ISO），失败/未取到返回 null。 */
-    public String latestReleaseDate() {
-        String now = java.time.Instant.now().toString();
-        if (cachedAt != null && releasedAt != null
-                && java.time.Duration.between(java.time.Instant.parse(cachedAt), java.time.Instant.parse(now)).toMillis() < TTL_MS) {
-            return releasedAt;
-        }
-        String date = fetch();
-        if (date != null) {
-            cachedAt = now;
-            releasedAt = date;
-        }
-        return date;
-    }
-
-    private String fetch() {
+    public String fetchLatestReleaseDate() {
         try {
             JsonNode root = npm.get()
                     .uri("/@anthropic-ai/claude-code")

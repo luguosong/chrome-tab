@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useIconData } from '../context/IconDataContext'
+import { useTranslateVersions } from '../hooks/useChangelog'
 import { inline } from '../lib/changelogParser'
 
 /**
@@ -8,6 +9,8 @@ import { inline } from '../lib/changelogParser'
  * 复用 useIconData 集中拉取的 changelog(由 useChangelog 维护,1h staleTime),展示完整版本
  * 列表(纵向滚动)。真实 CHANGELOG 无日期、无 ### 小节,条目直接挂在版本下,故按「发布时间线」
  * 呈现:左侧连续细轨 + 每版本一个节点,最新版 accent 高亮 + 「最新」药丸,旧版弱化。
+ * 未译版本(不在 translatedVersions 内)显示「翻译」按钮 → POST /translate 按需补译,
+ * 译毕后端持久化、invalidate 重拉即变中文(ADR-0017)。
  *
  * 刷新失败降级(spec user story 15):changelogError 非空 → 显示重试按钮,点击重拉。
  *
@@ -15,11 +18,13 @@ import { inline } from '../lib/changelogParser'
  * (reduced-motion 下不动画)。编辑态进入时由父组件(DashboardPage)onClose。
  */
 export default function ChangelogDrawer({ onClose }: { onClose: () => void }) {
-  const { changelog, changelogError, refetchChangelog } = useIconData()
+  const { changelog, changelogTranslated, changelogError, refetchChangelog } = useIconData()
+  const translateMut = useTranslateVersions()
   const [q, setQ] = useState('')
 
   const versions = changelog ?? []
   const latest = versions[0]?.title
+  const translated = useMemo(() => new Set(changelogTranslated), [changelogTranslated])
 
   // 过滤:命中版本号 OR 任一条目文本(真实诉求是搜某个功能/改动,而非版本号)
   const shown = useMemo(() => {
@@ -162,6 +167,17 @@ export default function ChangelogDrawer({ onClose }: { onClose: () => void }) {
                             <span className="rounded-full bg-accent/20 px-2 py-0.5 text-[10px] font-medium leading-none text-accent">
                               最新
                             </span>
+                          )}
+                          {!translated.has(v.title) && (
+                            <button
+                              type="button"
+                              disabled={translateMut.isPending}
+                              onClick={() => translateMut.mutate([v.title])}
+                              title="机器翻译此版本(译后持久化)"
+                              className="rounded-full border border-white/25 px-2 py-0.5 text-[10px] leading-none text-white/60 hover:border-accent hover:text-accent disabled:opacity-50 transition-colors"
+                            >
+                              {translateMut.isPending ? '译中…' : '翻译'}
+                            </button>
                           )}
                         </div>
                         {groups.map((g, j) => (

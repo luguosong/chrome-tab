@@ -25,6 +25,7 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-newtab}
       DB_USER: ${DB_USER:-newtab}
       DB_PASSWORD: ${DB_PASSWORD}
+      AIHUBMIX_API_KEY: ${AIHUBMIX_API_KEY}
     expose:
       - "8080"
     depends_on:

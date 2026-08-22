@@ -35,7 +35,7 @@ admin:
 
 newtab:
   changelog:
-    translate-recent: 5                  # 只译最近 N 版（见 ADR 0005：164K token 约束下的强制截断）
+    translate-recent: 5                  # 定时预取确保最近 N 版有译文（ADR 0005 截断约束 / ADR-0017 增量译制）
     llm:
       base-url: https://aihubmix.com/v1  # OpenAI 兼容网关
       model: coding-glm-5.3                  # GPT-5 系推理模型，temperature 被网关忽略，确定性靠系统提示

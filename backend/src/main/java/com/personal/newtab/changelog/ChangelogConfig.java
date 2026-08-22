@@ -2,21 +2,27 @@ package com.personal.newtab.changelog;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
+import org.springframework.boot.http.client.ClientHttpRequestFactorySettings;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.web.client.RestClient;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 装配更新日志中文译制管线（见 ADR 0005）：GitHub 原文 fetcher + aihubmix 译制器 + {@link ChangelogService}。
+ * 装配更新日志中文译制管线（见 ADR 0005 / ADR-0017）：GitHub 原文 fetcher + aihubmix 译制器 +
+ * {@link ChangelogService}(译文/快照持久化) + {@link ChangelogScheduler}(6 小时定时预取)。
  *
  * <p>两个 {@link RestClient}（GitHub 原文、LLM 网关）在此声明——RestClientConfig 尚未纳入提交历史，
  * 故把本特性的外部客户端与 Service 收拢在 changelog 模块内，保证特性提交自洽、可独立构建启动。</p>
  */
 @Configuration
+@EnableScheduling
 @EnableConfigurationProperties(ChangelogProperties.class)
 public class ChangelogConfig {
 
@@ -30,20 +36,32 @@ public class ChangelogConfig {
             4. 不要翻译：版本号（如 1.2.3）、代码片段内容、URL、命令名、配置键名。
             5. 通用技术术语（Claude Code、API、token、hook 等）可保留原文或按惯例中译。""";
 
+    /** 显式超时(ADR-0017):RestClient 默认无 read timeout,LLM/外网挂起会让定时预取线程永久卡死。
+     *  LLM 译一大块可达分钟级,read 放宽到 5 分钟;GitHub/npm 常规外呼 60s/30s 足够。 */
+    private static RestClient timed(String baseUrl, Duration connect, Duration read) {
+        return RestClient.builder()
+                .baseUrl(baseUrl)
+                .requestFactory(ClientHttpRequestFactoryBuilder.detect().build(
+                        ClientHttpRequestFactorySettings.defaults()
+                                .withConnectTimeout(connect)
+                                .withReadTimeout(read)))
+                .build();
+    }
+
     @Bean
     RestClient githubRawRestClient() {
-        return RestClient.builder().baseUrl("https://raw.githubusercontent.com").build();
+        return timed("https://raw.githubusercontent.com", Duration.ofSeconds(10), Duration.ofSeconds(60));
     }
 
     /** npm registry packument(ADR-0016 发布日期源)。 */
     @Bean
     RestClient npmRegistryRestClient() {
-        return RestClient.builder().baseUrl("https://registry.npmjs.org").build();
+        return timed("https://registry.npmjs.org", Duration.ofSeconds(10), Duration.ofSeconds(30));
     }
 
     @Bean
     RestClient llmRestClient(ChangelogProperties props) {
-        return RestClient.builder().baseUrl(props.getLlm().getBaseUrl()).build();
+        return timed(props.getLlm().getBaseUrl(), Duration.ofSeconds(10), Duration.ofMinutes(5));
     }
 
     @Bean
@@ -55,6 +73,9 @@ public class ChangelogConfig {
     ChangelogService changelogService(
             @Qualifier("githubRawRestClient") RestClient github,
             @Qualifier("llmRestClient") RestClient llm,
+            ChangelogTranslationRepository translations,
+            ChangelogSnapshotRepository snapshots,
+            NpmReleaseDateService npmDates,
             ChangelogProperties props) {
         return new ChangelogService(
                 () -> github.get()
@@ -62,7 +83,15 @@ public class ChangelogConfig {
                         .retrieve()
                         .body(String.class),
                 translator(llm, props),
+                translations,
+                snapshots,
+                npmDates,
                 props.getTranslateRecent());
+    }
+
+    @Bean
+    ChangelogScheduler changelogScheduler(ChangelogService service) {
+        return new ChangelogScheduler(service);
     }
 
     private static ChangelogService.Translator translator(RestClient llm, ChangelogProperties props) {

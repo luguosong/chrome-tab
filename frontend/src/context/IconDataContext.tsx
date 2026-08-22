@@ -23,6 +23,8 @@ import type { Icon } from '../lib/types'
 interface IconDataValue {
   quotes: Record<string, Quote | null>
   changelog: ChangelogVersion[] | null
+  /** 已有译文的版本号(ADR-0017),Drawer 对其余版本渲染「翻译」按钮。 */
+  changelogTranslated: string[]
   weather: Record<string, WeatherBundle | null>
   quotesError: Error | null
   changelogError: Error | null
@@ -80,6 +82,7 @@ export function IconDataProvider({
     () => ({
       quotes: quotesQ.data ?? {},
       changelog: changelogQ.data?.versions ?? null,
+      changelogTranslated: changelogQ.data?.translatedVersions ?? [],
       weather: weatherQ.data ?? {},
       quotesError: quotesQ.isError ? (quotesQ.error as Error) : null,
       changelogError: changelogQ.isError ? (changelogQ.error as Error) : null,
@@ -121,6 +124,7 @@ export function useIconData(): IconDataValue {
     useContext(IconDataContext) ?? {
       quotes: {},
       changelog: null,
+      changelogTranslated: [],
       weather: {},
       quotesError: null,
       changelogError: null,

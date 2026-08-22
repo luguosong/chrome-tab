@@ -1,5 +1,7 @@
 # 更新日志中文译制:后端 LLM 代理 + 最近 N 版截断
 
+> **缓存与拉取策略已被 [ADR-0017](0017-changelog-incremental-translation-persistence.md) 取代**(译文逐版本块持久化 + 6 小时定时预取 + 前端按需补译);本文的译制管线(GitHub 拉取 → LLM 译制 → 失败透传英文)、最近 N 版窗口与 Prompt 约束仍有效。
+
 `更新日志` 图标运行时直连 GitHub 拉取 Anthropic `claude-code` 仓库的 `CHANGELOG.md`(英文,`useChangelog.ts` 的 `CL_URL`),外壳 UI 已是中文,仅条目正文为英文。为达成"以中文展示",新增**后端译制代理**:后端拉取原文 → 仅译制**最近 N(=5)个 `##` 版本** → 旧版本原样保留英文 → 拼回完整 markdown 返回;前端把 `CL_URL` 换成 `/api/changelog`,复用现有已测试的 `parseChangelog` + `inline`,解析逻辑零改动。
 
 强制截断的硬约束:整份 `CHANGELOG.md` 实测 498 KB / 5420 行 / 361 版 / ~164 000 tokens,既超 `gpt-5-nano` 输入上下文、又远超任何模型单次输出上限,**整段一次译制技术上不可行、经济上荒谬**。截断到最近 5 版后约 1–2 万 token,一次调用几厘钱、秒回,且无损——旧 356 版不译不删。`N` 做成 `newtab.changelog.translate-recent` 可调。
