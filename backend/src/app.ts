@@ -42,7 +42,7 @@ export function createApp({
       gc()
       return c.json({ gc: 'done' })
     })
-  app.use('/api/*', sessionMiddleware(db))
+  app.use('/api/*', sessionMiddleware(db, cookieSecure))
   app.route('/', publicAuthRoutes(db, cookieSecure))
   app.use('/api/*', requireAuth())
   if (changelog) app.route('/', changelogRoutes(changelog))

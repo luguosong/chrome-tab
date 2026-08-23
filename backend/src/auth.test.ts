@@ -189,6 +189,50 @@ describe('POST /api/logout(放行端点,幂等化=修正白名单⑦)', () => {
   })
 })
 
+describe('滑动续期(剩余 < 29d 才续满 30d,按日节流)', () => {
+  /** 把 kv 对应 session 的剩余寿命改成指定秒数 */
+  async function setRemaining(kv: string, remainingS: number) {
+    const sid = kv.split('=')[1]!
+    await db
+      .updateTable('sessions')
+      .set({ expires_at: new Date(Date.now() + remainingS * 1000).toISOString() })
+      .where('session_id', '=', sid)
+      .execute()
+    return sid
+  }
+
+  it('剩余 1h:请求后 expires_at 续回 30d,响应刷新 Set-Cookie(同一 sid)', async () => {
+    const { kv } = await login()
+    const sid = await setRemaining(kv, 3600)
+    const res = await app.request('/api/me', { headers: { cookie: kv } })
+    expect(res.status).toBe(200)
+    const row = await db
+      .selectFrom('sessions')
+      .select('expires_at')
+      .where('session_id', '=', sid)
+      .executeTakeFirst()
+    expect(new Date(row!.expires_at).getTime()).toBeGreaterThan(Date.now() + 29 * 24 * 3600 * 1000)
+    const cookie = res.headers.getSetCookie()[0]!
+    expect(cookie).toContain(`JSESSIONID=${sid}`)
+    expect(cookie).toContain('Max-Age=2592000')
+  })
+
+  it('剩余 29.5d(> 阈值):不写库、不下发 Set-Cookie', async () => {
+    const { kv } = await login()
+    const sid = await setRemaining(kv, 29.5 * 24 * 3600)
+    const res = await app.request('/api/me', { headers: { cookie: kv } })
+    expect(res.status).toBe(200)
+    const row = await db
+      .selectFrom('sessions')
+      .select('expires_at')
+      .where('session_id', '=', sid)
+      .executeTakeFirst()
+    // expires_at 原样(到毫秒级相等,证明未续期)
+    expect(new Date(row!.expires_at).getTime()).toBeLessThanOrEqual(Date.now() + 29.5 * 24 * 3600 * 1000)
+    expect(res.headers.getSetCookie()).toHaveLength(0)
+  })
+})
+
 describe('拦截面横切', () => {
   it('多 session 并存:两次 login 各自有效', async () => {
     const a = await login()

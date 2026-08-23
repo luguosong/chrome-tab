@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
 import { getCookie, setCookie } from 'hono/cookie'
-import type { Handler, MiddlewareHandler } from 'hono'
+import type { Context, Handler, MiddlewareHandler } from 'hono'
 import type { Db } from './db'
 import { verifyPassword } from './password'
 
 /**
  * auth 契约冻结见 .scratch/backend-rewrite/issues/04 §4 + api-contract.md §1。
- * 会话载体 = SQLite sessions 表(session_id, user_id, expires_at;TTL 30d,多 session 并存,
+ * 会话载体 = SQLite sessions 表(session_id, user_id, expires_at;30d 滑动续期,多 session 并存,
  * 重启不掉线);过期读路径惰性视同无会话,物理清理走每日 cron(index.ts)。
  * 挂载顺序即拦截面:sessionMiddleware → login/logout(放行,logout 幂等化)→ requireAuth → 其余 /api/**。
  */
@@ -16,21 +16,45 @@ export interface AuthEnv {
 }
 
 const MAX_AGE_S = 30 * 24 * 3600
+// 滑动续期按日节流:剩余寿命 < 29d 才续满 30d——活跃即永生、闲置 30d 才重登,每设备每天最多写一次
+const RENEW_BELOW_S = MAX_AGE_S - 24 * 3600
 const nowIso = () => new Date().toISOString()
 
-export function sessionMiddleware(db: Db): MiddlewareHandler<AuthEnv> {
+/** 会话 cookie 属性的唯一来源(login 签发与滑动续期共用) */
+function issueSessionCookie(c: Context<AuthEnv>, sid: string, secure: boolean) {
+  setCookie(c, 'JSESSIONID', sid, {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'Strict',
+    maxAge: MAX_AGE_S,
+    secure,
+  })
+}
+
+export function sessionMiddleware(db: Db, cookieSecure: boolean): MiddlewareHandler<AuthEnv> {
   return async (c, next) => {
     const sid = getCookie(c, 'JSESSIONID')
     if (sid) {
-      const user = await db
+      const session = await db
         .selectFrom('sessions')
         .innerJoin('users', 'users.id', 'sessions.user_id')
-        .select(['users.id as id', 'users.username as username'])
+        .select(['users.id as id', 'users.username as username', 'sessions.expires_at as expiresAt'])
         .where('sessions.session_id', '=', sid)
         // ISO-8601 UTC 文本字典序即时间序(spec:容器保持 UTC)
         .where('sessions.expires_at', '>', nowIso())
         .executeTakeFirst()
-      if (user) c.set('user', user)
+      if (session) {
+        c.set('user', { id: session.id, username: session.username })
+        // ISO 文本比较即时间比较;节流见 RENEW_BELOW_S
+        if (session.expiresAt < new Date(Date.now() + RENEW_BELOW_S * 1000).toISOString()) {
+          await db
+            .updateTable('sessions')
+            .set({ expires_at: new Date(Date.now() + MAX_AGE_S * 1000).toISOString() })
+            .where('session_id', '=', sid)
+            .execute()
+          issueSessionCookie(c, sid, cookieSecure)
+        }
+      }
     }
     await next()
   }
@@ -76,13 +100,7 @@ export function publicAuthRoutes(db: Db, cookieSecure: boolean) {
             expires_at: new Date(Date.now() + MAX_AGE_S * 1000).toISOString(),
           })
           .execute()
-        setCookie(c, 'JSESSIONID', sessionId, {
-          path: '/',
-          httpOnly: true,
-          sameSite: 'Strict',
-          maxAge: MAX_AGE_S,
-          secure: cookieSecure,
-        })
+        issueSessionCookie(c, sessionId, cookieSecure)
         return c.json({ id: user.id, username: user.username })
       })
       // 幂等化(修正白名单⑦):无会话/过期会话同样 200 空体
