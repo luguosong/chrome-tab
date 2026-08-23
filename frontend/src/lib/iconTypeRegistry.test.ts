@@ -188,3 +188,22 @@ describe('register — 扩展点(spec 契约:register(typeId, definition))', () 
     register(customId, { ...custom, label: '__cleaned__' })
   })
 })
+
+describe('AI 热点类型 aihot(单例,CONTEXT.md「AI 热点」)', () => {
+  it('登记为扩展、单例、detail=modal', () => {
+    expect(get('aihot')?.label).toBe('AI 热点')
+    expect(get('aihot')?.kind).toBe('extension')
+    expect(get('aihot')?.singleton).toBe(true)
+    expect(get('aihot')?.detail).toBe('modal')
+  })
+
+  it('单例:不存在时允许,已存在时拒绝(跨页全局判断)', () => {
+    expect(canAdd('aihot', ['nav', 'weather'])).toBe(true)
+    expect(canAdd('aihot', ['nav', 'aihot'])).toBe(false)
+  })
+
+  it('editor 仅 name 一个可选字段(名称行,空回落默认)', () => {
+    const editor = get('aihot')?.editor ?? []
+    expect(editor.map((f) => f.name)).toEqual(['name'])
+  })
+})

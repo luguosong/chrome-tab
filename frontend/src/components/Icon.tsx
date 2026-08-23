@@ -5,6 +5,7 @@ import { get, type EditorField, type IconTypeDefinition } from '../lib/iconTypeR
 import StockIconBody from './StockIcon'
 import WeatherIconBody from './WeatherIcon'
 import ChangelogIconBody from './ChangelogIcon'
+import AiHotIconBody from './AiHotIcon'
 import LocationPicker from './LocationPicker'
 import Tile from './Tile'
 import type { Icon as IconModel } from '../lib/types'
@@ -153,6 +154,8 @@ export default function Icon({
         <GroupBody icon={icon} overlay={overlay} />
       ) : icon.type === 'changelog' ? (
         <ChangelogIconBody icon={icon} overlay={overlay} />
+      ) : icon.type === 'aihot' ? (
+        <AiHotIconBody icon={icon} overlay={overlay} />
       ) : (
         <>
           {/* nav:裸 favicon 直出(ADR-0015 注记 2026-08-23c,回归 ADR-0013):Tile bare

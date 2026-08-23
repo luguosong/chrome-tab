@@ -259,6 +259,18 @@ describe('PUT /api/config(全量替换)', () => {
     )
   })
 
+  it('409 单例类型出现多次(blob 内两份 AIHOT,全局仅一个实例)', async () => {
+    const body = {
+      ...blob(),
+      icons: [
+        ...blob().icons,
+        { id: 9106, pageId: 9002, parentId: null, type: 'AIHOT', sortOrder: 1, data: null },
+        { id: 9107, pageId: 9002, parentId: null, type: 'AIHOT', sortOrder: 2, data: null },
+      ],
+    }
+    await expectError(await req('PUT', '/api/config', { body, cookie }), 409, 'icons[6] 单例类型 AIHOT 出现多次，全局仅一个实例')
+  })
+
   it('失败写(409)后数据原样保留、版本不前进(原子性)', async () => {
     await req('PUT', '/api/config', { body: blob(), cookie })
     const before = (await (await req('GET', '/api/config', { cookie })).json()) as { pages: unknown[]; updatedAt: string }

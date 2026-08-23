@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { AuthEnv } from './auth'
 import { BadRequest, ConflictError, touchVersion } from './common'
 import type { Db } from './db'
-import { CAPACITY_CELLS, ICON_TYPES, iconWire } from './icons'
+import { CAPACITY_CELLS, ICON_TYPES, SINGLETON_TYPES, iconWire } from './icons'
 import { readLayout, updateLayout } from './layout'
 import { pageWire } from './pages'
 
@@ -187,9 +187,16 @@ function validate(req: { pages: PageItem[]; icons: IconItem[] }): void {
   const cellsByPage = new Map<number, number>()
   const byId = new Map<number, IconItem>()
   const groupsWithMember = new Set<number>()
+  const singletonSeen = new Set<string>()
   req.icons.forEach((i, idx) => {
     if (byId.has(i.id)) throw new ConflictError(409, `icons[${idx}] 的 id 重复:${i.id}`)
     byId.set(i.id, i)
+    if (SINGLETON_TYPES.includes(i.type)) {
+      if (singletonSeen.has(i.type)) {
+        throw new ConflictError(409, `icons[${idx}] 单例类型 ${i.type} 出现多次，全局仅一个实例`)
+      }
+      singletonSeen.add(i.type)
+    }
   })
   req.icons.forEach((i, idx) => {
     if (!pageIds.has(i.pageId)) throw new ConflictError(409, `icons[${idx}] 引用了不存在的页面:${i.pageId}`)

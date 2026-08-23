@@ -29,8 +29,8 @@ export type EditorField =
 
 /** 刷新配置(spec §刷新策略):hook key + 间隔(ms)。0 = 不刷新。 */
 export type RefreshConfig = {
-  /** 'quotes' = useQuotes 轮询(60s); 'changelog' = useChangelog staleTime(1h); 'weather' = useWeather(后端缓存 10/30/5min); 'none' = 不刷新。 */
-  kind: 'quotes' | 'changelog' | 'weather' | 'none'
+  /** 'quotes' = useQuotes 轮询(60s); 'changelog' = useChangelog staleTime(1h); 'weather' = useWeather(后端缓存 10/30/5min); 'aihot' = useAiHot 自持(后端缓存 300s,单例不入集中层); 'none' = 不刷新。 */
+  kind: 'quotes' | 'changelog' | 'weather' | 'aihot' | 'none'
 }
 
 /** 实时摘要数据(见 summarize 注释:ADR-0001 契约字段,当前无网格消费方)。 */
@@ -183,6 +183,19 @@ export const WEATHER_DEF: IconTypeDefinition = {
   },
 }
 
+/** AI 热点:扩展类型,目前唯一单例(见 CONTEXT.md「AI 热点」——榜单全局唯一、无可绑实例参数),
+ *  data={name?}(名称行,空回落「AI 热点」)。网格显示榜首标题+源数,详情=Modal。 */
+export const AIHOT_DEF: IconTypeDefinition = {
+  id: 'aihot',
+  label: 'AI 热点',
+  kind: 'extension',
+  singleton: true,
+  refresh: { kind: 'aihot' },
+  detail: 'modal',
+  editor: [{ name: 'name', label: '名称', placeholder: '名称(默认 AI 热点)' }],
+  summarize: () => null, // 网格渲染走专属 AiHotIconBody,契约字段无消费方(同 nav)
+}
+
 /**
  * 分组(ADR-0011):iOS 文件夹式收纳容器(块内成员 favicon 3×2 迷你预览,ADR-0015)。
  * kind='group' 不属于 base/extension 任一分区,
@@ -206,4 +219,5 @@ register('nav', NAV_DEF)
 register('stock', STOCK_DEF)
 register('changelog', CHANGELOG_DEF)
 register('weather', WEATHER_DEF)
+register('aihot', AIHOT_DEF)
 register('group', GROUP_DEF)

@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { sql } from 'kysely'
+import { aihotRoutes } from './aihot'
 import { meHandler, publicAuthRoutes, requireAuth, sessionMiddleware, type AuthEnv } from './auth'
 import { changelogRoutes, type ChangelogServices } from './changelog'
 import { ConflictError } from './common'
@@ -53,6 +54,8 @@ export function createApp({
   app.route('/', configRoutes(db))
   // weather 恒挂载:未配置 → requireConfigured 抛 → 500「服务器错误」(契约 §7,非 404)
   app.route('/', weatherRoutes(weather))
+  // AIHOT 热点代理(单例图标「AI 热点」):无配置,失败降级见 aihot.ts
+  app.route('/', aihotRoutes())
   app.get('/api/wallpaper', createWallpaperHandler())
   // 站点信息抓取(CONTEXT.md「站点信息」):新增/编辑表单自动填充用,/api/* 鉴权横切覆盖
   app.get('/api/site-info', createSiteInfoHandler())

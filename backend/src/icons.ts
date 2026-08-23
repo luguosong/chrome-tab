@@ -14,8 +14,11 @@ import type { Db } from './db'
 /** 页面容量 = 每页顶层格数上限(ADR-0002/0016;config 全量替换校验复用)。 */
 export const CAPACITY_CELLS = 64
 /** icon type 大写枚举 wire(config 全量替换校验复用)。 */
-export const ICON_TYPES = ['NAV', 'STOCK', 'CHANGELOG', 'WEATHER', 'GROUP'] as const
+export const ICON_TYPES = ['NAV', 'STOCK', 'CHANGELOG', 'WEATHER', 'AIHOT', 'GROUP'] as const
 type IconType = (typeof ICON_TYPES)[number]
+
+/** 单例类型(见 CONTEXT.md「单例类型」):全局仅一个实例,新增/全量替换两入口同校验。 */
+export const SINGLETON_TYPES: readonly IconType[] = ['AIHOT']
 
 type IconRow = {
   id: number
@@ -48,6 +51,7 @@ export function iconRoutes(db: Db) {
       requireDataField(body)
       return await db.transaction().execute(async (tx) => {
         if (type === 'GROUP') throw new ConflictError(409, '分组需经合并创建，不能直接新建')
+        if (SINGLETON_TYPES.includes(type)) await rejectExistingSingleton(tx, userId, type)
         const page = await tx
           .selectFrom('pages')
           .select('id')
@@ -393,6 +397,22 @@ async function findIcon(tx: Db, userId: number, id: number, notFoundMsg: string)
     .where('id', '=', id)
     .where('user_id', '=', userId)
     .executeTakeFirstOrThrow(() => new ConflictError(404, notFoundMsg))
+}
+
+/** 单例类型已存在实例 → 409(前端抽屉已置灰,此为竞态兜底)。 */
+async function rejectExistingSingleton(
+  tx: Db,
+  userId: number,
+  type: IconType,
+): Promise<void> {
+  const dup = await tx
+    .selectFrom('icons')
+    .select('id')
+    .where('user_id', '=', userId)
+    .where('type', '=', type)
+    .limit(1)
+    .executeTakeFirst()
+  if (dup) throw new ConflictError(409, '该类型图标已存在，单例类型全局仅可添加一个')
 }
 
 async function requirePage(tx: Db, userId: number, pageId: number): Promise<{ id: number }> {

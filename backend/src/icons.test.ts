@@ -102,6 +102,15 @@ describe('POST /api/icons', () => {
     )
   })
 
+  it('AIHOT 单例:首建 201,第二份 409(CONTEXT.md「单例类型」,前端置灰的竞态兜底)', async () => {
+    const first = await req('POST', '/api/icons', { body: { pageId: 1, type: 'AIHOT', data: null }, cookie })
+    expect(first.status).toBe(201)
+    await expectError(
+      await req('POST', '/api/icons', { body: { pageId: 1, type: 'AIHOT', data: null }, cookie }),
+      409, '该类型图标已存在，单例类型全局仅可添加一个',
+    )
+  })
+
   it('404 页面不存在;400 非法 type(含小写)/缺 pageId/data 非对象', async () => {
     await expectError(await req('POST', '/api/icons', { body: { pageId: 999, type: 'NAV', data: null }, cookie }), 404, '页面不存在')
     for (const body of [

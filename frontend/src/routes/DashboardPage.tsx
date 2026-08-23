@@ -37,6 +37,7 @@ import IconView from '../components/Icon'
 import GroupOverlay, { isGroupContainerId, parseGroupContainerId } from '../components/GroupOverlay'
 import StockModal from '../components/StockModal'
 import WeatherModal from '../components/WeatherModal'
+import AiHotModal from '../components/AiHotModal'
 import ChangelogDrawer from '../components/ChangelogDrawer'
 import ControlDrawer from '../components/ControlDrawer'
 import { get } from '../lib/iconTypeRegistry'
@@ -584,6 +585,8 @@ function Dashboard() {
                 {detail && get(detail.type)?.detail === 'modal' &&
                   (detail.type === 'weather' ? (
                     <WeatherModal icon={detail} onClose={() => setDetail(null)} />
+                  ) : detail.type === 'aihot' ? (
+                    <AiHotModal icon={detail} onClose={() => setDetail(null)} />
                   ) : (
                     <StockModal icon={detail} onClose={() => setDetail(null)} />
                   ))}
