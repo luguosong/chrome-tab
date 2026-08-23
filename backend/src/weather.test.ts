@@ -6,7 +6,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app'
 import { openDb } from './db'
 import { bootstrap } from './seed'
-import { baseUrlFor, parseAir, parseAlerts, parseLatLon, parseLocations, parseNow, weatherRoutes } from './weather'
+import { baseUrlFor, parseAir, parseAlerts, parseDaily, parseHourly, parseLatLon, parseLocations, parseNow, weatherRoutes } from './weather'
 
 // 契约 §7(ADR-0009)。纯解析直测 + HTTP 层经真实 stub 上游(127.0.0.1 随机端口)探测;
 // 401 横切由契约测试统一覆盖,此处直挂路由(不经 createApp,免依赖并行未提交的接线)。
@@ -45,6 +45,20 @@ const GEO = {
     { name: '朝阳', adm1: '辽宁省', adm2: '朝阳市', lat: '41.57', lon: '120.45' },
   ],
 }
+const HOURLY = {
+  code: '200',
+  hourly: [
+    { fxTime: '2026-08-12T10:00+08:00', temp: '25', icon: '104', text: '阴', pop: '10' },
+    { fxTime: '2026-08-12T11:00+08:00', temp: '26', icon: '101', text: '多云', pop: '20' },
+  ],
+}
+const DAILY = {
+  code: '200',
+  daily: [
+    { fxDate: '2026-08-12', tempMax: '31', tempMin: '24', iconDay: '104', textDay: '阴' },
+    { fxDate: '2026-08-13', tempMax: '33', tempMin: '25', iconDay: '100', textDay: '晴' },
+  ],
+}
 
 // ── stub 上游:按路径回放 fixture,可注入失败/覆盖/gzip ─────────────────────────
 
@@ -57,6 +71,8 @@ function respondFor(pathname: string): { status: number; body: unknown } {
   if (failing.has(pathname)) return { status: 500, body: { error: 'boom' } }
   if (overrides.has(pathname)) return { status: 200, body: overrides.get(pathname) }
   if (pathname === '/v7/weather/now') return { status: 200, body: { code: '200', now: NOW } }
+  if (pathname === '/v7/weather/24h') return { status: 200, body: HOURLY }
+  if (pathname === '/v7/weather/7d') return { status: 200, body: DAILY }
   if (pathname.startsWith('/airquality/v1/current/')) return { status: 200, body: AIR }
   if (pathname.startsWith('/weatheralert/v1/current/')) return { status: 200, body: ALERTS }
   if (pathname === '/geo/v2/city/lookup') return { status: 200, body: GEO }
@@ -181,6 +197,27 @@ describe('parseLocations', () => {
   })
 })
 
+describe('parseHourly / parseDaily(预报:v7 字符串字段归一化)', () => {
+  it('hourly:fxTime/temp/icon/text 映射,丢弃多余字段', () => {
+    expect(parseHourly(HOURLY)).toEqual([
+      { fxTime: '2026-08-12T10:00+08:00', temp: 25, icon: '104', text: '阴' },
+      { fxTime: '2026-08-12T11:00+08:00', temp: 26, icon: '101', text: '多云' },
+    ])
+  })
+  it('daily:fxDate/温度区间/iconDay/textDay 映射', () => {
+    expect(parseDaily(DAILY)).toEqual([
+      { fxDate: '2026-08-12', tempMax: 31, tempMin: 24, iconDay: '104', textDay: '阴' },
+      { fxDate: '2026-08-13', tempMax: 33, tempMin: 25, iconDay: '100', textDay: '晴' },
+    ])
+  })
+  it('code 非 200 / 缺数组 → 抛(调用方据此省略预报段)', () => {
+    expect(() => parseHourly({ code: '404' })).toThrow()
+    expect(() => parseHourly({ code: '200' })).toThrow()
+    expect(() => parseDaily({ code: '404' })).toThrow()
+    expect(() => parseDaily({ code: '200' })).toThrow()
+  })
+})
+
 // ── HTTP 层(批量端点)───────────────────────────────────────────────────────
 
 describe('GET /api/weather(批量,重复 location 整串为键)', () => {
@@ -196,11 +233,15 @@ describe('GET /api/weather(批量,重复 location 整串为键)', () => {
     expect(b.air.aqi).toBe(42)
     expect(b.air).not.toHaveProperty('so2') // NON_NULL:缺失污染物省略,不得置 null
     expect(b.alerts).toHaveLength(1)
-    // now 的 location=lon,lat(经度在前);v1 路径 /{lat}/{lon}(纬度在前)
+    expect(b.hourly).toHaveLength(2)
+    expect(b.daily).toHaveLength(2)
+    // now/24h/7d 的 location=lon,lat(经度在前);v1 路径 /{lat}/{lon}(纬度在前)
     expect(paths()).toEqual([
       '/v7/weather/now',
       '/airquality/v1/current/39.90/116.41',
       '/weatheralert/v1/current/39.90/116.41',
+      '/v7/weather/24h',
+      '/v7/weather/7d',
     ])
     expect(new URL(hits[0]!.url, 'http://x').searchParams.get('location')).toBe('116.41,39.90')
     expect(hits[0]!.key).toBe('test-key')
@@ -211,7 +252,7 @@ describe('GET /api/weather(批量,重复 location 整串为键)', () => {
     const out = await json(res)
     expect(Object.keys(out)).toEqual(['39.9,116.4', '31.2,121.5'])
     expect(out['31.2,121.5']!.location).toBe('31.20,121.50')
-    expect(paths()).toHaveLength(6)
+    expect(paths()).toHaveLength(10)
   })
 
   it('无 location → {}', async () => {
@@ -224,7 +265,7 @@ describe('GET /api/weather(批量,重复 location 整串为键)', () => {
     const res = await makeApp().request('/api/weather?location=abc&location=39.9,116.4&location=1,2,3&location=,')
     const out = await json(res)
     expect(Object.keys(out)).toEqual(['39.9,116.4'])
-    expect(paths()).toHaveLength(3)
+    expect(paths()).toHaveLength(5)
   })
 
   it('同坐标不同原始串共享缓存(规范化键为桶):三端点仅各拉一次', async () => {
@@ -232,7 +273,7 @@ describe('GET /api/weather(批量,重复 location 整串为键)', () => {
     const out = await json(res)
     expect(Object.keys(out)).toEqual(['39.904,116.407', '39.90,116.41'])
     expect(out['39.904,116.407']!.location).toBe('39.90,116.41')
-    expect(paths()).toHaveLength(3)
+    expect(paths()).toHaveLength(5)
   })
 
   it('实况失败 → 该键 null,且不再拉空气/预警(整 bundle null)', async () => {
@@ -250,7 +291,7 @@ describe('GET /api/weather(批量,重复 location 整串为键)', () => {
     expect(b.now.temp).toBe(25)
     expect('air' in b).toBe(false)
     expect(b.alerts).toHaveLength(1)
-    expect(paths()).toHaveLength(3)
+    expect(paths()).toHaveLength(5)
   })
 
   it('预警失败仅预警降级:alerts 空数组,实况/空气不受影响', async () => {
@@ -261,7 +302,19 @@ describe('GET /api/weather(批量,重复 location 整串为键)', () => {
     expect(b.now.temp).toBe(25)
     expect(b.air.aqi).toBe(42)
     expect(b.alerts).toEqual([])
-    expect(paths()).toHaveLength(3)
+    expect(paths()).toHaveLength(5)
+  })
+
+  it('24h 失败仅小时预报降级:hourly 省略,其余不受影响(7d 同理各自独立)', async () => {
+    failing.add('/v7/weather/24h')
+    failing.add('/v7/weather/7d')
+    const res = await makeApp().request('/api/weather?location=39.9,116.4')
+    const out = await json(res)
+    const b = out['39.9,116.4']!
+    expect(b.now.temp).toBe(25)
+    expect('hourly' in b).toBe(false)
+    expect('daily' in b).toBe(false)
+    expect(paths()).toHaveLength(5)
   })
 
   it('TTL 缓存:失败不缓存(恢复后重拉)、成功缓存(命中零外呼)', async () => {
@@ -275,20 +328,20 @@ describe('GET /api/weather(批量,重复 location 整串为键)', () => {
     failing.clear()
     const ok = await json(await app.request('/api/weather?location=39.9,116.4'))
     expect(ok['39.9,116.4']!.now.temp).toBe(25)
-    // 累计外呼:2 次失败 now + 1 次成功 now + air + alert = 5
-    expect(paths()).toHaveLength(5)
+    // 累计外呼:2 次失败 now + 1 次成功 now + air + alert + 24h + 7d = 7
+    expect(paths()).toHaveLength(7)
     // 成功已缓存 → 同参零外呼(计数不动)
     await app.request('/api/weather?location=39.9,116.4')
-    expect(paths()).toHaveLength(5)
+    expect(paths()).toHaveLength(7)
   })
 
-  it('TTL 分桶过期:实况 10min/预警 5min 到期重拉,空气 30min 未到零外呼', async () => {
+  it('TTL 分桶过期:实况 10min/预警 5min 到期重拉,空气/预报 30min 未到零外呼', async () => {
     const app = makeApp()
     await app.request('/api/weather?location=39.9,116.4')
-    expect(paths()).toHaveLength(3)
+    expect(paths()).toHaveLength(5)
     vi.setSystemTime(Date.now() + 11 * 60_000)
     await app.request('/api/weather?location=39.9,116.4')
-    expect(paths()).toHaveLength(5)
+    expect(paths()).toHaveLength(7)
   })
 
   it('和风无条件 gzip:上游 gzip 响应照常解析(Node fetch 自动解压并摘头,Java 拦截器语义)', async () => {

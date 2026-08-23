@@ -55,12 +55,31 @@ export type WeatherAlert = {
   color: { red: number; green: number; blue: number } | null
 }
 
-/** 一个位置的三合一 bundle。实况取数失败时整个 bundle 为 null(前端该图标显示重试)。 */
+/** 小时预报单条(对齐后端 WeatherBundle.Hourly;展示子集:时间/温度/状况)。 */
+export type WeatherHour = {
+  fxTime: string
+  temp: number
+  icon: string
+  text: string
+}
+
+/** 逐日预报单条(对齐后端 WeatherBundle.Daily;展示子集:日期/温度区间/昼间状况)。 */
+export type WeatherDay = {
+  fxDate: string
+  tempMax: number
+  tempMin: number
+  iconDay: string
+  textDay: string
+}
+
+/** 一个位置的 bundle(实况必在;空气/预报取数失败时对应字段运行时缺失)。实况取数失败时整个 bundle 为 null(前端该图标显示重试)。 */
 export type WeatherBundle = {
   location: string
   now: WeatherNow
   air: WeatherAir | null
   alerts: WeatherAlert[]
+  hourly?: WeatherHour[]
+  daily?: WeatherDay[]
 }
 
 /**

@@ -1,15 +1,17 @@
 import { Hono } from 'hono'
+import { TtlCache } from './common'
 
 /**
- * 天气后端代理(ADR-0009,契约 §7)。三端点 per 位置:实况 /v7/weather/now、空气
- * /airquality/v1/current、预警 /weatheralert/v1/current;城市搜索走 GeoAPI。
+ * 天气后端代理(ADR-0009,契约 §7)。五端点 per 位置:实况 /v7/weather/now、空气
+ * /airquality/v1/current、预警 /weatheralert/v1/current、小时预报 /v7/weather/24h、
+ * 逐日预报 /v7/weather/7d;城市搜索走 GeoAPI。
  *
- * 经纬度入参顺序(和风反直觉点,极易错):weather-now 的 location=lon,lat(经度在前);
+ * 经纬度入参顺序(和风反直觉点,极易错):v7 端点(now/24h/7d)的 location=lon,lat(经度在前);
  * v1 空气/预警路径 /{lat}/{lon}(纬度在前)。经纬度统一 2 位小数(和风精度上限)。
  *
- * 缓存:按 (canonicalKey, endpoint) 内存 TTL——实况 10min、空气 30min、预警 5min;仅缓存成功结果,
- * 失败不缓存(重试可再打上游)。降级:实况失败 → 整 bundle 为 null(前端该图标显示重试);
- * 空气/预警失败 → 各自 null/空,不影响实况展示。Key/host 未配置 → 抛错走 500「服务器错误」。
+ * 缓存:按 (canonicalKey, endpoint) 内存 TTL——实况 10min、空气 30min、预警 5min、预报(24h/7d)30min;
+ * 仅缓存成功结果,失败不缓存(重试可再打上游)。降级:实况失败 → 整 bundle 为 null(前端该图标显示重试);
+ * 空气/预警/预报失败 → 各自 null/空/省略,不影响实况展示。Key/host 未配置 → 抛错走 500「服务器错误」。
  *
  * gzip:和风对所有响应无条件 gzip。Java 侧需 GzipDecompressingInterceptor(JDK HttpClient 不解压);
  * Node fetch 按规范自动解压并摘 Content-Encoding/Content-Length,无需处理。
@@ -18,6 +20,8 @@ import { Hono } from 'hono'
 const NOW_TTL_MS = 10 * 60_000
 const AIR_TTL_MS = 30 * 60_000
 const ALERT_TTL_MS = 5 * 60_000
+const HOURLY_TTL_MS = 30 * 60_000
+const DAILY_TTL_MS = 30 * 60_000
 
 // ── wire DTO(契约 §7;air 及其内部字段 NON_NULL:null 序列化时省略,不得置 null)──────
 
@@ -69,6 +73,23 @@ export interface LocationCandidateDto {
   lon: number
 }
 
+/** 小时预报单条(24h,展示字段子集:时间/温度/状况)。 */
+export interface WeatherHourlyDto {
+  fxTime: string | null
+  temp: number
+  icon: string | null
+  text: string | null
+}
+
+/** 逐日预报单条(7d,展示字段子集:日期/温度区间/昼间状况)。 */
+export interface WeatherDailyDto {
+  fxDate: string | null
+  tempMax: number
+  tempMin: number
+  iconDay: string | null
+  textDay: string | null
+}
+
 export interface WeatherBundleDto {
   /** 规范化 "lat,lon"(2 位小数)缓存键,与响应 map 的原始串键不同表示(契约冻结) */
   location: string
@@ -76,6 +97,9 @@ export interface WeatherBundleDto {
   /** null 时整个字段省略(NON_NULL) */
   air?: WeatherAirDto
   alerts: WeatherAlertDto[]
+  /** 取数失败时整个字段省略(同 air 降级) */
+  hourly?: WeatherHourlyDto[]
+  daily?: WeatherDailyDto[]
 }
 
 export interface WeatherConfig {
@@ -222,6 +246,42 @@ export function parseLocations(resp: unknown): LocationCandidateDto[] {
   return out
 }
 
+/** 小时预报:code != 200 或缺 hourly 抛(调用方据此省略 hourly 段)。 */
+export function parseHourly(resp: unknown): WeatherHourlyDto[] {
+  const r = asRec(resp)
+  if (str(r, 'code') !== '200') throw new Error('weather-24h 响应非 200')
+  const arrV = arr(r, 'hourly')
+  if (!arrV.length) throw new Error('weather-24h 缺 hourly')
+  const out: WeatherHourlyDto[] = []
+  for (const o of arrV) {
+    const m = asRec(o)
+    if (!m) continue
+    out.push({ fxTime: str(m, 'fxTime'), temp: int(m, 'temp'), icon: str(m, 'icon'), text: str(m, 'text') })
+  }
+  return out
+}
+
+/** 逐日预报:code != 200 或缺 daily 抛(调用方据此省略 daily 段)。 */
+export function parseDaily(resp: unknown): WeatherDailyDto[] {
+  const r = asRec(resp)
+  if (str(r, 'code') !== '200') throw new Error('weather-7d 响应非 200')
+  const arrV = arr(r, 'daily')
+  if (!arrV.length) throw new Error('weather-7d 缺 daily')
+  const out: WeatherDailyDto[] = []
+  for (const o of arrV) {
+    const m = asRec(o)
+    if (!m) continue
+    out.push({
+      fxDate: str(m, 'fxDate'),
+      tempMax: int(m, 'tempMax'),
+      tempMin: int(m, 'tempMin'),
+      iconDay: str(m, 'iconDay'),
+      textDay: str(m, 'textDay'),
+    })
+  }
+  return out
+}
+
 /** 从 pollutants[] 按 code 取浓度 value(so2 等可能缺失 → null)。 */
 function pollutant(pollutants: unknown[], code: string): number | null {
   for (const o of pollutants) {
@@ -244,20 +304,6 @@ export function baseUrlFor(apiHost: string): string {
   return /^https?:\/\//.test(host) ? host : `https://${host}`
 }
 
-/** 简易 TTL 缓存:仅存成功结果,过期失效;重启清空可接受(分钟级数据,重拉无感)。 */
-class TtlCache<V> {
-  private store = new Map<string, { value: V; expiresAt: number }>()
-
-  get(key: string): V | undefined {
-    const e = this.store.get(key)
-    return e && e.expiresAt > Date.now() ? e.value : undefined
-  }
-
-  put(key: string, value: V, ttlMs: number) {
-    this.store.set(key, { value, expiresAt: Date.now() + ttlMs })
-  }
-}
-
 /** NON_NULL 语义:Air null 字段序列化省略(契约冻结:前端声明 | null 但运行时收 undefined) */
 function omitNulls<T extends object>(o: T): T {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== undefined)) as T
@@ -272,6 +318,8 @@ export function createWeatherService(cfg: WeatherConfig) {
   const nowCache = new TtlCache<WeatherNowDto>()
   const airCache = new TtlCache<WeatherAirDto | null>()
   const alertCache = new TtlCache<WeatherAlertDto[]>()
+  const hourlyCache = new TtlCache<WeatherHourlyDto[]>()
+  const dailyCache = new TtlCache<WeatherDailyDto[]>()
 
   function requireConfigured() {
     if (!apiKey.trim() || !apiHost.trim()) {
@@ -295,7 +343,7 @@ export function createWeatherService(cfg: WeatherConfig) {
     return parseLocations(await getJson('/geo/v2/city/lookup', { location: q.trim(), lang, number: '10' }))
   }
 
-  /** 取一个位置的三合一 bundle。实况失败返回 null(前端该图标重试);空气/预警各自降级。 */
+  /** 取一个位置的五合一 bundle。实况失败返回 null(前端该图标重试);空气/预警/预报各自降级。 */
   async function bundleFor(lat: number, lon: number): Promise<WeatherBundleDto | null> {
     requireConfigured()
     const canon = `${fmt(lat)},${fmt(lon)}`
@@ -318,7 +366,26 @@ export function createWeatherService(cfg: WeatherConfig) {
     } catch (e) {
       console.warn(`天气预警取数失败 ${canon}: ${e}`)
     }
-    return { location: canon, now, ...(air ? { air: omitNulls(air) } : {}), alerts }
+    let hourly: WeatherHourlyDto[] | null = null
+    try {
+      hourly = await fetchHourly(lat, lon, canon)
+    } catch (e) {
+      console.warn(`小时预报取数失败 ${canon}: ${e}`)
+    }
+    let daily: WeatherDailyDto[] | null = null
+    try {
+      daily = await fetchDaily(lat, lon, canon)
+    } catch (e) {
+      console.warn(`逐日预报取数失败 ${canon}: ${e}`)
+    }
+    return {
+      location: canon,
+      now,
+      ...(air ? { air: omitNulls(air) } : {}),
+      alerts,
+      ...(hourly ? { hourly } : {}),
+      ...(daily ? { daily } : {}),
+    }
   }
 
   async function fetchNow(lat: number, lon: number, canon: string): Promise<WeatherNowDto> {
@@ -345,6 +412,22 @@ export function createWeatherService(cfg: WeatherConfig) {
     if (cached) return cached
     const v = parseAlerts(await getJson(`/weatheralert/v1/current/${fmt(lat)}/${fmt(lon)}`, { lang })) // 纬度在前
     alertCache.put(canon, v, ALERT_TTL_MS)
+    return v
+  }
+
+  async function fetchHourly(lat: number, lon: number, canon: string): Promise<WeatherHourlyDto[]> {
+    const cached = hourlyCache.get(canon)
+    if (cached) return cached
+    const v = parseHourly(await getJson('/v7/weather/24h', { location: `${fmt(lon)},${fmt(lat)}`, lang, unit: 'm' })) // 经度在前
+    hourlyCache.put(canon, v, HOURLY_TTL_MS)
+    return v
+  }
+
+  async function fetchDaily(lat: number, lon: number, canon: string): Promise<WeatherDailyDto[]> {
+    const cached = dailyCache.get(canon)
+    if (cached) return cached
+    const v = parseDaily(await getJson('/v7/weather/7d', { location: `${fmt(lon)},${fmt(lat)}`, lang, unit: 'm' })) // 经度在前
+    dailyCache.put(canon, v, DAILY_TTL_MS)
     return v
   }
 
