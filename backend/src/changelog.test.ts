@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app'
 import { openDb, type Db } from './db'
 import { bootstrap } from './seed'
@@ -6,6 +6,8 @@ import { expectError, setupApp } from './testUtils'
 import {
   extractContent,
   ChangelogService,
+  modelCandidates,
+  prodChangelogDeps,
   splitBlocks,
   type ChangelogDeps,
 } from './changelog'
@@ -239,6 +241,84 @@ describe('extractContent(畸形响应 → null 触发降级,不抛)', () => {
   it('content 非字符串 → null', () => {
     expect(extractContent({ choices: [{ message: { content: 42 } }] })).toBeNull()
     expect(extractContent({ choices: [{ message: null }] })).toBeNull()
+  })
+})
+
+// ---- 模型候选链(prodChangelogDeps.translate 真链路,mock globalThis.fetch)----
+
+describe('modelCandidates(free 优先,CHANGELOG_LLM_MODEL 逗号分隔覆盖)', () => {
+  it('默认:三 free + coding-glm-5.2 兜底', () => {
+    expect(modelCandidates()).toEqual([
+      'coding-glm-5.1-free',
+      'coding-kimi-k3-free',
+      'gemini-3.6-flash-free',
+      'coding-glm-5.2',
+    ])
+  })
+
+  it('env 覆盖:逗号分隔 + trim,空段过滤;空串回默认(compose 缺省键注入的是 "")', () => {
+    expect(modelCandidates({ CHANGELOG_LLM_MODEL: ' a , b,,' } as NodeJS.ProcessEnv)).toEqual(['a', 'b'])
+    expect(modelCandidates({ CHANGELOG_LLM_MODEL: '' } as NodeJS.ProcessEnv)).toEqual(modelCandidates())
+  })
+})
+
+describe('translate 候选链(候选失效=403/404/no_available_channel 换下一个,其余直接抛)', () => {
+  const realFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    delete process.env.AIHUBMIX_API_KEY
+    delete process.env.CHANGELOG_LLM_MODEL
+  })
+
+  /** 依次返回 seq 响应(超出取末个),记录每次请求的 model 字段顺序。 */
+  function mockFetchSeq(seq: Array<{ status: number; body: unknown }>): string[] {
+    const models: string[] = []
+    let i = 0
+    globalThis.fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      models.push(JSON.parse(String(init?.body)).model)
+      const s = seq[Math.min(i++, seq.length - 1)]!
+      return new Response(JSON.stringify(s.body), { status: s.status })
+    }) as typeof fetch
+    return models
+  }
+
+  const OK = { status: 200, body: { choices: [{ message: { content: '译文' } }] } }
+  const NO_CHANNEL = { status: 400, body: { error: { code: 'no_available_channel' } } }
+
+  it('no_available_channel → 换下一候选直到成功,请求按候选序', async () => {
+    process.env.AIHUBMIX_API_KEY = 'k'
+    process.env.CHANGELOG_LLM_MODEL = 'm1,m2,m3'
+    const models = mockFetchSeq([NO_CHANNEL, NO_CHANNEL, OK])
+    await expect(prodChangelogDeps().translate('块')).resolves.toBe('译文')
+    expect(models).toEqual(['m1', 'm2', 'm3'])
+  })
+
+  it('403(模型被禁,如线上 coding-kimi-k3-free)同样换下一候选', async () => {
+    process.env.AIHUBMIX_API_KEY = 'k'
+    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
+    const models = mockFetchSeq([{ status: 403, body: {} }, OK])
+    await expect(prodChangelogDeps().translate('块')).resolves.toBe('译文')
+    expect(models).toEqual(['m1', 'm2'])
+  })
+
+  it('401(key 无效)换模型无益:直接抛,不再请求', async () => {
+    process.env.AIHUBMIX_API_KEY = 'k'
+    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
+    const models = mockFetchSeq([{ status: 401, body: { error: { code: 'invalid_api_key' } } }])
+    await expect(prodChangelogDeps().translate('块')).rejects.toThrow('HTTP 401')
+    expect(models).toEqual(['m1'])
+  })
+
+  it('全链候选失效:抛末次错误(调用方 warn 降级英文)', async () => {
+    process.env.AIHUBMIX_API_KEY = 'k'
+    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
+    const models = mockFetchSeq([NO_CHANNEL, NO_CHANNEL])
+    await expect(prodChangelogDeps().translate('块')).rejects.toThrow('HTTP 400')
+    expect(models).toEqual(['m1', 'm2'])
+  })
+
+  it('Key 缺失:返回 null(Service 层据此透传英文原文)', async () => {
+    expect(prodChangelogDeps().translate('块')).resolves.toBeNull()
   })
 })
 

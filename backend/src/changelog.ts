@@ -227,7 +227,12 @@ const SYSTEM_PROMPT = `你是专业技术译者。把用户给出的 CHANGELOG m
 async function fetchText(url: string, timeoutMs: number, init?: RequestInit): Promise<string> {
   // 超时防挂起(ADR-0017):外呼挂死会让定时预取永不返回;LLM 译一大块可达分钟级
   const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
-  if (!res.ok) throw new Error(`${init?.method ?? 'GET'} ${url} → HTTP ${res.status}`)
+  if (!res.ok)
+    // status/body 挂错误上:调用方据此分类(free 候选链按 403/404/no_available_channel 换下一个)
+    throw Object.assign(new Error(`${init?.method ?? 'GET'} ${url} → HTTP ${res.status}`), {
+      status: res.status,
+      body: (await res.text()).slice(0, 200),
+    })
   return res.text()
 }
 
@@ -239,10 +244,27 @@ export function extractContent(resp: unknown): string | null {
   return typeof content === 'string' ? content : null
 }
 
-/** 默认值对齐线上 application.yml 现状(model=coding-glm-5.3);Key 沿用 AIHUBMIX_API_KEY。 */
+/**
+ * 译制模型候选链(2026-08-23):free 优先,free 全不可用落到付费 coding-glm-5.2。
+ * 候选失效 = 403/404(模型被禁/不存在)或 400 no_available_channel(渠道没了);其他错误(401 key/网络/5xx)换模型无益,直接抛。
+ * CHANGELOG_LLM_MODEL 支持逗号分隔列表覆盖;Key 沿用 AIHUBMIX_API_KEY。
+ */
+export const DEFAULT_LLM_MODELS = 'coding-glm-5.1-free,coding-kimi-k3-free,gemini-3.6-flash-free,coding-glm-5.2'
+
+export function modelCandidates(env: NodeJS.ProcessEnv = process.env): string[] {
+  // 空串回退默认:compose 引用行对 .env 缺省键注入的是 ''(非 undefined),split 后会是空列表
+  return (env.CHANGELOG_LLM_MODEL?.trim() || DEFAULT_LLM_MODELS).split(',').map((m) => m.trim()).filter(Boolean)
+}
+
+/** 网关对该候选「没戏了,换下一个」的判定:模型被禁/不存在/无渠道。 */
+function isCandidateExhausted(e: unknown): boolean {
+  const err = e as { status?: number; body?: string }
+  return err?.status === 403 || err?.status === 404 || /no_available_channel/.test(err?.body ?? '')
+}
+
 export function prodChangelogDeps(): ChangelogDeps {
   const apiKey = process.env.AIHUBMIX_API_KEY ?? ''
-  const model = process.env.CHANGELOG_LLM_MODEL ?? 'coding-glm-5.3'
+  const models = modelCandidates()
   return {
     fetchMarkdown: () => fetchText(GITHUB_RAW_URL, 60_000),
     fetchReleasedAt: async () => {
@@ -261,18 +283,28 @@ export function prodChangelogDeps(): ChangelogDeps {
     },
     translate: async (block) => {
       if (!apiKey) return null // Key 缺失:Service 层据此透传英文原文
-      const resp = await fetchText(`${LLM_BASE_URL}/chat/completions`, 300_000, {
-        method: 'POST',
-        headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: block },
-          ],
-        }),
-      })
-      return extractContent(JSON.parse(resp))
+      let lastErr: unknown
+      for (const model of models) {
+        try {
+          const resp = await fetchText(`${LLM_BASE_URL}/chat/completions`, 300_000, {
+            method: 'POST',
+            headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+            body: JSON.stringify({
+              model,
+              messages: [
+                { role: 'system', content: SYSTEM_PROMPT },
+                { role: 'user', content: block },
+              ],
+            }),
+          })
+          return extractContent(JSON.parse(resp))
+        } catch (e) {
+          if (!isCandidateExhausted(e)) throw e
+          lastErr = e
+          console.warn(`模型 ${model} 不可用(${(e as { status?: number }).status}),试下一候选`)
+        }
+      }
+      throw lastErr
     },
   }
 }
