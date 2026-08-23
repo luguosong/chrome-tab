@@ -1,10 +1,11 @@
 /**
- * 网格几何(见 CONTEXT.md「格子」/ ADR-0016):所有图标一律占 1 格,
- * 无尺寸档位。固定 8×8 网格:列数与行数都固定,背景尺寸由网格决定而非
- * 随图标数量变化。容量 = GRID_COLUMNS × GRID_ROWS。
+ * 网格几何(见 CONTEXT.md「格子」/ ADR-0016):图标默认占 1 格,类型可经注册表
+ * size 声明跨格(ADR-0021,AIHOT 3×2 唯一先例)。固定 9×9 网格(2026-08-23 由 8×8
+ * 扩容,为大 tile 腾格):列数与行数都固定,背景尺寸由网格决定而非随图标数量变化。
+ * 容量 = GRID_COLUMNS × GRID_ROWS = 81。
  */
-export const GRID_COLUMNS = 8
-export const GRID_ROWS = 8
+export const GRID_COLUMNS = 9
+export const GRID_ROWS = 9
 
 /**
  * favicon 基准边长(ADR-0014 遗产,ADR-0016 单档化;上调史见 ADR-0016 注记 2026-08-23b/c):

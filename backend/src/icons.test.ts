@@ -95,11 +95,25 @@ describe('POST /api/icons', () => {
       const res = await req('POST', '/api/icons', { body: { pageId: 1, type: 'CHANGELOG', data: { source: 'matt-skills' } }, cookie })
       expect(res.status).toBe(201)
     }
-    const [fullPage] = await navPage(64)
+    const [fullPage] = await navPage(81)
     await expectError(
       await req('POST', '/api/icons', { body: { pageId: fullPage, type: 'WEATHER', data: null }, cookie }),
       409, '页面容量不足，剩余 0 格',
     )
+  })
+
+  it('AIHOT 跨格容量(ADR-0021):占 6 格,剩 5 格拒、剩 6 格收', async () => {
+    const [fiveLeft] = await navPage(76) // 81 − 76 = 5
+    await expectError(
+      await req('POST', '/api/icons', { body: { pageId: fiveLeft, type: 'AIHOT', data: null }, cookie }),
+      409, '页面容量不足，剩余 5 格',
+    )
+    const [sixLeft] = await navPage(75, 'sixLeft') // 81 − 75 = 6
+    const ok = await req('POST', '/api/icons', { body: { pageId: sixLeft, type: 'AIHOT', data: null }, cookie })
+    expect(ok.status).toBe(201)
+    // 单例全局唯一:清掉本测试建的 AIHOT,不污染下方「AIHOT 单例首建 201」断言
+    const created = (await ok.json()) as { id: number }
+    await db.deleteFrom('icons').where('id', '=', created.id).execute()
   })
 
   it('AIHOT 单例:首建 201,第二份 409(CONTEXT.md「单例类型」,前端置灰的竞态兜底)', async () => {
@@ -144,7 +158,7 @@ describe('PATCH /api/icons/move —— 分支三:落页面顶层', () => {
   })
 
   it('跨页容量校验:满页拒收(剩余 0 格)', async () => {
-    const [fullPage] = await navPage(64)
+    const [fullPage] = await navPage(81)
     const res = await req('PATCH', '/api/icons/move', { body: { id: 1, toPageId: fullPage, toIndex: 0 }, cookie })
     await expectError(res, 409, '目标页面容量不足，剩余 0 格')
   })
@@ -296,15 +310,15 @@ describe('POST /api/icons/{id}/dissolve', () => {
 
   it('409 满页容量(组行让 1 格不够);409 非分组;404', async () => {
     // 唯一可超容量的构造:满页组 + 跨页塞成员(入组不计目标页容量,Java 同)
-    // 页B:64 NAV 满格 → merge 2 个 → 顶层 63(组+62 NAV);页A:1 NAV
-    const [pageB] = await navPage(64, 'fullB')
+    // 页B:81 NAV 满格 → merge 2 个 → 顶层 80(组+79 NAV);页A:1 NAV
+    const [pageB] = await navPage(81, 'fullB')
     const rowsB = await db.selectFrom('icons').select('id').where('page_id', '=', pageB).orderBy('sort_order', 'asc').execute()
     const g = await mergeIcons(pageB, [rowsB[0]!.id, rowsB[1]!.id])
     const [pageA] = await navPage(1, 'srcA')
     const outsider = (await db.selectFrom('icons').select('id').where('page_id', '=', pageA).execute())[0]!.id
     const into = await req('PATCH', '/api/icons/move', { body: { id: outsider, toPageId: pageB, toIndex: 0, parentId: g }, cookie })
     expect(into.status).toBe(200)
-    // dissolve:顶层 63 - 1 + 3 成员 = 65 > 64 → 409
+    // dissolve:顶层 80 - 1 + 3 成员 = 82 > 81 → 409
     await expectError(
       await req('POST', `/api/icons/${g}/dissolve`, { cookie }),
       409, '页面容量不足，请先移出部分图标后再解散',

@@ -54,7 +54,9 @@ export async function readLayout(db: Db, userId: number): Promise<LayoutWire> {
 
 /** 校验 + upsert(可空字段补默认);返回 14 字段 wire。调用方负责事务与 bump。 */
 export async function updateLayout(db: Db, userId: number, body: Record<string, unknown>): Promise<LayoutWire> {
-  const gridWidth = reqInt(body, 'gridWidth', 640, 1536)
+  // gridWidth 下限 768(ADR-0021 随 9×9 扩容上调,原 640):9 列轨道下图标不缩过旧 8 列
+  // 最小档——「网格最小宽度变大,1×1 图标视觉不变」的容量侧配套。
+  const gridWidth = reqInt(body, 'gridWidth', 768, 1536)
   const gridGap = reqInt(body, 'gridGap', 0, 24)
   const gridGapY = optInt(body, 'gridGapY', 0, 32, LAYOUT_DEFAULTS.gridGapY)
   const iconScale = reqScale(body)

@@ -1,11 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_PAGE_CAPACITY, canFit, capacityFor, cellsUsed } from './iconCapacity'
+import { iconCells } from './iconTypeRegistry'
 
 // 对齐 spec §接缝2:容量纯函数输入输出断言,无 DOM。
-// 后端单一事实源为 DEFAULT_CAPACITY_CELLS(64),前端此处镜像该约定。
-// ADR-0016 单档化:每图标恒 1 格,cellsUsed = 顶层图标数。
+// 后端单一事实源为 CAPACITY_CELLS(81),前端此处镜像该约定。
+// ADR-0021:图标默认 1 格,类型可声明 size 跨格(AIHOT 3×2 = 6 格)。
 
-describe('cellsUsed — 顶层图标计数(每图标 1 格)', () => {
+describe('iconCells — 类型格数(ADR-0021)', () => {
+  it('未声明 size 的类型恒 1 格(nav/stock/…)', () => {
+    for (const t of ['nav', 'stock', 'changelog', 'weather', 'group'] as const) {
+      expect(iconCells(t)).toBe(1)
+    }
+  })
+
+  it('aihot 声明 3×2 = 6 格', () => {
+    expect(iconCells('aihot')).toBe(6)
+  })
+})
+
+describe('cellsUsed — 顶层图标格数求和', () => {
   it('空页 = 0', () => {
     expect(cellsUsed([])).toBe(0)
   })
@@ -26,11 +39,25 @@ describe('cellsUsed — 顶层图标计数(每图标 1 格)', () => {
     const top = { parentId: null }
     expect(cellsUsed([groupRow, ...members, top])).toBe(2)
   })
+
+  it('跨格类型按 w×h 计:aihot 单独占 6 格', () => {
+    expect(cellsUsed([{ parentId: null, type: 'aihot' as const }])).toBe(6)
+  })
+
+  it('混合:3 个 1 格 + 1 个 aihot = 9 格', () => {
+    const icons = [
+      { parentId: null, type: 'nav' as const },
+      { parentId: null, type: 'stock' as const },
+      { parentId: null, type: 'weather' as const },
+      { parentId: null, type: 'aihot' as const },
+    ]
+    expect(cellsUsed(icons)).toBe(9)
+  })
 })
 
 describe('capacityFor — 列×行', () => {
-  it('8×8 = 64(固定网格,与后端 DEFAULT_CAPACITY_CELLS 对齐)', () => {
-    expect(capacityFor(8, 8)).toBe(64)
+  it('9×9 = 81(固定网格,与后端 CAPACITY_CELLS 对齐)', () => {
+    expect(capacityFor(9, 9)).toBe(81)
   })
 
   it('其它网格', () => {
@@ -39,8 +66,8 @@ describe('capacityFor — 列×行', () => {
     expect(capacityFor(4, 4)).toBe(16)
   })
 
-  it('DEFAULT_PAGE_CAPACITY 为 8×8', () => {
-    expect(DEFAULT_PAGE_CAPACITY).toBe(capacityFor(8, 8))
+  it('DEFAULT_PAGE_CAPACITY 为 9×9', () => {
+    expect(DEFAULT_PAGE_CAPACITY).toBe(capacityFor(9, 9))
   })
 
   it('零维度 = 0', () => {
@@ -49,7 +76,7 @@ describe('capacityFor — 列×行', () => {
   })
 })
 
-describe('canFit — 能否再容纳一个新图标(恒 1 格)', () => {
+describe('canFit — 能否再容纳待放入图标', () => {
   it('空页能放', () => {
     expect(canFit([], 24)).toBe(true)
   })
@@ -63,5 +90,12 @@ describe('canFit — 能否再容纳一个新图标(恒 1 格)', () => {
   it('边界:剩正好 1 格 → 允许(对齐后端 needed > remaining 才拒)', () => {
     const icons = Array.from({ length: 23 }, () => ({ parentId: null }))
     expect(canFit(icons, 24)).toBe(true)
+  })
+
+  it('跨格放入:剩 5 格时 aihot(6 格)拒绝,剩 6 格允许', () => {
+    const five = Array.from({ length: 19 }, () => ({ parentId: null })) // 24-5
+    expect(canFit(five, 24, 6)).toBe(false)
+    const six = Array.from({ length: 18 }, () => ({ parentId: null })) // 24-6
+    expect(canFit(six, 24, 6)).toBe(true)
   })
 })

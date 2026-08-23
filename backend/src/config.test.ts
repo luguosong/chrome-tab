@@ -99,7 +99,7 @@ describe('PUT /api/layout-settings', () => {
   it('400:必填缺失/超范围/非法枚举/坏色值', async () => {
     for (const body of [
       { gridGap: 8, iconScale: 1.5 },                          // 缺 gridWidth
-      { gridWidth: 600, gridGap: 8, iconScale: 1.5 },          // 低于 640
+      { gridWidth: 600, gridGap: 8, iconScale: 1.5 },          // 低于 768(ADR-0021 随 9×9 上调)
       { gridWidth: 1024, gridGap: 30, iconScale: 1.5 },        // gap 超 24
       { gridWidth: 1024, gridGap: 8, iconScale: 2.5 },         // scale 超 2.0
       { gridWidth: 1024, gridGap: 8, iconScale: 1.5, gridGapY: 40 },      // 超 32
@@ -152,11 +152,11 @@ describe('PUT /api/config(全量替换)', () => {
   })
 
   it('layoutSettings null = 保留现有布局行(替换不动 layout)', async () => {
-    await req('PUT', '/api/layout-settings', { body: { gridWidth: 640, gridGap: 0, iconScale: 0.75 }, cookie })
+    await req('PUT', '/api/layout-settings', { body: { gridWidth: 768, gridGap: 0, iconScale: 0.75 }, cookie })
     const res = await req('PUT', '/api/config', { body: { ...blob(), layoutSettings: null }, cookie })
     expect(res.status).toBe(200)
     const json = (await res.json()) as { layoutSettings: { gridWidth: number; iconScale: number } }
-    expect(json.layoutSettings.gridWidth).toBe(640)
+    expect(json.layoutSettings.gridWidth).toBe(768)
     expect(json.layoutSettings.iconScale).toBe(0.75)
   })
 
@@ -190,9 +190,9 @@ describe('PUT /api/config(全量替换)', () => {
   it('业务 409 矩阵:容量/孤儿 parentId/组嵌套/非 NAV 成员/跨页/空组(消息逐字)', async () => {
     const icon = (over: Record<string, unknown>): Record<string, unknown> =>
       ({ id: 9199, pageId: 9001, parentId: null, type: 'NAV', sortOrder: 9, data: null, ...over })
-    // 容量:65 个顶层(仅 1 页)
-    const full = { pages: [{ id: 9001, name: '甲', sortOrder: 0 }], icons: Array.from({ length: 65 }, (_, i) => icon({ id: 9200 + i, sortOrder: i })) }
-    await expectError(await req('PUT', '/api/config', { body: full, cookie }), 409, '页面(blob 内 9001)容量超过 64 格')
+    // 容量:82 个顶层(仅 1 页;9×9=81,ADR-0021)
+    const full = { pages: [{ id: 9001, name: '甲', sortOrder: 0 }], icons: Array.from({ length: 82 }, (_, i) => icon({ id: 9200 + i, sortOrder: i })) }
+    await expectError(await req('PUT', '/api/config', { body: full, cookie }), 409, '页面(blob 内 9001)容量超过 81 格')
     // CHANGELOG 非单例(ADR-0020):两实例各绑一源,合法
     {
       const res = await req('PUT', '/api/config', {

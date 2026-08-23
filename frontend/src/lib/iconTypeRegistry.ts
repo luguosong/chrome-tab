@@ -8,13 +8,17 @@ import { DEFAULT_CHANGELOG_SOURCE } from 'chrome-tab-shared'
  * 图标类型注册表(见 CONTEXT.md「图标类型」/ ADR-0001)。
  *
  * 注册表存纯数据 + 纯函数(无 JSX):元数据(kind/singleton/refresh/detail/
- * editor) + 纯 summarize。实际渲染由组件层按 type/detail 分发,使本模块 DOM-free、
- * 可 Vitest 纯函数测试(spec §接缝2)。图标无尺寸档位(ADR-0016),一律占 1 格。
+ * editor/size) + 纯 summarize。实际渲染由组件层按 type/detail 分发,使本模块 DOM-free、
+ * 可 Vitest 纯函数测试(spec §接缝2)。图标默认占 1 格;类型可声明 size 跨格
+ * (ADR-0021,渲染层 CSS grid span,位置仍是纯顺序流)。
  */
 export type IconTypeKind = 'base' | 'extension' | 'group'
 
 /** 详情容器形态(stock=Modal / changelog=底部 Drawer / nav=无)。10 ticket 实现渲染。 */
 export type DetailContainer = 'none' | 'modal' | 'drawer'
+
+/** 画格跨度(ADR-0021):w 列 × h 行,缺省 1×1。渲染层据此 span,容量按 w×h 计。 */
+export type IconSpan = { w: number; h: number }
 
 /** 配置表单字段声明(新增抽屉用,09 ticket 实现表单本身)。 */
 export type EditorField =
@@ -53,6 +57,8 @@ export interface IconTypeDefinition {
   refresh: RefreshConfig
   detail: DetailContainer
   editor: EditorField[]
+  /** 画格跨度(ADR-0021):缺省(不声明)= 1×1。跨格类型的位置仍是顺序流,CSS span 排布。 */
+  size?: IconSpan
   /**
    * 从图标 data + 实时数据取摘要。纯函数,无 DOM。返回 null 表示无摘要或刷新失败。
    * 注:ADR-0001 契约字段。票 10 换肤后四个内置类型的网格渲染全部走专属 body
@@ -74,6 +80,16 @@ export function register(typeId: IconTypeId, def: IconTypeDefinition): IconTypeD
 /** 按 id 取定义;未登记返回 undefined。 */
 export function get(typeId: IconTypeId): IconTypeDefinition | undefined {
   return registry.get(typeId)
+}
+
+/**
+ * 图标占用的画格数(ADR-0021):声明 size 的类型 = w×h,其余 1(undefined = 最小调用
+ * 形态无 type,按 1 格)。容量计算(iconCapacity.cellsUsed / 后端 requireCapacity)
+ * 与拖拽预校验共用本口径。纯函数 —— 直接 Vitest 断言。
+ */
+export function iconCells(typeId: IconTypeId | undefined): number {
+  const s = typeId === undefined ? undefined : registry.get(typeId)?.size
+  return s ? s.w * s.h : 1
 }
 
 /**
@@ -184,7 +200,8 @@ export const WEATHER_DEF: IconTypeDefinition = {
 }
 
 /** AI 热点:扩展类型,目前唯一单例(见 CONTEXT.md「AI 热点」——榜单全局唯一、无可绑实例参数),
- *  data={name?}(名称行,空回落「AI 热点」)。网格显示榜首标题+源数,详情=Modal。 */
+ *  data={name?}(块内标头名,空回落「AI 热点」)。网格渲染 3×2 大 tile(ADR-0021:块内
+ *  双列滚动榜单,标头+序号+单行截断,点条目外跳事件页),详情=Modal(完整榜单)。 */
 export const AIHOT_DEF: IconTypeDefinition = {
   id: 'aihot',
   label: 'AI 热点',
@@ -192,6 +209,7 @@ export const AIHOT_DEF: IconTypeDefinition = {
   singleton: true,
   refresh: { kind: 'aihot' },
   detail: 'modal',
+  size: { w: 3, h: 2 },
   editor: [{ name: 'name', label: '名称', placeholder: '名称(默认 AI 热点)' }],
   summarize: () => null, // 网格渲染走专属 AiHotIconBody,契约字段无消费方(同 nav)
 }

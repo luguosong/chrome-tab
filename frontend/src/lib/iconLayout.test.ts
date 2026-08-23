@@ -29,9 +29,9 @@ describe('faviconPx', () => {
 })
 
 describe('固定网格', () => {
-  it('8×8', () => {
-    expect(GRID_COLUMNS).toBe(8)
-    expect(GRID_ROWS).toBe(8)
+  it('9×9(2026-08-23 由 8×8 扩容,为大 tile 腾格,ADR-0021)', () => {
+    expect(GRID_COLUMNS).toBe(9)
+    expect(GRID_ROWS).toBe(9)
   })
 })
 

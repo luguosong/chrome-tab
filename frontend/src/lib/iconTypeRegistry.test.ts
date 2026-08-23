@@ -197,6 +197,13 @@ describe('AI 热点类型 aihot(单例,CONTEXT.md「AI 热点」)', () => {
     expect(get('aihot')?.detail).toBe('modal')
   })
 
+  it('声明跨格 size 3×2(ADR-0021):唯一跨格类型,其余不声明', () => {
+    expect(get('aihot')?.size).toEqual({ w: 3, h: 2 })
+    for (const t of ['nav', 'stock', 'changelog', 'weather', 'group'] as const) {
+      expect(get(t)?.size).toBeUndefined()
+    }
+  })
+
   it('单例:不存在时允许,已存在时拒绝(跨页全局判断)', () => {
     expect(canAdd('aihot', ['nav', 'weather'])).toBe(true)
     expect(canAdd('aihot', ['nav', 'aihot'])).toBe(false)

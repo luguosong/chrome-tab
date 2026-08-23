@@ -22,6 +22,7 @@ import { ApiError } from '../api/client'
 import { moveIcon } from '../lib/iconReducer'
 import { groupMembers, moveIntoGroup, topLevelOf } from '../lib/groupReducer'
 import { canFit, DEFAULT_PAGE_CAPACITY } from '../lib/iconCapacity'
+import { iconCells } from '../lib/iconTypeRegistry'
 import { withDefaults } from '../lib/layoutSettings'
 import { GroupGestureContext, useGroupGestureDwell } from '../context/GroupGestureContext'
 import { EditModeProvider, useEditMode } from '../context/EditModeContext'
@@ -279,7 +280,7 @@ function Dashboard() {
 
     // ── 组成员拖出(票 08)────────────────────────────────────────────
     // 被拖项在组内且 over 落在页面网格(图标或空页 droppable):乐观 move-out——
-    // moveIcon 清 parentId、canFit 直接判「已用 + 1 ≤ 容量」(每图标 1 格,ADR-0016)、
+    // moveIcon 清 parentId、canFit 判「已用 + 被拖格数 ≤ 容量」(组内成员恒 NAV、1 格,ADR-0021)、
     // 落 over 位序,图标拖拽中即现身目标页网格。落回弹层
     // 已被上方守卫早退;搬移后 parentId 变 null,后续 onDragOver 走顶层同页早退,
     // 不往复搬移(防渲染循环,#735/#1421)。dwell 已挡成员(hook 判 parentId),不冲突。
@@ -304,9 +305,9 @@ function Dashboard() {
     if (overIsPage) {
       const targetPageId = overData.pageId
       if (targetPageId === dragged.pageId) return
-      // 容量只计顶层行(cellsUsed 内跳过组内成员,ADR-0011)
+      // 容量只计顶层行(cellsUsed 内跳过组内成员,ADR-0011);被拖项按类型格数计(ADR-0021)
       const targetIcons = cur.icons.filter((i) => i.pageId === targetPageId)
-      if (!canFit(targetIcons, DEFAULT_PAGE_CAPACITY)) {
+      if (!canFit(targetIcons, DEFAULT_PAGE_CAPACITY, iconCells(dragged.type))) {
         showNotice('目标页已满,无法移入')
         return
       }
@@ -320,13 +321,13 @@ function Dashboard() {
     const targetPageId = Number(containerId)
     if (Number.isNaN(targetPageId) || targetPageId === dragged.pageId) return // 同页:交给落点提交
 
-    // 跨页容量预校验:目标页当前不含被拖项,canFit 直接判断"已用 + 被拖尺寸 ≤ 容量"
+    // 跨页容量预校验:目标页当前不含被拖项,canFit 直接判断"已用 + 被拖格数 ≤ 容量"
     // (cellsUsed 只计顶层行;此处同样只滤顶层行——页上有组时成员混入 sortOrder 序列
-    // 会让下方 toIndex 偏移,08 修正 07 遗留)
+    // 会让下方 toIndex 偏移,08 修正 07 遗留;被拖项按类型格数计,ADR-0021)
     const targetIcons = cur.icons.filter(
       (i) => i.pageId === targetPageId && i.parentId === null,
     )
-    if (!canFit(targetIcons, DEFAULT_PAGE_CAPACITY)) {
+    if (!canFit(targetIcons, DEFAULT_PAGE_CAPACITY, iconCells(dragged.type))) {
       showNotice('目标页已满,无法移入')
       return
     }

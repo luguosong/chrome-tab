@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { AuthEnv } from './auth'
 import { BadRequest, ConflictError, touchVersion } from './common'
 import type { Db } from './db'
-import { CAPACITY_CELLS, ICON_TYPES, SINGLETON_TYPES, iconWire } from './icons'
+import { CAPACITY_CELLS, ICON_TYPES, SINGLETON_TYPES, iconWire, spanOf } from './icons'
 import { readLayout, updateLayout } from './layout'
 import { pageWire } from './pages'
 
@@ -209,8 +209,8 @@ function validate(req: { pages: PageItem[]; icons: IconItem[] }): void {
       if (i.pageId !== parent.pageId) throw new ConflictError(409, `icons[${idx}] 分组成员必须与分组同页`)
       groupsWithMember.add(i.parentId)
     } else {
-      // 容量只计顶层行:组内成员不计(ADR-0011);每图标 1 格(ADR-0016)
-      const used = (cellsByPage.get(i.pageId) ?? 0) + 1
+      // 容量只计顶层行:组内成员不计(ADR-0011);跨格类型按 w×h 计(ADR-0021)
+      const used = (cellsByPage.get(i.pageId) ?? 0) + spanOf(i.type)
       cellsByPage.set(i.pageId, used)
       if (used > CAPACITY_CELLS) throw new ConflictError(409, `页面(blob 内 ${i.pageId})容量超过 ${CAPACITY_CELLS} 格`)
     }

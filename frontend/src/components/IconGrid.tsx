@@ -11,7 +11,8 @@ import IconView from './Icon'
 /**
  * 单页图标网格(见 spec §前端架构 IconGrid)。
  *
- * 固定 8×8 CSS grid,每图标占 1 格(ADR-0016 单档化)。
+ * 固定 9×9 CSS grid,图标默认占 1 格(ADR-0016),声明 size 的类型 CSS span 跨格
+ * (ADR-0021,见 Icon.tsx 的 style 注释)。
  * section 自身透明(玻璃背景由 DashboardPage 的整页面板提供),走 h-full 填满走马灯 slide,
  * grid 元素 flex-1 仍占满画布(空页与满页网格区域同尺寸),但**行轨道不再平分画布**:
  * gridAutoRows = 图标几何行高(实际占用的行才存在,簇 align-content:start 自上向下排列)——
@@ -35,7 +36,7 @@ export default function IconGrid({
   const { editing } = useEditMode()
   const { gridWidth, gridGap, gridGapY, iconScale, labelVisible, labelSize } = useLayoutSettings()
   // 剩余格数角标(spec user story 42):容量取 DEFAULT_PAGE_CAPACITY(与后端最终校验一致),
-  // 纯函数 cellsUsed 累加本页图标占用(icons 已由调用方按 pageId 过滤)。
+  // 纯函数 cellsUsed 累加本页图标格数(跨格类型按 w×h 计,ADR-0021;icons 已按 pageId 过滤)。
   const remaining = DEFAULT_PAGE_CAPACITY - cellsUsed(icons)
 
   // 画布实测(ResizeObserver):图标几何要钳制在真实轨道宽/画布高内(视口/设置变化即重算)。
@@ -51,7 +52,10 @@ export default function IconGrid({
     return () => ro.disconnect()
   }, [])
 
-  const usedRows = Math.ceil(icons.length / GRID_COLUMNS)
+  // 行数按格子和估算(ceil(Σ格数 / 列数)):跨格块的 flow 空洞会让真实行数**多于**估算
+  // (下界),行高按更少行分高、图标略偏大,极端满页矮视口下底部可能溢出被裁——
+  // 不模拟 flow(ADR-0021 的取舍),AIHOT 常居页首时空洞极少。
+  const usedRows = Math.ceil(cellsUsed(icons) / GRID_COLUMNS)
   // edge 不直接进 style:它经 rowH 驱动 Tile 块(TileFrame,Tile.tsx 私有)的 flex
   // 填充高度,块再被 maxHeight(标称)与 maxWidth min(标称,100%) 双向钳制
   const { rowH } = iconCellGeometry({

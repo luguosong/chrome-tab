@@ -6,7 +6,7 @@ import type { LayoutSettings } from './types'
  * 搜索框 max-w-xl(576px)、时钟 text-5xl(48px)、名称 text-xs(12px)。
  */
 export const LAYOUT_LIMITS = {
-  gridWidth: { min: 640, max: 1536, step: 16, default: 1024 },
+  gridWidth: { min: 768, max: 1536, step: 16, default: 1024 },
   gridGap: { min: 0, max: 24, step: 1, default: 8 },
   gridGapY: { min: 0, max: 32, step: 1, default: 8 },
   iconScale: { min: 0.75, max: 2, step: 0.05, default: 1.5 },
@@ -38,7 +38,12 @@ export function withDefaults(
   s: Partial<LayoutSettings> | null | undefined,
 ): LayoutSettings {
   return {
-    gridWidth: s?.gridWidth ?? DEFAULT_LAYOUT_SETTINGS.gridWidth,
+    // gridWidth 下限随 9×9 扩容上调 640→768(ADR-0021):存量更低值在**读侧**钳到界内,
+    // 防旧值原样回传触发后端 400。其余字段边界未动,存量必在界内,无需同款钳制。
+    gridWidth: Math.min(
+      LAYOUT_LIMITS.gridWidth.max,
+      Math.max(LAYOUT_LIMITS.gridWidth.min, s?.gridWidth ?? DEFAULT_LAYOUT_SETTINGS.gridWidth),
+    ),
     gridGap: s?.gridGap ?? DEFAULT_LAYOUT_SETTINGS.gridGap,
     gridGapY: s?.gridGapY ?? DEFAULT_LAYOUT_SETTINGS.gridGapY,
     iconScale: s?.iconScale ?? DEFAULT_LAYOUT_SETTINGS.iconScale,

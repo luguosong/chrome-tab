@@ -4,15 +4,32 @@ import { BadRequest, ConflictError, numericParam, touchVersion } from './common'
 import type { Db } from './db'
 
 /**
- * Icon 写操作六端点(api-contract §5,ADR-0011/0016)。核心约束:
- * - 页面容量 = 每页顶层行数 ≤ 64(组行占 1 格、组内成员不计);
+ * Icon 写操作六端点(api-contract §5,ADR-0011/0016/0021)。核心约束:
+ * - 页面容量 = 每页顶层格数 ≤ 81(9×9 网格;跨格类型按 w×h 计,组行占 1 格、组内成员不计);
  * - 组行只能经 merge 创建、空组不存活;CHANGELOG 已非单例(ADR-0020,每实例绑一个外源);
  * - 排序无空洞(0..n-1);所有读写按 userId 隔离;任意写事务末尾 bump config_version。
  * 修正白名单②:POST/merge 建成功 201;④:move 入组分支尊重 toIndex 并夹紧;⑥:PATCH /{id} 补参数校验。
  */
 
-/** 页面容量 = 每页顶层格数上限(ADR-0002/0016;config 全量替换校验复用)。 */
-export const CAPACITY_CELLS = 64
+/** 页面容量 = 每页顶层格数上限(ADR-0002/0016;9×9=81,ADR-0021;config 全量替换校验复用)。 */
+export const CAPACITY_CELLS = 81
+
+/**
+ * 跨格类型格数(ADR-0021,对齐前端注册表 size):AIHOT 3×2=6 格,其余缺省 1 格。
+ * 容量口径唯一来源——requireCapacity/dissolve/POST/move/blob 全量替换共用。
+ */
+export const TYPE_SPANS: Partial<Record<IconType, number>> = { AIHOT: 6 }
+
+/** 类型格数:未声明 = 1。 */
+export const spanOf = (type: string): number =>
+  (TYPE_SPANS as Record<string, number | undefined>)[type] ?? 1
+
+/** 一组顶层行的格数和(容量口径;组内成员不计,由调用方先行滤出顶层)。 */
+const cellsOf = (rows: ReadonlyArray<{ type: string }>): number => {
+  let sum = 0
+  for (const r of rows) sum += spanOf(r.type)
+  return sum
+}
 /** icon type 大写枚举 wire(config 全量替换校验复用)。 */
 export const ICON_TYPES = ['NAV', 'STOCK', 'CHANGELOG', 'WEATHER', 'AIHOT', 'GROUP'] as const
 type IconType = (typeof ICON_TYPES)[number]
@@ -58,7 +75,7 @@ export function iconRoutes(db: Db) {
           .where('id', '=', pageId)
           .where('user_id', '=', userId)
           .executeTakeFirstOrThrow(() => new ConflictError(404, '页面不存在'))
-        await requireCapacity(tx, userId, page.id, 1, '页面')
+        await requireCapacity(tx, userId, page.id, spanOf(type), '页面')
         const siblings = await topLevel(tx, userId, page.id)
         const saved = await tx
           .insertInto('icons')
@@ -116,8 +133,8 @@ export function iconRoutes(db: Db) {
         const group = await findIcon(tx, userId, id, '分组不存在')
         if (group.type !== 'GROUP') throw new ConflictError(409, '该图标不是分组')
         const members = await membersOf(tx, userId, group.id)
-        // 组行自身让出 1 格;成员落回顶层各占 1 格
-        if ((await topLevel(tx, userId, group.page_id)).length - 1 + members.length > CAPACITY_CELLS) {
+        // 组行自身让出 1 格;成员落回顶层各占 1 格(页上跨格类型经 cellsOf 计入,ADR-0021)
+        if (cellsOf(await topLevel(tx, userId, group.page_id)) - 1 + members.length > CAPACITY_CELLS) {
           throw new ConflictError(409, '页面容量不足，请先移出部分图标后再解散')
         }
         // 成员自组行 sort_order 位置起按组内序洒回本页顶层(在含组行的旧序列里展开)
@@ -260,7 +277,7 @@ async function move(
   const crossPage = icon.page_id !== target.id
   // 同页顶层纯重排不校验容量(占用不变);跨页、或从组内移出(开始占格)才校验
   if (crossPage || wasInGroup) {
-    let needed = 1
+    let needed = spanOf(icon.type)
     if (wasInGroup && !crossPage) {
       // 同页移出且源组因此变空:组行让出 1 格,净占 0(对齐 dissolve 的 -1)
       if ((await membersOf(tx, userId, icon.parent_id!)).length === 1) needed -= 1
@@ -424,7 +441,7 @@ async function requirePage(tx: Db, userId: number, pageId: number): Promise<{ id
     .executeTakeFirstOrThrow(() => new ConflictError(404, '目标页面不存在'))
 }
 
-/** 容量校验:已用格子 + needed > 64 → 409,message 带剩余格数;subject 为消息前缀。 */
+/** 容量校验:已用格子和 + needed > 81 → 409,message 带剩余格数;subject 为消息前缀。 */
 async function requireCapacity(
   tx: Db,
   userId: number,
@@ -432,7 +449,7 @@ async function requireCapacity(
   needed: number,
   subject: '页面' | '目标页面',
 ): Promise<void> {
-  const remaining = CAPACITY_CELLS - (await topLevel(tx, userId, pageId)).length
+  const remaining = CAPACITY_CELLS - cellsOf(await topLevel(tx, userId, pageId))
   if (needed > remaining) throw new ConflictError(409, `${subject}容量不足，剩余 ${remaining} 格`)
 }
 
