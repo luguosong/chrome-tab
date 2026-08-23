@@ -20,6 +20,10 @@ describe('内置类型登记', () => {
     expect(get('changelog')?.label).toBe('更新日志')
     expect(get('nonexistent' as never)).toBeUndefined()
   })
+
+  it('nav editor:url 先行(自动加载触发器)+ name + 可选 icon 覆盖', () => {
+    expect(get('nav')?.editor.map((f) => f.name)).toEqual(['url', 'name', 'icon'])
+  })
 })
 
 describe('canAdd — 单例判断', () => {

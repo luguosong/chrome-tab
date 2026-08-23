@@ -5,7 +5,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { useConfig, useDeleteIcon, useUpdateIconData } from '../api/config'
 import { useEditMode } from '../context/EditModeContext'
 import { groupMembers, groupPageCount, groupPageSlice } from '../lib/groupReducer'
-import { extractString, faviconUrl } from '../lib/iconData'
+import { extractString, navIconSrc } from '../lib/iconData'
 import type { Icon } from '../lib/types'
 
 /**
@@ -229,7 +229,8 @@ function MemberTile({ member, onClose }: { member: Icon; onClose: () => void }) 
 
   const name = extractString(member.data, 'name')
   const url = member.type === 'nav' ? extractString(member.data, 'url') : ''
-  const src = url ? faviconUrl(url) : ''
+  // 覆盖 > 派生,与网格/组预览同一口径(navIconSrc)
+  const src = member.type === 'nav' ? navIconSrc(member.data) : ''
 
   const body = (
     <>

@@ -11,7 +11,9 @@ import { useEditMode } from '../context/EditModeContext'
 import { useGroupGesture } from '../context/GroupGestureContext'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import { GROUP_PAD_PX, faviconPx } from '../lib/iconLayout'
-import { extractString, buildIconData, faviconUrl } from '../lib/iconData'
+import { extractString, buildIconData, navIconSrc } from '../lib/iconData'
+import IconPicker from './IconPicker'
+import { useSiteInfoAutofill } from '../api/siteInfo'
 import { groupMembers } from '../lib/groupReducer'
 import { readWeatherLocation, type WeatherLocation } from '../lib/weather'
 import { useConfig, useDeleteIcon, useDissolveGroup, useUpdateIconData } from '../api/config'
@@ -130,7 +132,8 @@ export default function Icon({
 
   const name = extractString(icon.data, 'name')
   const url = icon.type === 'nav' ? extractString(icon.data, 'url') : ''
-  const favicon = url ? faviconUrl(url) : ''
+  // 渲染优先级:图标覆盖(data.icon)> 派生 favicon(navIconSrc 统一口径)
+  const favicon = icon.type === 'nav' ? navIconSrc(icon.data) : ''
 
   // 点击派发(ADR-0001 契约:容器形态由类型定义声明):
   //   - group:点开分组弹层(票 08)——任意模式(编辑态也要先开弹层才能组内排序)
@@ -316,9 +319,9 @@ function GroupBody({
     <TileFrame favPx={favPx} padPx={GROUP_PAD_PX} overlay={overlay}>
       <div className="grid w-full h-full grid-cols-3 grid-rows-2 place-items-center gap-[6%]">
         {members.map((m) => {
-          // 组成员只能是 nav(后端把关),但防御式兜底非 nav/无 url 的占位灰块
-          const url = m.type === 'nav' ? extractString(m.data, 'url') : ''
-          const src = url ? faviconUrl(url) : ''
+          // 组成员只能是 nav(后端把关),但防御式兜底非 nav 的占位灰块;成员图标同样
+          // 走 navIconSrc(覆盖 > 派生),与网格渲染一致
+          const src = m.type === 'nav' ? navIconSrc(m.data) : ''
           return src ? (
             <img
               key={m.id}
@@ -449,6 +452,9 @@ function EditForm({
       ]),
     ),
   )
+  // nav:改网址后重新抓站点信息(图标候选随新网址刷新;名称已有值不覆盖——名称是
+  // 用户的标签,与「图标覆盖」同为显式意图优先)。共享 hook,与新增抽屉一致。
+  useSiteInfoAutofill(icon.type === 'nav', String(values['url'] ?? ''), setValues)
   function setField(name: string, v: unknown) {
     setValues((prev) => ({ ...prev, [name]: v }))
   }
@@ -477,6 +483,14 @@ function EditForm({
               key={f.name}
               value={values[f.name] ? (values[f.name] as WeatherLocation) : null}
               onChange={(loc) => setField('location', loc)}
+              placeholder={f.placeholder}
+            />
+          ) : f.name === 'icon' ? (
+            <IconPicker
+              key={f.name}
+              url={String(values['url'] ?? '')}
+              value={String(values['icon'] ?? '')}
+              onChange={(v) => setField('icon', v)}
               placeholder={f.placeholder}
             />
           ) : (

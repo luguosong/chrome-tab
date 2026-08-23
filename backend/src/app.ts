@@ -10,6 +10,7 @@ import { iconRoutes } from './icons'
 import { layoutRoutes } from './layout'
 import { pageRoutes } from './pages'
 import { createWallpaperHandler } from './wallpaper'
+import { createSiteInfoHandler } from './siteInfo'
 import { weatherRoutes, type WeatherConfig } from './weather'
 
 /**
@@ -53,6 +54,8 @@ export function createApp({
   // weather 恒挂载:未配置 → requireConfigured 抛 → 500「服务器错误」(契约 §7,非 404)
   app.route('/', weatherRoutes(weather))
   app.get('/api/wallpaper', createWallpaperHandler())
+  // 站点信息抓取(CONTEXT.md「站点信息」):新增/编辑表单自动填充用,/api/* 鉴权横切覆盖
+  app.get('/api/site-info', createSiteInfoHandler())
   // 统一错误体 {status, message}(api-contract §0):业务/校验冲突按自带 status;
   // 未映射路径(含旧端点 /api/nav-links)404 资源不存在;兜底 500 服务器错误(留栈)。
   app.onError((err, c) => {

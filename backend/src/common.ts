@@ -29,6 +29,20 @@ export function numericParam(c: Context<AuthEnv>, key: string): number {
   return v
 }
 
+/** 简易 TTL 缓存(自 weather.ts 提为共享):仅存成功结果,过期失效;重启清空可接受(分钟级数据,重拉无感)。 */
+export class TtlCache<V> {
+  private store = new Map<string, { value: V; expiresAt: number }>()
+
+  get(key: string): V | undefined {
+    const e = this.store.get(key)
+    return e && e.expiresAt > Date.now() ? e.value : undefined
+  }
+
+  put(key: string, value: V, ttlMs: number) {
+    this.store.set(key, { value, expiresAt: Date.now() + ttlMs })
+  }
+}
+
 /** config_version bump(ADR-0006):upsert 当前用户版本为 now。必须在写事务末尾调用,与配置写原子。 */
 export async function touchVersion(db: Db, userId: number): Promise<void> {
   const now = new Date().toISOString()

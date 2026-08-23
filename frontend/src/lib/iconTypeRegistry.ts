@@ -21,6 +21,8 @@ export type EditorField =
   | { name: 'url'; label: string; placeholder: string }
   | { name: 'symbol'; label: string; placeholder: string }
   | { name: 'location'; label: string; placeholder: string }
+  /** nav 专属:图标覆盖选择器(站点信息候选 + 自定义地址,值存 data.icon,空 = 派生)。 */
+  | { name: 'icon'; label: string; placeholder: string }
 
 /** 刷新配置(spec §刷新策略):hook key + 间隔(ms)。0 = 不刷新。 */
 export type RefreshConfig = {
@@ -91,7 +93,9 @@ export function listTypes(): IconTypeDefinition[] {
 }
 
 // ── 三个内置类型定义 ──────────────────────────────────────────────────────
-/** 网站链接:基础类型,data={name,url}。点击直接在新标签打开,无详情容器,无实时摘要。 */
+/** 网站链接:基础类型,data={name,url,icon?}。点击直接在新标签打开,无详情容器,无实时摘要。
+ *  editor 网址先行——它是「站点信息」自动加载(名称/图标候选)的触发器;icon 为可选覆盖,
+ *  空 = 派生 favicon(渲染优先级见 lib/iconData.ts navIconSrc)。 */
 export const NAV_DEF: IconTypeDefinition = {
   id: 'nav',
   label: '网站链接',
@@ -100,8 +104,9 @@ export const NAV_DEF: IconTypeDefinition = {
   refresh: { kind: 'none' },
   detail: 'none',
   editor: [
-    { name: 'name', label: '名称', placeholder: '名称' },
     { name: 'url', label: '网址', placeholder: 'https://…' },
+    { name: 'name', label: '名称', placeholder: '名称' },
+    { name: 'icon', label: '图标', placeholder: '自定义图片地址(可选)' },
   ],
   summarize: () => null, // nav 无实时摘要
 }

@@ -1,9 +1,11 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { useCreateIcon } from '../api/config'
+import { useSiteInfoAutofill } from '../api/siteInfo'
 import { ApiError } from '../api/client'
 import { canAdd, listTypes, type IconTypeDefinition } from '../lib/iconTypeRegistry'
 import { buildIconData } from '../lib/iconData'
 import LocationPicker from './LocationPicker'
+import IconPicker from './IconPicker'
 import type { WeatherLocation } from '../lib/weather'
 import type { IconTypeId } from '../lib/types'
 
@@ -84,6 +86,10 @@ function TypeCard({
     Object.fromEntries(def.editor.map((f) => [f.name, ''])),
   )
 
+  // nav:网址停顿后自动加载站点信息(CONTEXT.md「站点信息」)——title 只在名称为空时
+  // 填入,图标候选由下方 icon 字段的 IconPicker 消费(共享 hook,与编辑 EditForm 一致)。
+  useSiteInfoAutofill(def.id === 'nav', String(values['url'] ?? ''), setValues)
+
   function setField(name: string, v: unknown) {
     setValues((prev) => ({ ...prev, [name]: v }))
   }
@@ -142,6 +148,14 @@ function TypeCard({
             key={f.name}
             value={values[f.name] ? (values[f.name] as WeatherLocation) : null}
             onChange={(loc) => setField('location', loc)}
+            placeholder={f.placeholder}
+          />
+        ) : f.name === 'icon' ? (
+          <IconPicker
+            key={f.name}
+            url={String(values['url'] ?? '')}
+            value={String(values['icon'] ?? '')}
+            onChange={(v) => setField('icon', v)}
             placeholder={f.placeholder}
           />
         ) : (
