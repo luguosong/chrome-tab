@@ -155,10 +155,10 @@ export default function Icon({
         <ChangelogIconBody icon={icon} overlay={overlay} />
       ) : (
         <>
-          {/* nav:玻璃 squircle 块 = 图标本体(ADR-0015 修订:玻璃下沉到图标层,只包
-              favicon,名称外置块下方),favicon 撑满块(pad=0,图形即块);「上块下字」
-              组装归 Tile(label 空值不渲染行,favicon 缺失留空玻璃块占位)。 */}
-          <Tile label={name} overlay={overlay}>
+          {/* nav:裸 favicon 直出(ADR-0015 注记 2026-08-23c,回归 ADR-0013):Tile bare
+              不渲染玻璃底板,几何骨架(块边长/收缩/hover 缩放)与名称行照常;favicon 撑满
+              块(pad=0),自身圆角 22% 即图形圆角;favicon 缺失留空占位(画格仍占位)。 */}
+          <Tile label={name} overlay={overlay} bare>
             {favicon && (
               <img
                 src={favicon}

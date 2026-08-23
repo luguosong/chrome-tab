@@ -41,12 +41,15 @@ function IconLabel({ children }: { children: ReactNode }) {
 function TileFrame({
   favPx,
   padPx = 0,
+  bare = false,
   overlay,
   className = '',
   children,
 }: {
   favPx: number
   padPx?: number
+  /** 裸块(ADR-0015 注记 2026-08-23c,即回归 ADR-0013):省略玻璃材质,几何骨架照旧。 */
+  bare?: boolean
   overlay: boolean
   className?: string
   children: ReactNode
@@ -57,7 +60,8 @@ function TileFrame({
       className={
         // flex 居中:块内主体在块内居中;nav favicon 与分组预览是 w-full/h-full
         // 撑满式,不受影响。Tile 固定追加块内纵排 + inline-size 容器(字号 cqw 钳制)。
-        'glass-soft rounded-[22%] flex items-center justify-center ' +
+        // bare 时不挂 glass-soft:hover 提亮随之消失,反馈只剩下方 hover 缩放(0013 语言)。
+        (bare ? '' : 'glass-soft rounded-[22%] ') + 'flex items-center justify-center ' +
         (!overlay
           ? 'flex-1 min-h-0 aspect-square transition-transform hover:scale-110 active:scale-95 '
           : '') +
@@ -116,12 +120,15 @@ export default function Tile({
   label,
   overlay = false,
   padPx = 0,
+  bare = false,
   children,
 }: {
   /** 名称行文本;空串不渲染行(显隐仍由「布局设置」管)。 */
   label?: string
   overlay?: boolean
   padPx?: number
+  /** 裸块:不渲染玻璃底板(仅 nav,ADR-0015 注记 2026-08-23c);几何/名称行照常。 */
+  bare?: boolean
   children: ReactNode
 }) {
   const { iconScale } = useLayoutSettings()
@@ -130,6 +137,7 @@ export default function Tile({
       <TileFrame
         favPx={faviconPx(iconScale)}
         padPx={padPx}
+        bare={bare}
         overlay={overlay}
         className="flex-col gap-[4%] [container-type:inline-size]"
       >
