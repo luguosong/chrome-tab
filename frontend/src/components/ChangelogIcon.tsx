@@ -38,7 +38,7 @@ export default function ChangelogIconBody({ icon: _icon, overlay = false }: { ic
         {released && (
           <span
             className="text-white/70 leading-none"
-            style={{ fontSize: `min(${px(9)}px, 15cqw)` }}
+            style={{ fontSize: `min(${px(12)}px, 20cqw)` }}
           >
             {released.slice(5, 10)}
           </span>

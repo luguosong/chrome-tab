@@ -39,7 +39,7 @@ export default function WeatherIconBody({ icon, overlay = false }: { icon: Icon;
             />
             <span
               className="font-mono text-white/90 leading-none max-w-full truncate"
-              style={{ fontSize: `min(${px(11)}px, 16cqw)` }}
+              style={{ fontSize: `min(${px(14)}px, 20cqw)` }}
             >
               {now.temp}°
             </span>

@@ -43,7 +43,7 @@ export default function StockIconBody({ icon, overlay = false }: { icon: Icon; o
         {q && (
           <span
             className="font-mono leading-none max-w-full truncate"
-            style={{ fontSize: `min(${px(10)}px, 15cqw)`, color: toneVar(q) }}
+            style={{ fontSize: `min(${px(13)}px, 20cqw)`, color: toneVar(q) }}
           >
             {q.price.toFixed(2)}
           </span>
