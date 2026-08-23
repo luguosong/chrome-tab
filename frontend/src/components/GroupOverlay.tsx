@@ -257,8 +257,6 @@ function MemberTile({ member, onClose }: { member: Icon; onClose: () => void }) 
       <a
         ref={setNodeRef}
         href={url}
-        target="_blank"
-        rel="noreferrer"
         onClick={onClose}
         className="flex flex-col items-center gap-1.5 rounded-2xl p-1.5 cursor-pointer hover:bg-white/10 active:scale-95 transition"
       >

@@ -138,12 +138,12 @@ export default function Icon({
   // 点击派发(ADR-0001 契约:容器形态由类型定义声明):
   //   - group:点开分组弹层(票 08)——任意模式(编辑态也要先开弹层才能组内排序)
   //   - 其余类型:编辑模式一律不触发;查看模式按 detail 字段
-  //     - detail='none':nav 渲染为 <a target=_blank> 新标签打开(保留原生中键/右键菜单)
+  //     - detail='none':nav 渲染为 <a> 当前标签打开(保留原生中键/右键菜单)
   //     - detail='modal'/'drawer':点击 → onOpenDetail,由父组件按 detail 渲染对应面板
   const isNavLink = icon.type === 'nav' && !editing
   const Tag = isNavLink ? 'a' : 'div'
   const linkProps = isNavLink
-    ? { href: url, target: '_blank' as const, rel: 'noreferrer' }
+    ? { href: url }
     : {}
   const hasPanel = def?.detail === 'modal' || def?.detail === 'drawer'
   // 组图标点击 = 开弹层(票 08):任意模式(编辑态开弹层才能组内排序),不与编辑态互斥
