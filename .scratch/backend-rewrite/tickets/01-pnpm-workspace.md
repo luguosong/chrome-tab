@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done(2026-08-21 实现,见 Comments;状态行 2026-08-23 补记)
 
 - [x] workspace 根一次 `pnpm install` 装齐三包,frontend 构建/测试照常通过
 - [x] `shared/` 至少含一个双端可用的类型/常量并可直接 import(通道打通的验证载体)

@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — SQLite schema(表结构定型即可写,不依赖任何端点)。
 
-**Status:** ready-for-agent
+**Status:** done(2026-08-22,checkbox 证据在列;状态行 2026-08-23 补记)
 
 - [x] 对真实 MySQL 结构(含本机 Java 库)跑 ETL 秒级完成,对账报告 7 张表零差异 —— 2026-08-22 演练:mysql:8 容器压平执行 V1~V11 + 真实 bcrypt 数据,`pnpm etl` 0.2s 零差异(含 500KB snapshot)
 - [x] bcrypt 哈希、json 串、时间戳字符串逐字节原样拷贝 —— bcryptjs compareSync 对迁移产物 10/12 rounds 双用户验证通过;对账全行逐字段 === 比对
