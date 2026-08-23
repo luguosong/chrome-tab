@@ -16,7 +16,6 @@ import {
 } from '@dnd-kit/core'
 import { useQueryClient } from '@tanstack/react-query'
 import { changelogSourceOf } from 'chrome-tab-shared'
-import { useAuth } from '../context/AuthContext'
 import { useConfig, useMergeIcons, useMoveIcon } from '../api/config'
 import { ApiError } from '../api/client'
 import { moveIcon } from '../lib/iconReducer'
@@ -96,7 +95,6 @@ function PageSlide({
 }
 
 function Dashboard() {
-  const { user, logout } = useAuth()
   const { data } = useConfig()
   const layout = withDefaults(data?.layoutSettings)
   const { editing, toggle } = useEditMode()
@@ -109,7 +107,7 @@ function Dashboard() {
   // openGroup 派生为 null → 弹层随组行卸载。开关判定在 onDragEnd(见 handleDragEnd)。
   const [openGroupId, setOpenGroupId] = useState<number | null>(null)
 
-  // 控制抽屉开关(issue 09):右上角 ⚙ 唤起,tab 切换「新增 / 布局」,与编辑模式职责分离。
+  // 控制抽屉开关(issue 09):右上角 ⚙ 唤起,tab 切换「新增 / 布局 / 账号」,与编辑模式职责分离。
   const [controlOpen, setControlOpen] = useState(false)
 
   // 当前激活页索引:Carousel 滚动停稳后向上通知,用于新增抽屉把新图标落到"当前页"。
@@ -513,28 +511,18 @@ function Dashboard() {
             }
           >
             {layout.clockVisible && <Clock />}
-            {/* 右上控件:归组进 L2 胶囊,统一视觉权重(+/⚙/用户名/登出),hover 轻晕 */}
-            <LensBox
-              radius={22}
-              className="shrink-0 rounded-full flex items-center gap-0.5 pl-1 pr-1 py-1"
-            >
-              {/* 控制抽屉入口(issue 09):右上角 ⚙ 唤起统一抽屉,tab 切换「新增 / 布局」 */}
+            {/* 右上控件:极简为单个 ⚙ 圆钮(L2 折射壳退化为 40px 正圆);
+                用户信息与登出移入控制抽屉「账号」tab */}
+            <LensBox radius={22} className="shrink-0 rounded-full p-1">
+              {/* 控制抽屉入口(issue 09):右上角 ⚙ 唤起统一抽屉,tab 切换「新增 / 布局 / 账号」 */}
               <button
                 type="button"
                 onClick={() => setControlOpen(true)}
-                aria-label="新增与设置"
-                title="新增与设置"
+                aria-label="设置"
+                title="设置"
                 className="w-8 h-8 rounded-full text-white/90 hover:bg-white/25 flex items-center justify-center text-base leading-none transition"
               >
                 ⚙
-              </button>
-              <span className="mx-1 h-4 w-px bg-white/20" />
-              <span className="text-sm text-white/85 px-1 select-none">{user?.username}</span>
-              <button
-                onClick={logout}
-                className="px-2.5 py-1 rounded-full text-sm text-white/85 hover:bg-white/25 transition"
-              >
-                登出
               </button>
             </LensBox>
           </div>
