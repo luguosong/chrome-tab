@@ -68,8 +68,10 @@ CREATE TABLE IF NOT EXISTS changelog_translations (
     translated  TEXT NOT NULL,
     created_at  TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS changelog_snapshot (
-    id           INTEGER PRIMARY KEY CHECK (id = 1),
+-- 多源快照(ADR-0020):每源一行。前身 changelog_snapshot(id=1 单行)已废弃——
+-- SQLite 改不了已存表的 CHECK,旧库中该表原地留存为孤儿缓存,不迁移(快照可重建)。
+CREATE TABLE IF NOT EXISTS changelog_snapshots (
+    source       TEXT PRIMARY KEY NOT NULL,
     raw_markdown TEXT NOT NULL,
     released_at  TEXT,
     fetched_at   TEXT NOT NULL
@@ -145,8 +147,8 @@ export interface ChangelogTranslationsTable {
   created_at: string
 }
 
-export interface ChangelogSnapshotTable {
-  id: number
+export interface ChangelogSnapshotsTable {
+  source: string
   raw_markdown: string
   released_at: string | null
   fetched_at: string
@@ -165,6 +167,6 @@ export interface SchemaDatabase {
   layout_settings: LayoutSettingsTable
   config_version: ConfigVersionTable
   changelog_translations: ChangelogTranslationsTable
-  changelog_snapshot: ChangelogSnapshotTable
+  changelog_snapshots: ChangelogSnapshotsTable
   sessions: SessionsTable
 }

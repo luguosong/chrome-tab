@@ -19,6 +19,9 @@ importers:
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
+      chrome-tab-shared:
+        specifier: workspace:*
+        version: link:../shared
       hono:
         specifier: ^4.13.3
         version: 4.13.3

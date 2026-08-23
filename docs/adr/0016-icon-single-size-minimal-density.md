@@ -12,6 +12,8 @@
 
 > **注记(2026-08-23e)**:「上块下字」脚手架收拢为深 module `components/Tile.tsx`(Tile + TilePrimary/TileSecondary)——此前 TileFrame/IconLabel 组装、`px()` 缩放、`min(px, cqw)` 钳制公式在各类型 body 各写一遍,调一次字号横跨 3 文件。字号档全类型统一:**主行 14px/24cqw、次行 12px/20cqw**(`lib/iconLayout.ts` 的 `TILE_FONT_TIERS` 唯一来源;px 随 iconScale 同比缩放,cqw 钳块宽占比)。统一即微调:weather 温度 20→24cqw、stock 股价 13→12px、changelog 版本 13→14px(用户拍板「统一两档,顺势对齐」)。名称行行高(1.5)与「块↔行」gap(4px)以 `LABEL_LINE_HEIGHT`/`LABEL_GAP_PX` 单源导出,`labelBlockPx` 与画格同引——改 gap 不再静默错位。changelog 网格取数改走 IconDataContext 下发(删直调 useChangelog 的跨文件缓存键耦合,`releasedAt` 随之下发)。
 
+> **注记(2026-08-23f)**:changelog 日期行升主行档(用户要求「日期再大点、醒目点」)——日期由次行 12px/20cqw、white/70、无 mono,改主行 14px/24cqw、全白、mono,与版本行成对(版本 accent = 身份,日期白 = 数据,层级靠颜色不靠字号);行序、版本行、字号档体系(`TILE_FONT_TIERS` 仍两档)均不动。
+
 删除图标三档尺寸(small/medium/large),所有类型一律 1×1 小图标,网格层只留极简内容——nav = favicon 块 + 外置名称;stock = 名称 + 当前价(价格带涨跌色,不加字);weather = 状况图标 + 温度;changelog = 最新版本号 + 发布日期两行(容器查询自适应,防遮蔽防溢出);group = 3×2 迷你预览。其余信息(sparkline、市值/PE/行业、湿度/风向/预警、版本列表)全部收进详情容器(stock/weather = Modal,changelog = Drawer)。「尺寸 = 信息密度」的档位模型(ADR-0007/0009)就此废止,动机是用户明确的「布局干净统一」。
 
 **彻底删除而非锁死**:`IconSize` 类型、`icons.size` 列(Flyway drop)、PATCH 尺寸与编辑模式尺寸菜单、注册表 `sizes`/`defaultSize`(ADR-0001 契约缩减)、`SIZE_CELLS`/`faviconPx` 自相似推导/三档 `ICON_PAD_PX` 全部移除;单档 favicon = `FAV_BASE_PX`(32)×iconScale,gridGap 不再参与推导(ADR-0014 失效主体)。存量 medium/large 图标随迁移收缩为 1 格——只释放格子、无容量溢出风险;页面重排变稀疏由用户自行整理(否决自动聚拢:网格摆放本就是用户手工职责)。公司概述随 large 消亡,恢复 ADR-0004 的 Modal 独占。

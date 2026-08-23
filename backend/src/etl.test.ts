@@ -37,9 +37,6 @@ const source: EtlSource = {
     { block_hash: 'a'.repeat(64), translated: '## v1.0.0\n首个版本。', created_at: '2026-01-01 00:00:00' },
     { block_hash: 'b'.repeat(64), translated: '## v1.1.0\n修复。', created_at: '2026-02-01 00:00:00' },
   ],
-  changelog_snapshot: [
-    { id: 1, raw_markdown: '# Changelog\n' + 'x'.repeat(50_000), released_at: null, fetched_at: '2026-08-21 03:00:00' },
-  ],
 }
 
 let sqlite: Database.Database
@@ -48,7 +45,7 @@ beforeEach(() => {
 })
 
 describe('runEtl', () => {
-  it('7 张表逐字节原样灌入(bcrypt/json/时间戳/NULL/大文本)', () => {
+  it('7 张表逐字节原样灌入(bcrypt/json/时间戳/NULL/大文本;changelog_snapshot 不迁,ADR-0020)', () => {
     runEtl(sqlite, source)
     expect(unwrap(sqlite, 'users')).toEqual(source.users)
     expect(unwrap(sqlite, 'pages')).toEqual(source.pages)
@@ -56,7 +53,6 @@ describe('runEtl', () => {
     expect(unwrap(sqlite, 'layout_settings')).toEqual(source.layout_settings)
     expect(unwrap(sqlite, 'config_version')).toEqual(source.config_version)
     expect(unwrap(sqlite, 'changelog_translations')).toEqual(source.changelog_translations)
-    expect(unwrap(sqlite, 'changelog_snapshot')).toEqual(source.changelog_snapshot)
   })
 
   it('重跑幂等:第二次结果 = 第二份行集,无第一次残留', () => {
@@ -68,7 +64,6 @@ describe('runEtl', () => {
       icons: [source.icons[0]!],
       config_version: [{ user_id: 1, updated_at: '2026-08-22 12:00:00' }],
       changelog_translations: [],
-      changelog_snapshot: [],
     }
     runEtl(sqlite, second)
     expect(unwrap(sqlite, 'users')).toHaveLength(1)
@@ -76,7 +71,6 @@ describe('runEtl', () => {
     expect(unwrap(sqlite, 'icons')).toEqual(second.icons)
     expect(unwrap(sqlite, 'config_version')).toEqual(second.config_version)
     expect(unwrap(sqlite, 'changelog_translations')).toEqual([])
-    expect(unwrap(sqlite, 'changelog_snapshot')).toEqual([])
   })
 
   it('外键完好:parent_id 引用不悬挂,后续写入受 FK 约束', () => {
@@ -109,7 +103,7 @@ describe('reconcile', () => {
     expect(report.ok).toBe(true)
     expect(report.tables.map((t) => [t.name, t.source, t.sqlite])).toEqual([
       ['users', 2, 2], ['pages', 2, 2], ['icons', 5, 5], ['layout_settings', 1, 1],
-      ['config_version', 2, 2], ['changelog_translations', 2, 2], ['changelog_snapshot', 1, 1],
+      ['config_version', 2, 2], ['changelog_translations', 2, 2],
     ])
   })
 

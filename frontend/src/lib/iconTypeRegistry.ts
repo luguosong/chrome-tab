@@ -2,6 +2,7 @@ import type { ChangelogVersion } from './changelogParser'
 import type { Quote } from './quoteParser'
 import type { IconTypeId } from './types'
 import { locationKey, readWeatherLocation, type WeatherBundle } from './weather'
+import { DEFAULT_CHANGELOG_SOURCE } from 'chrome-tab-shared'
 
 /**
  * 图标类型注册表(见 CONTEXT.md「图标类型」/ ADR-0001)。
@@ -23,6 +24,8 @@ export type EditorField =
   | { name: 'location'; label: string; placeholder: string }
   /** nav 专属:图标覆盖选择器(站点信息候选 + 自定义地址,值存 data.icon,空 = 派生)。 */
   | { name: 'icon'; label: string; placeholder: string }
+  /** changelog 专属:外源下拉(ADR-0020),选项来自 shared CHANGELOG_SOURCES。 */
+  | { name: 'source'; label: string; placeholder: string; default: string }
 
 /** 刷新配置(spec §刷新策略):hook key + 间隔(ms)。0 = 不刷新。 */
 export type RefreshConfig = {
@@ -33,7 +36,7 @@ export type RefreshConfig = {
 /** 实时摘要数据(见 summarize 注释:ADR-0001 契约字段,当前无网格消费方)。 */
 export type SummaryInput = {
   quotes?: Record<string, Quote | null>
-  /** 更新日志的最新版本(changelog 单例只看最新一条)。 */
+  /** 更新日志的最新版本(changelog 图标只看最新一条;多源后此字段暂无网格消费方,见 ADR-0020)。 */
   changelog?: ChangelogVersion | null
   /** 各天气图标的 bundle,键为 locationKey(lat,lon)。 */
   weather?: Record<string, WeatherBundle | null>
@@ -135,15 +138,23 @@ export const STOCK_DEF: IconTypeDefinition = {
   },
 }
 
-/** 更新日志:扩展类型,单例,data=null。网格显示最新版本号+发布日期,详情=底部 Drawer(ADR-0016)。 */
+/** 更新日志:扩展类型,非单例(ADR-0020),data={source}(存量 null 兜底归默认源)。
+ *  网格显示最新版本号+发布日期,名称行取源 label;详情=底部 Drawer(ADR-0016)。 */
 export const CHANGELOG_DEF: IconTypeDefinition = {
   id: 'changelog',
   label: '更新日志',
   kind: 'extension',
-  singleton: true,
+  singleton: false,
   refresh: { kind: 'changelog' },
   detail: 'drawer',
-  editor: [],
+  editor: [
+    {
+      name: 'source',
+      label: '外源',
+      placeholder: '选择外源',
+      default: DEFAULT_CHANGELOG_SOURCE,
+    },
+  ],
   summarize: (_data, live) => {
     const v = live.changelog
     if (!v) return null

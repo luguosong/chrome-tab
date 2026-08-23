@@ -75,8 +75,9 @@ async function seedPagesAndIcons(db: Db, userId: number): Promise<void> {
         data: JSON.stringify({ name, url }), created_at: now,
       })),
       {
+        // data.source 见 ADR-0020(存量库 data=null 的旧图标读侧兜底归默认源,前端 changelogSourceOf)
         user_id: userId, page_id: changelogPage.id, parent_id: null, type: 'CHANGELOG', sort_order: 0,
-        data: null, created_at: now,
+        data: JSON.stringify({ source: 'claude-code' }), created_at: now,
       },
       // ponytail: Java 版有 >64 只股票溢出追加页逻辑,DEFAULT_STOCKS 恒 13 只 < 64,死分支不搬
       ...DEFAULT_STOCKS.map(([symbol, name], so) => ({

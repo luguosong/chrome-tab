@@ -15,6 +15,7 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core'
 import { useQueryClient } from '@tanstack/react-query'
+import { changelogSourceOf } from 'chrome-tab-shared'
 import { useAuth } from '../context/AuthContext'
 import { useConfig, useMergeIcons, useMoveIcon } from '../api/config'
 import { ApiError } from '../api/client'
@@ -587,10 +588,13 @@ function Dashboard() {
                     <StockModal icon={detail} onClose={() => setDetail(null)} />
                   ))}
                 {detail && get(detail.type)?.detail === 'drawer' && (
-                  <ChangelogDrawer onClose={() => setDetail(null)} />
+                  <ChangelogDrawer
+                    source={changelogSourceOf(detail.data)}
+                    onClose={() => setDetail(null)}
+                  />
                 )}
                 {/* 拖拽幽灵(06):只读副本跟随光标,原位降级为占位;复用 <Icon overlay> 保持视觉一致。
-                    置于 IconDataProvider 内以拿到 quotes/changelog 上下文(React 上下文随 React 树,
+                    置于 IconDataProvider 内以拿到 quotes/weather 上下文(React 上下文随 React 树,
                     不随 portal DOM)。dropAnimation=null 让落定即隐藏,避免与乐观重排动画叠加抖动。 */}
                 <DragOverlay dropAnimation={null}>
                   {activeIcon && <IconView icon={activeIcon} overlay />}

@@ -88,9 +88,13 @@ describe('POST /api/icons', () => {
     })
   })
 
-  it('409 GROUP 不能直接建 / 单例 CHANGELOG 已存在 / 满页容量(剩余 0 格)', async () => {
+  it('409 GROUP 不能直接建 / CHANGELOG 可多实例(ADR-0020) / 满页容量(剩余 0 格)', async () => {
     await expectError(await req('POST', '/api/icons', { body: { pageId: 1, type: 'GROUP', data: null }, cookie }), 409, '分组需经合并创建，不能直接新建')
-    await expectError(await req('POST', '/api/icons', { body: { pageId: 1, type: 'CHANGELOG', data: null }, cookie }), 409, '该类型图标已存在，且为单例类型')
+    // CHANGELOG 已非单例:seed 已有一条,再建第二条(另一源)合法
+    {
+      const res = await req('POST', '/api/icons', { body: { pageId: 1, type: 'CHANGELOG', data: { source: 'matt-skills' } }, cookie })
+      expect(res.status).toBe(201)
+    }
     const [fullPage] = await navPage(64)
     await expectError(
       await req('POST', '/api/icons', { body: { pageId: fullPage, type: 'WEATHER', data: null }, cookie }),

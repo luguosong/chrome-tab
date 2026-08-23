@@ -35,7 +35,7 @@ describe('GET /api/config', () => {
     expect(keys).toEqual(sorted)
     // 大写枚举 wire;data 形态抽查
     expect(json.icons.filter((i) => i.type === 'NAV')).toHaveLength(12)
-    expect(json.icons.find((i) => i.type === 'CHANGELOG')!.data).toBeNull()
+    expect(json.icons.find((i) => i.type === 'CHANGELOG')!.data).toEqual({ source: 'claude-code' })
     expect(json.icons.find((i) => i.type === 'NAV')!.data).toEqual({ name: 'GitHub', url: 'https://github.com' })
     expect(json.icons.filter((i) => i.type === 'STOCK')).toHaveLength(13)
     // 无行 → defaults()(14 字段全量)
@@ -187,20 +187,20 @@ describe('PUT /api/config(全量替换)', () => {
     await expectError(await req('PUT', '/api/config', { body: 'not-json', cookie }), 400)
   })
 
-  it('业务 409 矩阵:容量/单例/孤儿 parentId/组嵌套/非 NAV 成员/跨页/空组(消息逐字)', async () => {
+  it('业务 409 矩阵:容量/孤儿 parentId/组嵌套/非 NAV 成员/跨页/空组(消息逐字)', async () => {
     const icon = (over: Record<string, unknown>): Record<string, unknown> =>
       ({ id: 9199, pageId: 9001, parentId: null, type: 'NAV', sortOrder: 9, data: null, ...over })
     // 容量:65 个顶层(仅 1 页)
     const full = { pages: [{ id: 9001, name: '甲', sortOrder: 0 }], icons: Array.from({ length: 65 }, (_, i) => icon({ id: 9200 + i, sortOrder: i })) }
     await expectError(await req('PUT', '/api/config', { body: full, cookie }), 409, '页面(blob 内 9001)容量超过 64 格')
-    // 单例 ×2
-    await expectError(
-      await req('PUT', '/api/config', {
-        body: { pages: [{ id: 9001, name: '甲', sortOrder: 0 }], icons: [icon({ id: 1, type: 'CHANGELOG' }), icon({ id: 2, type: 'CHANGELOG' })] },
+    // CHANGELOG 非单例(ADR-0020):两实例各绑一源,合法
+    {
+      const res = await req('PUT', '/api/config', {
+        body: { pages: [{ id: 9001, name: '甲', sortOrder: 0 }], icons: [icon({ id: 1, type: 'CHANGELOG', data: { source: 'claude-code' } }), icon({ id: 2, type: 'CHANGELOG', data: { source: 'matt-skills' } })] },
         cookie,
-      }),
-      409, '单例类型 CHANGELOG 出现多次',
-    )
+      })
+      expect(res.status).toBe(200)
+    }
     // id 重复
     await expectError(
       await req('PUT', '/api/config', {

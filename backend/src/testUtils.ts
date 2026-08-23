@@ -1,6 +1,7 @@
 import { expect } from 'vitest'
+import { DEFAULT_CHANGELOG_SOURCE } from 'chrome-tab-shared'
 import { createApp } from './app'
-import type { ChangelogService } from './changelog'
+import type { ChangelogService, ChangelogServices } from './changelog'
 import { openDb, type Db } from './db'
 import { bootstrap } from './seed'
 
@@ -8,12 +9,16 @@ import { bootstrap } from './seed'
  * 契约测试 fixture(spec Testing Decisions):内存 SQLite + seed 基线
  * (3 页 26 图标:12 NAV / 1 CHANGELOG / 13 STOCK),主 seam = app.request()。
  * 每测试文件独立实例,互不串污染;测试可直接用 db 造边角 fixture(满格页等)。
- * changelog 透传注入桩 service(假 fetch/translate,零外呼)。
+ * changelog 透传注入桩 service(假 fetch/translate,零外呼),挂默认源。
  */
 export async function setupApp(changelog?: ChangelogService) {
   const { db } = openDb(':memory:')
   await bootstrap(db, { username: 'admin', password: 'admin-pw' })
-  const app = createApp({ db, changelog })
+  const app = createApp({
+    db,
+    // 计算键被推宽,断言回 map 类型;matt-skills 缺位时 pick 回落默认源,无碍
+    changelog: (changelog && { [DEFAULT_CHANGELOG_SOURCE]: changelog }) as ChangelogServices | undefined,
+  })
   const login = async () => {
     const res = await app.request('/api/login', {
       method: 'POST',

@@ -2,9 +2,10 @@ import { serve } from '@hono/node-server'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { schedule } from 'node-cron'
+import { CHANGELOG_SOURCES } from 'chrome-tab-shared'
 import { createApp } from './app'
 import { dailyBackup } from './backup'
-import { ChangelogService, prodChangelogDeps, startChangelogScheduler } from './changelog'
+import { ChangelogService, prodChangelogDeps, startChangelogScheduler, type ChangelogServices } from './changelog'
 import { openDb } from './db'
 import { bootstrap } from './seed'
 
@@ -19,7 +20,10 @@ await bootstrap(db, {
 // cookie secure 照 Java prod profile:NODE_ENV=production 下默认 true,COOKIE_SECURE=false 可关(裸 IP HTTP 部署)
 const cookieSecure =
   process.env.NODE_ENV === 'production' && process.env.COOKIE_SECURE !== 'false'
-const changelog = new ChangelogService(db, prodChangelogDeps())
+// 每源一个 Service(ADR-0020):快照/预热/定时独立,译文表按块哈希跨源共享
+const changelog = Object.fromEntries(
+  CHANGELOG_SOURCES.map((s) => [s.id, new ChangelogService(db, s.id, prodChangelogDeps(s.id))]),
+) as ChangelogServices
 // 和风天气(ADR-0009):Key/个人专用主机走环境变量、不入库;缺省未配置 → 端点 500
 const app = createApp({
   db,
@@ -33,8 +37,8 @@ const app = createApp({
 
 const port = Number(process.env.PORT ?? 8080)
 serve({ fetch: app.fetch, port }, (info) => console.log(`backend listening on :${info.port}`))
-// ADR-0017:启动先恢复快照再异步预热,此后每 6h 定时刷新
-startChangelogScheduler(changelog)
+// ADR-0017:启动先恢复快照再异步预热,此后每 6h 定时刷新(逐源,ADR-0020)
+startChangelogScheduler(Object.values(changelog))
 
 // 每日 03:17(UTC):WAL checkpoint + 过期 session 清理 + VACUUM INTO 备份(票 09;恢复 = 拷回文件)
 schedule('17 3 * * *', async () => {

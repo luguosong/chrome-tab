@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { sql } from 'kysely'
 import { meHandler, publicAuthRoutes, requireAuth, sessionMiddleware, type AuthEnv } from './auth'
-import { changelogRoutes, type ChangelogService } from './changelog'
+import { changelogRoutes, type ChangelogServices } from './changelog'
 import { ConflictError } from './common'
 import { configRoutes } from './config'
 import type { Db } from './db'
@@ -27,7 +27,7 @@ export function createApp({
 }: {
   db: Db
   cookieSecure?: boolean
-  changelog?: ChangelogService
+  changelog?: ChangelogServices
   weather?: WeatherConfig
 }) {
   const app = new Hono<AuthEnv>()

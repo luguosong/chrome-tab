@@ -33,13 +33,10 @@ describe('canAdd — 单例判断', () => {
     expect(canAdd('stock', ['stock'])).toBe(true)
   })
 
-  it('单例类型:已存在则拒绝(changelog)', () => {
+  it('changelog 已非单例(ADR-0020):每实例绑一个外源,已存在也允许', () => {
     expect(canAdd('changelog', [])).toBe(true)
-    expect(canAdd('changelog', ['changelog'])).toBe(false)
-    // 即使列表里有其它类型,只要 changelog 不在就允许
-    expect(canAdd('changelog', ['nav', 'stock'])).toBe(true)
-    // 一旦 changelog 在,拒绝
-    expect(canAdd('changelog', ['nav', 'changelog'])).toBe(false)
+    expect(canAdd('changelog', ['changelog'])).toBe(true) // 已有也允许
+    expect(canAdd('changelog', ['changelog', 'changelog'])).toBe(true)
   })
 
   it('未登记类型拒绝', () => {
@@ -94,6 +91,15 @@ describe('summarize — 纯数据提取(无需 DOM)', () => {
 
   it('nav 无实时摘要:恒返回 null', () => {
     expect(get('nav')!.summarize({ name: 'x', url: 'https://a.com' }, {})).toBeNull()
+  })
+})
+
+describe('更新日志类型 changelog(多源,ADR-0020)', () => {
+  it('登记为扩展、非单例、detail=drawer,editor 声明 source 字段', () => {
+    expect(get('changelog')?.kind).toBe('extension')
+    expect(get('changelog')?.singleton).toBe(false)
+    expect(get('changelog')?.detail).toBe('drawer')
+    expect(get('changelog')?.editor.map((f) => f.name)).toEqual(['source'])
   })
 })
 

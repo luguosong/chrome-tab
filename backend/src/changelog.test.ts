@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { DEFAULT_CHANGELOG_SOURCE, type ChangelogSourceId } from 'chrome-tab-shared'
 import { createApp } from './app'
 import { openDb, type Db } from './db'
 import { bootstrap } from './seed'
@@ -29,13 +30,18 @@ const TRANSLATOR = (block: string): string => {
   throw new Error(`未知块: ${block}`)
 }
 
-function makeService(db: Db, deps: Partial<ChangelogDeps> = {}, translateRecent = 2) {
+function makeService(
+  db: Db,
+  deps: Partial<ChangelogDeps> = {},
+  source: ChangelogSourceId = DEFAULT_CHANGELOG_SOURCE,
+  translateRecent = 2,
+) {
   const defaults: ChangelogDeps = {
     fetchMarkdown: async () => RAW,
     translate: async (b) => TRANSLATOR(b),
     fetchReleasedAt: async () => null,
   }
-  return new ChangelogService(db, { ...defaults, ...deps }, translateRecent)
+  return new ChangelogService(db, source, { ...defaults, ...deps }, translateRecent)
 }
 
 describe('splitBlocks(块边界即哈希边界,错一字符即失配)', () => {
@@ -78,7 +84,11 @@ describe('ChangelogService 编排(ADR-0017)', () => {
     expect(snap.translatedVersions).toEqual(['3.0', '2.0'])
     const rows = await db.selectFrom('changelog_translations').selectAll().execute()
     expect(rows).toHaveLength(2)
-    const snapshotRow = await db.selectFrom('changelog_snapshot').selectAll().executeTakeFirst()
+    const snapshotRow = await db
+      .selectFrom('changelog_snapshots')
+      .selectAll()
+      .where('source', '=', DEFAULT_CHANGELOG_SOURCE)
+      .executeTakeFirst()
     expect(snapshotRow?.raw_markdown).toBe(RAW)
     expect(snapshotRow?.released_at).toBeNull()
   })
@@ -174,7 +184,13 @@ describe('ChangelogService 编排(ADR-0017)', () => {
   it('重启恢复:loadFromDb 从快照表重建镜像,零外呼零 LLM', async () => {
     const db = openDb(':memory:').db
     await makeService(db).get() // 前一进程:建库
-    expect(await db.selectFrom('changelog_snapshot').selectAll().executeTakeFirst()).toBeDefined()
+    expect(
+      await db
+        .selectFrom('changelog_snapshots')
+        .selectAll()
+        .where('source', '=', DEFAULT_CHANGELOG_SOURCE)
+        .executeTakeFirstOrThrow(),
+    ).toBeDefined()
 
     let llmCalls = 0
     const restarted = makeService(db, {
@@ -223,6 +239,86 @@ describe('ChangelogService 编排(ADR-0017)', () => {
 
     // 3 块各译恰好一次(recent=2 覆盖 3.0/2.0 + 补译 1.0)
     expect(calls).toBe(3)
+  })
+})
+
+describe('多源(ADR-0020:每源一 Service,快照按源分行;译文按块哈希跨源共享)', () => {
+  const RAW_B = '# Matt\n\n## 3.0\n- three\n\n## 1.4\n- one\n' // 与 A 共享 3.0 块原文
+
+  it('双源同库:快照各占一行互不覆盖,releasedAt 各自独立', async () => {
+    const db = openDb(':memory:').db
+    const a = makeService(db, { fetchReleasedAt: async () => '2026-08-01T00:00:00.000Z' })
+    const b = makeService(
+      db,
+      { fetchMarkdown: async () => RAW_B, fetchReleasedAt: async () => '2026-08-05T00:00:00.000Z' },
+      'matt-skills',
+    )
+
+    await a.get()
+    await b.get()
+
+    const rows = await db.selectFrom('changelog_snapshots').select(['source', 'released_at']).execute()
+    expect(rows).toEqual([
+      { source: 'claude-code', released_at: '2026-08-01T00:00:00.000Z' },
+      { source: 'matt-skills', released_at: '2026-08-05T00:00:00.000Z' },
+    ])
+    expect((await a.get()).markdown).toContain('## 1.0') // B 的刷新不冲掉 A
+    expect((await b.get()).markdown).toContain('## 1.4')
+  })
+
+  it('同原文块两源零重复译制:块哈希跨源命中,译文表无需源维度', async () => {
+    const db = openDb(':memory:').db
+    const translated: string[] = []
+    const spy = async (b: string) => (translated.push(b), TRANSLATOR(b))
+    const a = makeService(db, { translate: spy })
+    await a.get() // 译 A 的 3.0/2.0(共享块 = 3.0)
+
+    const b = makeService(db, { fetchMarkdown: async () => RAW_B, translate: spy }, 'matt-skills')
+    await b.get() // 3.0 哈希命中;窗口(recent=2)内只有 1.4 缺失
+
+    expect(translated.filter((x) => x.includes('3.0'))).toHaveLength(1) // 3.0 只被译过一次
+    expect((await b.get()).markdown).toContain('- 三') // 直接复用 A 的译文
+  })
+
+  it('同版本号、不同原文:各译各的,互不串台(哈希含全块原文)', async () => {
+    const db = openDb(':memory:').db
+    const zh: Array<[string, string]> = [
+      ['alpha', '甲'],
+      ['beta', '乙'],
+    ]
+    const translate = async (b: string) => {
+      for (const [en, cn] of zh) if (b.includes(en)) return b.replaceAll(en, cn)
+      throw new Error(`未知块: ${b}`)
+    }
+    const a = makeService(db, {
+      fetchMarkdown: async () => '# A\n\n## 1.2.3\n- alpha fix\n',
+      translate,
+    })
+    const b = makeService(db, { fetchMarkdown: async () => '# B\n\n## 1.2.3\n- beta fix\n', translate }, 'matt-skills')
+
+    await a.get()
+    await b.get()
+
+    // 两行译文,各归各源;B 的 1.2.3 绝不显示 A 的译文
+    expect(await db.selectFrom('changelog_translations').selectAll().execute()).toHaveLength(2)
+    expect((await a.get()).markdown).toContain('甲')
+    expect((await a.get()).markdown).not.toContain('乙')
+    expect((await b.get()).markdown).toContain('乙')
+    expect((await b.get()).markdown).not.toContain('甲')
+  })
+
+  it('loadFromDb 只恢复本源行', async () => {
+    const db = openDb(':memory:').db
+    await makeService(db).get()
+    await makeService(db, { fetchMarkdown: async () => RAW_B }, 'matt-skills').get()
+
+    const b = makeService(
+      db,
+      { fetchMarkdown: async () => { throw new Error('任何外呼即失败') } },
+      'matt-skills',
+    )
+    await b.loadFromDb()
+    expect((await b.get()).markdown).toContain('## 1.4') // 恢复的是 B 自己的快照
   })
 })
 
@@ -326,7 +422,7 @@ describe('translate 候选链(候选失效=403/404/no_available_channel 换下�
 
 const httpDb = openDb(':memory:').db
 const service = makeService(httpDb)
-const app = createApp({ db: httpDb, changelog: service })
+const app = createApp({ db: httpDb, changelog: { 'claude-code': service, 'matt-skills': service } })
 
 let cookie = ''
 beforeAll(async () => {
@@ -354,6 +450,41 @@ describe('GET /api/changelog', () => {
       releasedAt: null, // npm 拉失败 → 显式 null(输出不省略),前端日期行降级「—」
       translatedVersions: ['3.0', '2.0'],
     })
+  })
+})
+
+describe('GET /api/changelog ?source 分流(ADR-0020)', () => {
+  const db2 = openDb(':memory:').db
+  const svcB = makeService(
+    db2,
+    { fetchMarkdown: async () => '# Matt\n\n## 1.5\n- one\n' },
+    'matt-skills',
+  )
+  const app2 = createApp({
+    db: db2,
+    changelog: { 'claude-code': makeService(db2), 'matt-skills': svcB },
+  })
+  let cookie2 = ''
+  beforeAll(async () => {
+    await bootstrap(db2, { username: 'admin', password: 'admin-pw' })
+    const res = await app2.request('/api/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin-pw' }),
+    })
+    cookie2 = res.headers.getSetCookie()[0]!.split(';')[0]!
+  })
+
+  it('?source=matt-skills → 该源快照;未知/缺省 → 回落默认源', async () => {
+    const resB = await app2.request('/api/changelog?source=matt-skills', { headers: { cookie: cookie2 } })
+    expect(resB.status).toBe(200)
+    expect(((await resB.json()) as { markdown: string }).markdown).toContain('## 1.5')
+
+    for (const q of ['', '?source=bogus']) {
+      const res = await app2.request(`/api/changelog${q}`, { headers: { cookie: cookie2 } })
+      expect(res.status).toBe(200)
+      expect(((await res.json()) as { markdown: string }).markdown).toContain('## 3.0') // A 的 fixture
+    }
   })
 })
 

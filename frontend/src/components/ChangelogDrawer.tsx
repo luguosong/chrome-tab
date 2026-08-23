@@ -1,30 +1,37 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useIconData } from '../context/IconDataContext'
-import { useTranslateVersions } from '../hooks/useChangelog'
+import { getChangelogSource, type ChangelogSourceId } from 'chrome-tab-shared'
+import { useChangelog, useTranslateVersions } from '../hooks/useChangelog'
 import { inline } from '../lib/changelogParser'
 
 /**
  * 更新日志详情:居中 Dialog(由底部 Drawer 调整为居中浮层,消除「沉底」感)。
  *
- * 复用 useIconData 集中拉取的 changelog(由 useChangelog 维护,1h staleTime),展示完整版本
- * 列表(纵向滚动)。真实 CHANGELOG 无日期、无 ### 小节,条目直接挂在版本下,故按「发布时间线」
- * 呈现:左侧连续细轨 + 每版本一个节点,最新版 accent 高亮 + 「最新」药丸,旧版弱化。
- * 未译版本(不在 translatedVersions 内)显示「翻译」按钮 → POST /translate 按需补译,
- * 译毕后端持久化、invalidate 重拉即变中文(ADR-0017)。
+ * 按打开图标的源(source prop,ADR-0020)经 useChangelog 拉取(1h staleTime,与网格图标
+ * 共享同源 queryKey 缓存),展示完整版本列表(纵向滚动)。真实 CHANGELOG 无日期、无 ###
+ * 小节,条目直接挂在版本下,故按「发布时间线」呈现:左侧连续细轨 + 每版本一个节点,最新版
+ * accent 高亮 + 「最新」药丸,旧版弱化。未译版本(不在 translatedVersions 内)显示「翻译」
+ * 按钮 → POST /translate 按需补译,译毕后端持久化、invalidate 重拉即变中文(ADR-0017)。
  *
- * 刷新失败降级(spec user story 15):changelogError 非空 → 显示重试按钮,点击重拉。
+ * 刷新失败降级(spec user story 15):query error 非空 → 显示重试按钮,点击重拉。
  *
  * 容器:fixed 居中、玻璃面板、关闭按钮;Esc / 点遮罩关闭。入场:fade-in 遮罩 + pop-in 面板
  * (reduced-motion 下不动画)。编辑态进入时由父组件(DashboardPage)onClose。
  */
-export default function ChangelogDrawer({ onClose }: { onClose: () => void }) {
-  const { changelog, changelogTranslated, changelogError, refetchChangelog } = useIconData()
-  const translateMut = useTranslateVersions()
+export default function ChangelogDrawer({
+  source,
+  onClose,
+}: {
+  source: ChangelogSourceId
+  onClose: () => void
+}) {
+  const sourceLabel = getChangelogSource(source).label
+  const { data, isError, refetch } = useChangelog(source)
+  const translateMut = useTranslateVersions(source)
   const [q, setQ] = useState('')
 
-  const versions = changelog ?? []
+  const versions = data?.versions ?? []
   const latest = versions[0]?.title
-  const translated = useMemo(() => new Set(changelogTranslated), [changelogTranslated])
+  const translated = useMemo(() => new Set(data?.translatedVersions ?? []), [data?.translatedVersions])
 
   // 译制失败感知:后端译制失败仅记日志、保持英文仍返 200(如 LLM 网关不可达),
   // 请求版本不在响应 translatedVersions 内即失败——据此提示,而非「按钮一闪」无感知。
@@ -60,7 +67,7 @@ export default function ChangelogDrawer({ onClose }: { onClose: () => void }) {
       className="fixed inset-0 z-[60] flex items-center justify-center"
       role="dialog"
       aria-modal="true"
-      aria-label="Claude Code 更新日志"
+      aria-label={`${sourceLabel} 更新日志`}
     >
       {/* 遮罩:点击关闭 */}
       <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
@@ -69,7 +76,7 @@ export default function ChangelogDrawer({ onClose }: { onClose: () => void }) {
         {/* 顶栏:标题 + 副标题 + 关闭 */}
         <div className="flex items-start justify-between px-6 pt-4 pb-2">
           <div className="min-w-0">
-            <h2 className="text-base font-semibold text-white/90">Claude Code 更新日志</h2>
+            <h2 className="text-base font-semibold text-white/90">{sourceLabel} 更新日志</h2>
             <p className="mt-0.5 text-xs text-white/50">
               {latest ? `共 ${versions.length} 个版本 · 最新 ${latest}` : '加载中…'}
             </p>
@@ -86,12 +93,12 @@ export default function ChangelogDrawer({ onClose }: { onClose: () => void }) {
 
         {/* 失败态 / 过滤 + 列表 */}
         <div className="px-6">
-          {changelogError ? (
+          {isError ? (
             <div className="flex items-center gap-3 py-6">
               <span className="text-sm text-white/60">日志刷新失败</span>
               <button
                 type="button"
-                onClick={refetchChangelog}
+                onClick={() => void refetch()}
                 className="border border-white/30 text-white/80 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent"
               >
                 重试

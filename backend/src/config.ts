@@ -181,11 +181,10 @@ function parseReplaceRequest(body: Record<string, unknown>): {
   }
 }
 
-/** 业务校验(→ 409,消息逐字照 Java):孤儿引用 / 每页容量(只计顶层) / 单例 / 分组关系。 */
+/** 业务校验(→ 409,消息逐字照 Java):孤儿引用 / 每页容量(只计顶层) / 分组关系。 */
 function validate(req: { pages: PageItem[]; icons: IconItem[] }): void {
   const pageIds = new Set(req.pages.map((p) => p.id))
   const cellsByPage = new Map<number, number>()
-  const singletonCount = new Map<string, number>()
   const byId = new Map<number, IconItem>()
   const groupsWithMember = new Set<number>()
   req.icons.forEach((i, idx) => {
@@ -208,11 +207,7 @@ function validate(req: { pages: PageItem[]; icons: IconItem[] }): void {
       cellsByPage.set(i.pageId, used)
       if (used > CAPACITY_CELLS) throw new ConflictError(409, `页面(blob 内 ${i.pageId})容量超过 ${CAPACITY_CELLS} 格`)
     }
-    if (i.type === 'CHANGELOG') {
-      const n = (singletonCount.get(i.type) ?? 0) + 1
-      singletonCount.set(i.type, n)
-      if (n > 1) throw new ConflictError(409, `单例类型 ${i.type} 出现多次`)
-    }
+    // CHANGELOG 已非单例(ADR-0020):每实例绑一个外源,可多行
   })
   // 空组不存活:每个组行至少 1 个成员
   for (const [id, i] of byId) {

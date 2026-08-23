@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react'
+import { CHANGELOG_SOURCES } from 'chrome-tab-shared'
 import { useCreateIcon } from '../api/config'
 import { useSiteInfoAutofill } from '../api/siteInfo'
 import { ApiError } from '../api/client'
@@ -71,6 +72,11 @@ function TypeSection({
   )
 }
 
+/** 表单初值:普通字段空串,带 default 的字段(如 changelog 源下拉)取默认。初始化与提交后重置共用。 */
+function initialValues(def: IconTypeDefinition): Record<string, unknown> {
+  return Object.fromEntries(def.editor.map((f) => [f.name, 'default' in f ? f.default : '']))
+}
+
 /** 单张类型卡片:内嵌该类型 editor 表单,提交即加到当前页。单例已存在 → 置灰。 */
 function TypeCard({
   def,
@@ -82,9 +88,7 @@ function TypeCard({
   disabled: boolean
 }) {
   const create = useCreateIcon()
-  const [values, setValues] = useState<Record<string, unknown>>(() =>
-    Object.fromEntries(def.editor.map((f) => [f.name, ''])),
-  )
+  const [values, setValues] = useState<Record<string, unknown>>(() => initialValues(def))
 
   // nav:网址停顿后自动加载站点信息(CONTEXT.md「站点信息」)——title 只在名称为空时
   // 填入,图标候选由下方 icon 字段的 IconPicker 消费(共享 hook,与编辑 EditForm 一致)。
@@ -106,7 +110,7 @@ function TypeCard({
         type: def.id,
         data: buildIconData(def.editor, values),
       })
-      setValues(Object.fromEntries(def.editor.map((f) => [f.name, ''])))
+      setValues(initialValues(def))
     } catch {
       /* 错误已由 create.error 承载,errorMsg 转译展示 */
     }
@@ -158,6 +162,21 @@ function TypeCard({
             onChange={(v) => setField('icon', v)}
             placeholder={f.placeholder}
           />
+        ) : f.name === 'source' ? (
+          // 更新日志外源下拉(ADR-0020):选项 = shared CHANGELOG_SOURCES 枚举
+          <select
+            key={f.name}
+            value={String(values['source'] ?? f.default)}
+            onChange={(e) => setField('source', e.target.value)}
+            aria-label={f.label}
+            className="w-full px-3 py-2 rounded-lg bg-white/20 text-white text-sm outline-none focus:ring-2 focus:ring-accent"
+          >
+            {CHANGELOG_SOURCES.map((s) => (
+              <option key={s.id} value={s.id} className="text-black">
+                {s.label}
+              </option>
+            ))}
+          </select>
         ) : (
           <input
             key={f.name}
@@ -170,7 +189,7 @@ function TypeCard({
         ),
       )}
 
-      {/* changelog(editor=[])无表单字段,直接一个提交按钮 */}
+      {/* changelog 仅一个源下拉字段;其它类型 editor 为空时直接一个提交按钮 */}
 
       {errorMsg && <div className="text-xs text-down">{errorMsg}</div>}
 

@@ -6,7 +6,7 @@ import type { Db } from './db'
 /**
  * Icon 写操作六端点(api-contract §5,ADR-0011/0016)。核心约束:
  * - 页面容量 = 每页顶层行数 ≤ 64(组行占 1 格、组内成员不计);
- * - 单例类型仅 CHANGELOG;组行只能经 merge 创建、空组不存活;
+ * - 组行只能经 merge 创建、空组不存活;CHANGELOG 已非单例(ADR-0020,每实例绑一个外源);
  * - 排序无空洞(0..n-1);所有读写按 userId 隔离;任意写事务末尾 bump config_version。
  * 修正白名单②:POST/merge 建成功 201;④:move 入组分支尊重 toIndex 并夹紧;⑥:PATCH /{id} 补参数校验。
  */
@@ -54,16 +54,6 @@ export function iconRoutes(db: Db) {
           .where('id', '=', pageId)
           .where('user_id', '=', userId)
           .executeTakeFirstOrThrow(() => new ConflictError(404, '页面不存在'))
-        if (type === 'CHANGELOG') {
-          const has = await tx
-            .selectFrom('icons')
-            .select('id')
-            .where('user_id', '=', userId)
-            .where('type', '=', 'CHANGELOG')
-            .limit(1)
-            .executeTakeFirst()
-          if (has) throw new ConflictError(409, '该类型图标已存在，且为单例类型')
-        }
         await requireCapacity(tx, userId, page.id, 1, '页面')
         const siblings = await topLevel(tx, userId, page.id)
         const saved = await tx

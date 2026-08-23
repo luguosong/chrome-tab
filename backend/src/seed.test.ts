@@ -60,7 +60,7 @@ describe('空库首启 seed', () => {
     const changelog = icons.filter((i) => i.page_id === changelogPage!.id)
     expect(changelog).toHaveLength(1)
     expect(changelog[0]!.type).toBe('CHANGELOG')
-    expect(changelog[0]!.data).toBeNull()
+    expect(JSON.parse(changelog[0]!.data!)).toEqual({ source: 'claude-code' })
 
     const stocks = icons.filter((i) => i.page_id === stockPage!.id).sort((a, b) => a.sort_order - b.sort_order)
     expect(stocks.map((i) => i.type)).toEqual(Array(13).fill('STOCK'))

@@ -23,7 +23,7 @@ export const ETL_TABLES = [
   },
   { name: 'config_version', pk: 'user_id', columns: ['user_id', 'updated_at'] },
   { name: 'changelog_translations', pk: 'block_hash', columns: ['block_hash', 'translated', 'created_at'] },
-  { name: 'changelog_snapshot', pk: 'id', columns: ['id', 'raw_markdown', 'released_at', 'fetched_at'] },
+  // changelog_snapshot 不迁(ADR-0020 弃用):快照是可重建缓存,新表按 source 分键、旧单行无对应形态
 ] as const
 
 export type EtlTableName = (typeof ETL_TABLES)[number]['name']

@@ -58,8 +58,8 @@ const CHANGELOG_TRANSLATIONS: Col[] = [
   ['translated', 'TEXT', 1, null, 0],
   ['created_at', 'TEXT', 1, null, 0],
 ]
-const CHANGELOG_SNAPSHOT: Col[] = [
-  ['id', 'INTEGER', 0, null, 1],
+const CHANGELOG_SNAPSHOTS: Col[] = [
+  ['source', 'TEXT', 1, null, 1],
   ['raw_markdown', 'TEXT', 1, null, 0],
   ['released_at', 'TEXT', 0, null, 0],
   ['fetched_at', 'TEXT', 1, null, 0],
@@ -94,7 +94,7 @@ describe('schema:8 张表结构(research/03 骨架 + sessions)', () => {
     ['layout_settings', LAYOUT_SETTINGS],
     ['config_version', CONFIG_VERSION],
     ['changelog_translations', CHANGELOG_TRANSLATIONS],
-    ['changelog_snapshot', CHANGELOG_SNAPSHOT],
+    ['changelog_snapshots', CHANGELOG_SNAPSHOTS],
     ['sessions', SESSIONS],
   ] as const)('%s', (table, expected) => {
     expect(cols(sqlite, table)).toEqual(expected)
@@ -160,10 +160,13 @@ describe('schema:外键实际生效', () => {
     ).toThrow()
   })
 
-  it('changelog_snapshot 单行约束 CHECK (id = 1)', () => {
+  it('changelog_snapshots 多源共存:source 主键,两源各行(ADR-0020)', () => {
     const sqlite = fresh()
+    sqlite.exec(
+      "INSERT INTO changelog_snapshots (source, raw_markdown, fetched_at) VALUES ('claude-code', 'x', '2026-01-01 00:00:00'), ('matt-skills', 'y', '2026-01-01 00:00:01')",
+    )
     expect(() =>
-      sqlite.exec("INSERT INTO changelog_snapshot (id, raw_markdown, fetched_at) VALUES (2, 'x', '2026-01-01 00:00:00')"),
+      sqlite.exec("INSERT INTO changelog_snapshots (source, raw_markdown, fetched_at) VALUES ('claude-code', 'z', '2026-01-02 00:00:00')"),
     ).toThrow()
   })
 })

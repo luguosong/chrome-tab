@@ -1,15 +1,22 @@
 import { createHash } from 'node:crypto'
 import { schedule } from 'node-cron'
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
+import {
+  DEFAULT_CHANGELOG_SOURCE,
+  getChangelogSource,
+  type ChangelogSourceId,
+} from 'chrome-tab-shared'
 import type { Db } from './db'
 import type { AuthEnv } from './auth'
 
 /**
- * 更新日志译制代理(ADR-0005/0016/0017,语义照搬 Java changelog 模块)。
+ * 更新日志译制代理(ADR-0005/0016/0017,语义照搬 Java changelog 模块;多源化见 ADR-0020)。
  * 请求路径纯读内存快照(原子换新,零外呼零 LLM);node-cron 每 6h 预取刷新;
  * 启动先 loadFromDb 从快照表恢复(秒级可服务)再异步预热,失败沿用旧快照(最多旧 6h)。
  * 译文按版本块原文 SHA-256 主键持久化,一版终身只译一次;增量检测纯算法零 token;
+ * 块哈希与源无关——同原文块跨源共享译文,译文表无需源维度;
  * 译制失败记 warn 保持英文、下轮重试;refresh 与 translateVersions 互斥防并发重复译制。
+ * 每源一个 Service 实例(source 参数),快照表 changelog_snapshots 按源一行。
  */
 
 // ---- 切片器(Java ChangelogSlicer)----
@@ -72,6 +79,8 @@ export class ChangelogService {
 
   constructor(
     private readonly db: Db,
+    /** 本实例绑定的外源(scheduler 日志用;取数 URL 在 deps 里已按源定型)。 */
+    readonly source: ChangelogSourceId,
     private readonly deps: ChangelogDeps,
     private readonly translateRecent = 5,
   ) {}
@@ -82,12 +91,12 @@ export class ChangelogService {
     return this.memory!
   }
 
-  /** 启动时从快照表恢复内存镜像:零外呼、零 LLM。表空则无操作,等定时/兜底路径。 */
+  /** 启动时从快照表恢复本源内存镜像:零外呼、零 LLM。本源无行则无操作,等定时/兜底路径。 */
   async loadFromDb(): Promise<void> {
     const row = await this.db
-      .selectFrom('changelog_snapshot')
+      .selectFrom('changelog_snapshots')
       .selectAll()
-      .where('id', '=', 1)
+      .where('source', '=', this.source)
       .executeTakeFirst()
     if (!row) return
     const blocks = splitBlocks(row.raw_markdown)
@@ -123,10 +132,12 @@ export class ChangelogService {
     const releasedAt = await this.deps.fetchReleasedAt()
     const fetchedAt = nowIso()
     await this.db
-      .insertInto('changelog_snapshot')
-      .values({ id: 1, raw_markdown: raw, released_at: releasedAt, fetched_at: fetchedAt })
+      .insertInto('changelog_snapshots')
+      .values({ source: this.source, raw_markdown: raw, released_at: releasedAt, fetched_at: fetchedAt })
       .onConflict((oc) =>
-        oc.column('id').doUpdateSet({ raw_markdown: raw, released_at: releasedAt, fetched_at: fetchedAt }),
+        oc
+          .column('source')
+          .doUpdateSet({ raw_markdown: raw, released_at: releasedAt, fetched_at: fetchedAt }),
       )
       .execute()
     this.memory = this.assemble(blocks, byHash, releasedAt)
@@ -191,28 +202,33 @@ export class ChangelogService {
   }
 }
 
-// ---- HTTP 路由(Java ChangelogController,契约 api-contract.md §6)----
+// ---- HTTP 路由(Java ChangelogController,契约 api-contract.md §6;?source 分流见 ADR-0020)----
 
-export function changelogRoutes(service: ChangelogService): Hono<AuthEnv> {
+/** 源 id → Service 映射;index.ts 按 CHANGELOG_SOURCES 逐源构造。 */
+export type ChangelogServices = Record<ChangelogSourceId, ChangelogService>
+
+export function changelogRoutes(services: ChangelogServices): Hono<AuthEnv> {
+  /** ?source= 选源;缺省/未知回落默认源(前端 changelogSourceOf 已兜底,此处双保险)。 */
+  const pick = (c: Context<AuthEnv>) =>
+    services[(c.req.query('source') as ChangelogSourceId) ?? DEFAULT_CHANGELOG_SOURCE] ??
+    services[DEFAULT_CHANGELOG_SOURCE]
   const toResponse = (s: Snapshot) => ({
     markdown: s.markdown,
     releasedAt: s.releasedAt, // 失败时显式 null(输出不省略),前端日期行降级「—」
     translatedVersions: s.translatedVersions,
   })
   return new Hono<AuthEnv>()
-    .get('/api/changelog', async (c) => c.json(toResponse(await service.get())))
+    .get('/api/changelog', async (c) => c.json(toResponse(await pick(c).get())))
     .post('/api/changelog/translate', async (c) => {
       const body = await c.req.json().catch(() => null)
       const versions = (body as { versions?: unknown } | null)?.versions
       const list = Array.isArray(versions) ? versions.filter((v): v is string => typeof v === 'string') : []
-      return c.json(toResponse(await service.translateVersions(list)))
+      return c.json(toResponse(await pick(c).translateVersions(list)))
     })
 }
 
-// ---- 生产协作器(Java ChangelogConfig/NpmReleaseDateService 对应物)----
+// ---- 生产协作器(Java ChangelogConfig/NpmReleaseDateService 对应物;源定义在 shared)----
 
-const GITHUB_RAW_URL = 'https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md'
-const NPM_PACKUMENT_URL = 'https://registry.npmjs.org/@anthropic-ai/claude-code'
 const LLM_BASE_URL = 'https://aihubmix.com/v1'
 
 /** 译制系统提示(照搬 Java,ADR-0005):确定性靠提示约束,GPT-5 系 temperature 被网关忽略。 */
@@ -262,14 +278,17 @@ function isCandidateExhausted(e: unknown): boolean {
   return err?.status === 403 || err?.status === 404 || /no_available_channel/.test(err?.body ?? '')
 }
 
-export function prodChangelogDeps(): ChangelogDeps {
+export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_SOURCE): ChangelogDeps {
+  const def = getChangelogSource(source)
   const apiKey = process.env.AIHUBMIX_API_KEY ?? ''
   const models = modelCandidates()
   return {
-    fetchMarkdown: () => fetchText(GITHUB_RAW_URL, 60_000),
+    fetchMarkdown: () => fetchText(def.changelogUrl, 60_000),
     fetchReleasedAt: async () => {
       try {
-        const root = JSON.parse(await fetchText(NPM_PACKUMENT_URL, 30_000)) as {
+        const root = JSON.parse(
+          await fetchText(`https://registry.npmjs.org/${def.npmPackage}`, 30_000),
+        ) as {
           'dist-tags'?: { latest?: string }
           time?: Record<string, string>
         }
@@ -311,10 +330,13 @@ export function prodChangelogDeps(): ChangelogDeps {
 
 // ---- 定时预取(Java ChangelogScheduler)----
 
-/** 启动两步:先恢复快照(零外呼)再异步预热;此后每 6h 刷新。失败沿用旧快照(最多旧 6h)。 */
-export function startChangelogScheduler(service: ChangelogService): void {
-  const refreshQuietly = () =>
-    service.refresh().catch((e) => console.warn('更新日志定时刷新失败,沿用现有快照:', e))
-  void service.loadFromDb().then(refreshQuietly)
-  schedule('0 */6 * * *', () => void refreshQuietly())
+/** 启动两步:先恢复快照(零外呼)再异步预热;此后每 6h 刷新。失败沿用旧快照(最多旧 6h)。
+ *  逐源各一套(ADR-0020):每源独立恢复/预热/定时,一源失败不涉其它。 */
+export function startChangelogScheduler(services: readonly ChangelogService[]): void {
+  for (const service of services) {
+    const refreshQuietly = () =>
+      service.refresh().catch((e) => console.warn(`更新日志(${service.source})定时刷新失败,沿用现有快照:`, e))
+    void service.loadFromDb().then(refreshQuietly)
+    schedule('0 */6 * * *', () => void refreshQuietly())
+  }
 }

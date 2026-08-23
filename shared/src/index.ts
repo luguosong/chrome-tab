@@ -6,6 +6,8 @@
 /** 搜索引擎 id(与后端 LayoutLimits 校验白名单一致)。 */
 export type SearchEngineId = 'google' | 'bing' | 'baidu'
 
+export * from './changelogSources'
+
 /**
  * 布局设置(见 CONTEXT.md「布局设置」,五组):按用户持久化、跨设备共享。
  * 网格组与 8×8=64 格容量正交——只改像素几何,不改格子数。
