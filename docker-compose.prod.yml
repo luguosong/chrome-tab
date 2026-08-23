@@ -41,7 +41,7 @@ services:
       # Node24 原生 fetch 默认忽略代理变量,须开此开关(译制/拉原文走 mihomo,qweather/npm 直连)
       NODE_USE_ENV_PROXY: "1"
       HTTPS_PROXY: http://mihomo:7890
-      NO_PROXY: localhost,127.0.0.1,.qweatherapi.com,registry.npmjs.org
+      NO_PROXY: localhost,127.0.0.1,.qweatherapi.com,registry.npmjs.org,.bing.com
     volumes:
       - ./backend/data:/app/backend/data
     expose:
