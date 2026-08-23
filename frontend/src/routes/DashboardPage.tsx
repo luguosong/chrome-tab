@@ -38,7 +38,7 @@ import GroupOverlay, { isGroupContainerId, parseGroupContainerId } from '../comp
 import StockModal from '../components/StockModal'
 import WeatherModal from '../components/WeatherModal'
 import AiHotModal from '../components/AiHotModal'
-import ChangelogDrawer from '../components/ChangelogDrawer'
+import ChangelogModal from '../components/ChangelogModal'
 import ControlDrawer from '../components/ControlDrawer'
 import { get } from '../lib/iconTypeRegistry'
 import type { Config, Icon, IconTypeId, Page } from '../lib/types'
@@ -100,7 +100,7 @@ function Dashboard() {
   const { editing, toggle } = useEditMode()
 
   // 详情面板状态集中在此(spec §详情容器:同一时刻只开一个详情)。
-  // stock → Modal、changelog → 底部 Drawer、nav 不经此(其详情=新标签打开)。
+  // stock/weather/changelog/aihot → 各自 Modal(ADR-0022 起无 drawer)、nav 不经此(其详情=新标签打开)。
   const [detail, setDetail] = useState<Icon | null>(null)
 
   // 打开中的分组弹层(票 08):值为组行 id;组行被删(空组不存活)/解散后落空,
@@ -569,22 +569,21 @@ function Dashboard() {
                     />
                   ))}
                 </Carousel>
-                {/* 详情面板按 detail 字段渲染(ADR-0001 契约),不按 type 字符串 ——
-                    新增复用 modal/drawer 的类型无需改此处。 */}
+                {/* 详情面板按 detail 字段渲染(ADR-0001 契约),不按 type 字符串;
+                    但各 modal 类型仍需在此链加分支(容器形态≠组件实例)。 */}
                 {detail && get(detail.type)?.detail === 'modal' &&
                   (detail.type === 'weather' ? (
                     <WeatherModal icon={detail} onClose={() => setDetail(null)} />
                   ) : detail.type === 'aihot' ? (
                     <AiHotModal icon={detail} onClose={() => setDetail(null)} />
+                  ) : detail.type === 'changelog' ? (
+                    <ChangelogModal
+                      source={changelogSourceOf(detail.data)}
+                      onClose={() => setDetail(null)}
+                    />
                   ) : (
                     <StockModal icon={detail} onClose={() => setDetail(null)} />
                   ))}
-                {detail && get(detail.type)?.detail === 'drawer' && (
-                  <ChangelogDrawer
-                    source={changelogSourceOf(detail.data)}
-                    onClose={() => setDetail(null)}
-                  />
-                )}
                 {/* 拖拽幽灵(06):只读副本跟随光标,原位降级为占位;复用 <Icon overlay> 保持视觉一致。
                     置于 IconDataProvider 内以拿到 quotes/weather 上下文(React 上下文随 React 树,
                     不随 portal DOM)。dropAnimation=null 让落定即隐藏,避免与乐观重排动画叠加抖动。 */}

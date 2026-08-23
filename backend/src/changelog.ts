@@ -58,13 +58,16 @@ export interface ChangelogDeps {
   fetchMarkdown: () => Promise<string>
   /** 译制单个版本块。返回 null = 拒绝(如未配置 Key);抛错 = 译制失败。 */
   translate: (versionBlock: string) => Promise<string | null>
-  /** 最新版 npm 发布时间(ISO)。失败由实现方吞掉返回 null,不阻塞主链路。 */
-  fetchReleasedAt: () => Promise<string | null>
+  /** npm registry 全量发布信息:dist-tags.latest + time 全表(版本号→ISO,大 tile
+   *  版本榜单一行一版本带时间)。失败由实现方吞掉返回 null,不阻塞主链路。 */
+  fetchReleaseInfo: () => Promise<{ latest: string | null; times: Record<string, string> } | null>
 }
 
 export interface Snapshot {
   markdown: string
   releasedAt: string | null
+  /** 每版本发布时间(版本号→ISO);npm 失败/版本号错位为空条目,前端行级降级不显示。 */
+  releaseTimes: Record<string, string>
   translatedVersions: string[]
   /** 供按需补译免重切 */
   blocks: Blocks
@@ -100,7 +103,9 @@ export class ChangelogService {
       .executeTakeFirst()
     if (!row) return
     const blocks = splitBlocks(row.raw_markdown)
-    this.memory = this.assemble(blocks, await this.loadTranslations(blocks), row.released_at)
+    // releaseTimes 不落库:恢复镜像时置空表,启动紧跟的 refreshQuietly(见调度器)拉 npm 补齐,
+    // 缺失窗口仅重启后数秒——省一列迁移与快照表读写。
+    this.memory = this.assemble(blocks, await this.loadTranslations(blocks), row.released_at, {})
   }
 
   /** 定时/预热刷新:拉原文 → 只译最近 N 版中缺失的块 → 快照落库 → 换内存镜像。拉取失败上抛,由调度方决定降级。 */
@@ -112,12 +117,12 @@ export class ChangelogService {
   async translateVersions(titles: string[]): Promise<Snapshot> {
     return this.exclusive(async () => {
       if (!this.memory) await this.doRefresh() // 冷启动兜底(锁内,不可走加锁版防自锁)
-      const { blocks, releasedAt } = this.memory!
+      const { blocks, releasedAt, releaseTimes } = this.memory!
       const byHash = await this.loadTranslations(blocks)
       for (const b of blocks.blocks) {
         if (titles.includes(b.title)) await this.translateIfMissing(b, byHash)
       }
-      this.memory = this.assemble(blocks, byHash, releasedAt)
+      this.memory = this.assemble(blocks, byHash, releasedAt, releaseTimes)
       return this.memory
     })
   }
@@ -129,7 +134,11 @@ export class ChangelogService {
     for (const b of blocks.blocks.slice(0, this.translateRecent)) {
       await this.translateIfMissing(b, byHash)
     }
-    const releasedAt = await this.deps.fetchReleasedAt()
+    const info = await this.deps.fetchReleaseInfo()
+    // 空串守卫(npm time 条目可能为空串):releasedAt 语义 = ISO 或显式 null,不透 ''
+    const latestTime = info?.latest ? (info.times[info.latest] ?? '') : ''
+    const releasedAt = latestTime.trim() ? latestTime : null
+    const releaseTimes = info?.times ?? {}
     const fetchedAt = nowIso()
     await this.db
       .insertInto('changelog_snapshots')
@@ -140,7 +149,7 @@ export class ChangelogService {
           .doUpdateSet({ raw_markdown: raw, released_at: releasedAt, fetched_at: fetchedAt }),
       )
       .execute()
-    this.memory = this.assemble(blocks, byHash, releasedAt)
+    this.memory = this.assemble(blocks, byHash, releasedAt, releaseTimes)
   }
 
   private exclusive<T>(fn: () => Promise<T>): Promise<T> {
@@ -186,7 +195,12 @@ export class ChangelogService {
   }
 
   /** 拼装:前缀 + 每块取译文(哈希命中)或原文。translatedVersions 与拼装同源。 */
-  private assemble(blocks: Blocks, byHash: Map<string, string>, releasedAt: string | null): Snapshot {
+  private assemble(
+    blocks: Blocks,
+    byHash: Map<string, string>,
+    releasedAt: string | null,
+    releaseTimes: Record<string, string>,
+  ): Snapshot {
     let markdown = blocks.prefix
     const translatedVersions: string[] = []
     for (const b of blocks.blocks) {
@@ -198,7 +212,7 @@ export class ChangelogService {
         markdown += b.raw
       }
     }
-    return { markdown, releasedAt, translatedVersions, blocks }
+    return { markdown, releasedAt, releaseTimes, translatedVersions, blocks }
   }
 }
 
@@ -215,6 +229,7 @@ export function changelogRoutes(services: ChangelogServices): Hono<AuthEnv> {
   const toResponse = (s: Snapshot) => ({
     markdown: s.markdown,
     releasedAt: s.releasedAt, // 失败时显式 null(输出不省略),前端日期行降级「—」
+    releaseTimes: s.releaseTimes, // 空表 = npm 失败/重启恢复窗口,前端版本行时间降级不显示
     translatedVersions: s.translatedVersions,
   })
   return new Hono<AuthEnv>()
@@ -284,7 +299,7 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
   const models = modelCandidates()
   return {
     fetchMarkdown: () => fetchText(def.changelogUrl, 60_000),
-    fetchReleasedAt: async () => {
+    fetchReleaseInfo: async () => {
       try {
         const root = JSON.parse(
           await fetchText(`https://registry.npmjs.org/${def.npmPackage}`, 30_000),
@@ -292,11 +307,9 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
           'dist-tags'?: { latest?: string }
           time?: Record<string, string>
         }
-        const latest = root['dist-tags']?.latest
-        const date = latest ? root.time?.[latest] : undefined
-        return date?.trim() ? date : null
+        return { latest: root['dist-tags']?.latest ?? null, times: root.time ?? {} }
       } catch (e) {
-        console.warn('拉取 npm 发布日期失败,日期行降级:', e)
+        console.warn('拉取 npm 发布信息失败,版本时间降级:', e)
         return null
       }
     },

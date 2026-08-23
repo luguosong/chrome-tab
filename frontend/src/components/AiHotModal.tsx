@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useAiHot } from '../hooks/useAiHot'
-import { timeAgo } from '../lib/aihot'
+import { timeAgo } from '../lib/timeAgo'
 import { extractString } from '../lib/iconData'
 import type { Icon } from '../lib/types'
 

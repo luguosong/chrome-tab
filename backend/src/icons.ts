@@ -18,7 +18,7 @@ export const CAPACITY_CELLS = 81
  * 跨格类型格数(ADR-0021,对齐前端注册表 size):AIHOT 3×2=6 格,其余缺省 1 格。
  * 容量口径唯一来源——requireCapacity/dissolve/POST/move/blob 全量替换共用。
  */
-export const TYPE_SPANS: Partial<Record<IconType, number>> = { AIHOT: 6 }
+export const TYPE_SPANS: Partial<Record<IconType, number>> = { AIHOT: 6, CHANGELOG: 6 }
 
 /** 类型格数:未声明 = 1。 */
 export const spanOf = (type: string): number =>

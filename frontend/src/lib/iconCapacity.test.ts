@@ -6,15 +6,16 @@ import { iconCells } from './iconTypeRegistry'
 // 后端单一事实源为 CAPACITY_CELLS(81),前端此处镜像该约定。
 // ADR-0021:图标默认 1 格,类型可声明 size 跨格(AIHOT 3×2 = 6 格)。
 
-describe('iconCells — 类型格数(ADR-0021)', () => {
+describe('iconCells — 类型格数(ADR-0021/0022)', () => {
   it('未声明 size 的类型恒 1 格(nav/stock/…)', () => {
-    for (const t of ['nav', 'stock', 'changelog', 'weather', 'group'] as const) {
+    for (const t of ['nav', 'stock', 'weather', 'group'] as const) {
       expect(iconCells(t)).toBe(1)
     }
   })
 
-  it('aihot 声明 3×2 = 6 格', () => {
+  it('跨格类型 3×2 = 6 格(aihot / changelog,ADR-0022 changelog 为第二消费者)', () => {
     expect(iconCells('aihot')).toBe(6)
+    expect(iconCells('changelog')).toBe(6)
   })
 })
 

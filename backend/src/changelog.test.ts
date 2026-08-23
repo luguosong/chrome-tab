@@ -39,7 +39,7 @@ function makeService(
   const defaults: ChangelogDeps = {
     fetchMarkdown: async () => RAW,
     translate: async (b) => TRANSLATOR(b),
-    fetchReleasedAt: async () => null,
+    fetchReleaseInfo: async () => null,
   }
   return new ChangelogService(db, source, { ...defaults, ...deps }, translateRecent)
 }
@@ -247,10 +247,15 @@ describe('多源(ADR-0020:每源一 Service,快照按源分行;译文按块哈�
 
   it('双源同库:快照各占一行互不覆盖,releasedAt 各自独立', async () => {
     const db = openDb(':memory:').db
-    const a = makeService(db, { fetchReleasedAt: async () => '2026-08-01T00:00:00.000Z' })
+    const a = makeService(db, {
+      fetchReleaseInfo: async () => ({ latest: '3.0', times: { '3.0': '2026-08-01T00:00:00.000Z' } }),
+    })
     const b = makeService(
       db,
-      { fetchMarkdown: async () => RAW_B, fetchReleasedAt: async () => '2026-08-05T00:00:00.000Z' },
+      {
+        fetchMarkdown: async () => RAW_B,
+        fetchReleaseInfo: async () => ({ latest: '3.0', times: { '3.0': '2026-08-05T00:00:00.000Z' } }),
+      },
       'matt-skills',
     )
 
@@ -448,6 +453,7 @@ describe('GET /api/changelog', () => {
     await expect(res.json()).resolves.toEqual({
       markdown: '# Changelog\n\n## 3.0\n- 三\n\n## 2.0\n- 二\n\n## 1.0\n- one\n',
       releasedAt: null, // npm 拉失败 → 显式 null(输出不省略),前端日期行降级「—」
+      releaseTimes: {},
       translatedVersions: ['3.0', '2.0'],
     })
   })
@@ -524,11 +530,52 @@ describe('POST /api/changelog/translate(按需补译,ADR-0017)', () => {
 describe('releasedAt 成功路径(npm dist-tags.latest time 条目透传)', () => {
   it('200:ISO 串原样下发(非 null),失败路径才显式 null', async () => {
     const db = openDb(':memory:').db
-    const { req, login } = await setupApp(makeService(db, { fetchReleasedAt: async () => '2026-08-01T00:00:00.000Z' }))
+    const { req, login } = await setupApp(
+      makeService(db, {
+        fetchReleaseInfo: async () => ({ latest: '3.0', times: { '3.0': '2026-08-01T00:00:00.000Z' } }),
+      }),
+    )
     const res = await req('GET', '/api/changelog', { cookie: await login() })
     expect(res.status).toBe(200)
     const json = (await res.json()) as { releasedAt: string | null }
     expect(json.releasedAt).toBe('2026-08-01T00:00:00.000Z')
+  })
+})
+
+describe('releaseTimes(每版本 npm 发布时间:大 tile 版本榜单一行一版本带时间)', () => {
+  it('200:time 全表映射原样下发,releasedAt = times[latest]', async () => {
+    const db = openDb(':memory:').db
+    const times = { '3.0': '2026-08-01T00:00:00.000Z', '2.0': '2026-07-01T00:00:00.000Z' }
+    const { req, login } = await setupApp(
+      makeService(db, { fetchReleaseInfo: async () => ({ latest: '3.0', times }) }),
+    )
+    const res = await req('GET', '/api/changelog', { cookie: await login() })
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as { releasedAt: string | null; releaseTimes: Record<string, string> }
+    expect(json.releasedAt).toBe('2026-08-01T00:00:00.000Z')
+    expect(json.releaseTimes).toEqual(times)
+  })
+
+  it('npm 失败:null 降级 → 空表 + releasedAt null,主链路照常 200', async () => {
+    const db = openDb(':memory:').db
+    const { req, login } = await setupApp(makeService(db, { fetchReleaseInfo: async () => null }))
+    const res = await req('GET', '/api/changelog', { cookie: await login() })
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as { releasedAt: string | null; releaseTimes: Record<string, string> }
+    expect(json.releasedAt).toBeNull()
+    expect(json.releaseTimes).toEqual({})
+  })
+
+  it('time[latest] 为空串:releasedAt 显式 null(不透 ""),times 原样下发', async () => {
+    const db = openDb(':memory:').db
+    const { req, login } = await setupApp(
+      makeService(db, { fetchReleaseInfo: async () => ({ latest: '3.0', times: { '3.0': '' } }) }),
+    )
+    const res = await req('GET', '/api/changelog', { cookie: await login() })
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as { releasedAt: string | null; releaseTimes: Record<string, string> }
+    expect(json.releasedAt).toBeNull()
+    expect(json.releaseTimes).toEqual({ '3.0': '' })
   })
 })
 

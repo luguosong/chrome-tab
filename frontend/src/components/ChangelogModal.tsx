@@ -1,23 +1,25 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { getChangelogSource, type ChangelogSourceId } from 'chrome-tab-shared'
 import { useChangelog, useTranslateVersions } from '../hooks/useChangelog'
 import { inline } from '../lib/changelogParser'
 
 /**
- * 更新日志详情:居中 Dialog(由底部 Drawer 调整为居中浮层,消除「沉底」感)。
- *
- * 按打开图标的源(source prop,ADR-0020)经 useChangelog 拉取(1h staleTime,与网格图标
- * 共享同源 queryKey 缓存),展示完整版本列表(纵向滚动)。真实 CHANGELOG 无日期、无 ###
- * 小节,条目直接挂在版本下,故按「发布时间线」呈现:左侧连续细轨 + 每版本一个节点,最新版
- * accent 高亮 + 「最新」药丸,旧版弱化。未译版本(不在 translatedVersions 内)显示「翻译」
- * 按钮 → POST /translate 按需补译,译毕后端持久化、invalidate 重拉即变中文(ADR-0017)。
+ * 更新日志详情 Modal(ADR-0022,原 ChangelogDrawer 改造:与 AiHotModal/WeatherModal
+ * 同范式的居中玻璃面板;检索框随之移除——版本列表纵向滚动即达,入口收窄为 tile 标头
+ * 「更多」按钮)。按打开图标的源(source prop,ADR-0020)经 useChangelog 拉取(1h
+ * staleTime,与网格图标共享同源 queryKey 缓存),展示完整版本列表(纵向滚动)。
+ * 真实 CHANGELOG 无日期、无 ### 小节,条目直接挂在版本下,故按「发布时间线」呈现:
+ * 左侧连续细轨 + 每版本一个节点,最新版 accent 高亮 + 「最新」药丸,旧版弱化;每版本
+ * 日期 = npm releaseTimes 全表(ADR-0022)绝对日期,失败/错位降级不显示。
+ * 未译版本(不在 translatedVersions 内)显示「翻译」按钮 → POST /translate 按需补译,
+ * 译毕后端持久化、invalidate 重拉即变中文(ADR-0017)。
  *
  * 刷新失败降级(spec user story 15):query error 非空 → 显示重试按钮,点击重拉。
  *
- * 容器:fixed 居中、玻璃面板、关闭按钮;Esc / 点遮罩关闭。入场:fade-in 遮罩 + pop-in 面板
- * (reduced-motion 下不动画)。编辑态进入时由父组件(DashboardPage)onClose。
+ * 容器:fixed 居中、玻璃面板、关闭按钮;Esc / 点遮罩关闭。入场:fade-in 遮罩 + pop-in
+ * 面板(reduced-motion 下不动画)。编辑态进入时由父组件(DashboardPage)onClose。
  */
-export default function ChangelogDrawer({
+export default function ChangelogModal({
   source,
   onClose,
 }: {
@@ -27,9 +29,9 @@ export default function ChangelogDrawer({
   const sourceLabel = getChangelogSource(source).label
   const { data, isError, refetch } = useChangelog(source)
   const translateMut = useTranslateVersions(source)
-  const [q, setQ] = useState('')
 
   const versions = data?.versions ?? []
+  const times = data?.releaseTimes ?? {}
   const latest = versions[0]?.title
   const translated = useMemo(() => new Set(data?.translatedVersions ?? []), [data?.translatedVersions])
 
@@ -41,17 +43,6 @@ export default function ChangelogDrawer({
     const done = new Set(translateMut.data.translatedVersions)
     return translateMut.variables.filter((v) => !done.has(v))
   }, [translateMut.isPending, translateMut.data, translateMut.variables])
-
-  // 过滤:命中版本号 OR 任一条目文本(真实诉求是搜某个功能/改动,而非版本号)
-  const shown = useMemo(() => {
-    const kw = q.trim().toLowerCase()
-    if (!kw) return versions
-    return versions.filter((v) => {
-      if (v.title.toLowerCase().includes(kw)) return true
-      const items = [...v.top, ...v.sections.flatMap((s) => s.items)]
-      return items.some((it) => it.toLowerCase().includes(kw))
-    })
-  }, [q, versions])
 
   // Esc 关闭
   useEffect(() => {
@@ -91,7 +82,7 @@ export default function ChangelogDrawer({
           </button>
         </div>
 
-        {/* 失败态 / 过滤 + 列表 */}
+        {/* 失败态 + 列表 */}
         <div className="px-6">
           {isError ? (
             <div className="flex items-center gap-3 py-6">
@@ -106,42 +97,6 @@ export default function ChangelogDrawer({
             </div>
           ) : (
             <>
-              {/* 检索框 */}
-              <div className="relative my-3">
-                <svg
-                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/50"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <circle cx="11" cy="11" r="7" />
-                  <path d="m21 21-4.3-4.3" />
-                </svg>
-                <input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  autoFocus
-                  placeholder="过滤更新内容…"
-                  className="w-full pl-9 pr-9 py-2 rounded-lg bg-white/20 text-white placeholder-white/60 text-sm outline-none focus:ring-2 focus:ring-accent"
-                />
-                {q && (
-                  <button
-                    type="button"
-                    onClick={() => setQ('')}
-                    aria-label="清空"
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white/25 text-white/80 hover:bg-white/45 flex items-center justify-center text-xs leading-none"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-
-              {q.trim() && <p className="mb-1.5 text-xs text-white/45">{shown.length} 个结果</p>}
-
               {(translateMut.isError || translateFailed.length > 0) && (
                 <p className="mb-1.5 text-xs text-red-300/90">
                   {translateMut.isError
@@ -151,10 +106,8 @@ export default function ChangelogDrawer({
               )}
 
               <div className="max-h-[60vh] overflow-auto pr-1.5">
-                {shown.length === 0 && (
-                  <div className="text-white/60 text-sm py-4">
-                    {versions.length === 0 ? '加载中…' : `没有匹配「${q.trim()}」的版本`}
-                  </div>
+                {versions.length === 0 && (
+                  <div className="text-white/60 text-sm py-4">加载中…</div>
                 )}
 
                 <ol className="relative pl-6 [&_a]:text-accent [&_a]:underline">
@@ -163,12 +116,13 @@ export default function ChangelogDrawer({
                     className="absolute left-[8px] top-0 bottom-0 w-px bg-white/15"
                     aria-hidden="true"
                   />
-                  {shown.map((v, i) => {
+                  {versions.map((v, i) => {
                     const isLatest = !!latest && v.title === latest
                     // top(无小节条目)在前;命名小节(若未来出现)按名渲染
                     const groups: { name?: string; items: string[] }[] = []
                     if (v.top.length) groups.push({ items: v.top })
                     for (const s of v.sections) groups.push({ name: s.name, items: s.items })
+                    const date = times[v.title]?.slice(0, 10)
                     return (
                       <li key={i} className="relative mb-4 last:mb-0">
                         {/* 时间线节点:最新版实心 accent,旧版弱化 */}
@@ -179,7 +133,7 @@ export default function ChangelogDrawer({
                           }
                           aria-hidden="true"
                         />
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <h3
                             className={
                               'font-mono text-[15px] ' +
@@ -187,6 +141,7 @@ export default function ChangelogDrawer({
                             }
                             dangerouslySetInnerHTML={{ __html: inline(v.title) }}
                           />
+                          {date && <span className="font-mono text-[11px] text-white/40">{date}</span>}
                           {isLatest && (
                             <span className="rounded-full bg-accent/20 px-2 py-0.5 text-[10px] font-medium leading-none text-accent">
                               最新

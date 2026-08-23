@@ -14,8 +14,8 @@ import { DEFAULT_CHANGELOG_SOURCE } from 'chrome-tab-shared'
  */
 export type IconTypeKind = 'base' | 'extension' | 'group'
 
-/** 详情容器形态(stock=Modal / changelog=底部 Drawer / nav=无)。10 ticket 实现渲染。 */
-export type DetailContainer = 'none' | 'modal' | 'drawer'
+/** 详情容器形态(stock/weather/changelog/aihot=Modal / nav=无;ADR-0022 起无 drawer)。 */
+export type DetailContainer = 'none' | 'modal'
 
 /** 画格跨度(ADR-0021):w 列 × h 行,缺省 1×1。渲染层据此 span,容量按 w×h 计。 */
 export type IconSpan = { w: number; h: number }
@@ -155,14 +155,16 @@ export const STOCK_DEF: IconTypeDefinition = {
 }
 
 /** 更新日志:扩展类型,非单例(ADR-0020),data={source}(存量 null 兜底归默认源)。
- *  网格显示最新版本号+发布日期,名称行取源 label;详情=底部 Drawer(ADR-0016)。 */
+ *  网格渲染 3×2 大 tile(ADR-0022:跨格第二消费者)——标头(源名 + 榜首鲜度 + 「更多」
+ *  按钮)+ 版本滚动榜单(一行一版本,详见 ChangelogIcon);详情=Modal(ChangelogModal)。 */
 export const CHANGELOG_DEF: IconTypeDefinition = {
   id: 'changelog',
   label: '更新日志',
   kind: 'extension',
   singleton: false,
   refresh: { kind: 'changelog' },
-  detail: 'drawer',
+  detail: 'modal',
+  size: { w: 3, h: 2 },
   editor: [
     {
       name: 'source',

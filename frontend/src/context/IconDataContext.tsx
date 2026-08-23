@@ -14,12 +14,12 @@ import type { Icon } from '../lib/types'
  * 的 location → 一次批量 /api/weather → 下发,避免 N 个图标各自 N×3 请求。
  *
  * changelog 不在此层:多源化(ADR-0020)后无批量红利(每源一请求),ChangelogIconBody /
- * ChangelogDrawer 各自 useChangelog(source),同源 queryKey 缓存天然去重——还免掉
+ * ChangelogModal 各自 useChangelog(source),同源 queryKey 缓存天然去重——还免掉
  * 无 changelog 图标时的恒空请求。
  *
  * 下发 error 与 refetch 是为详情面板的「刷新失败,重试」(spec user story 15):
  * stock Modal 用 quotesError/refetchQuotes,weather Modal 用 weatherError/refetchWeather
- * (changelog Drawer 自持 query,见 ChangelogDrawer)。
+ * (changelog Modal 自持 query,见 ChangelogModal)。
  */
 interface IconDataValue {
   quotes: Record<string, Quote | null>

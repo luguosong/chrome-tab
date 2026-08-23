@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { timeAgo } from './aihot'
+import { timeAgo } from './timeAgo'
 
-// timeAgo 是 AI 热点图标/Modal 共用的唯一时长口径(纯函数,注入 now 可直测)。
+// timeAgo 是 aihot 榜单鲜度与 changelog 版本榜共用的时长口径(ADR-0022 移至中立位)(纯函数,注入 now 可直测)。
 const NOW = Date.parse('2026-08-23T12:00:00Z')
 
 describe('timeAgo', () => {

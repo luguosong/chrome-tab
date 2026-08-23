@@ -32,10 +32,12 @@ import { ApiError } from '../api/client'
  *     自行组装同款 Tile(块内主体 / 数据行,见 Tile.tsx),本组件不再包玻璃卡
  *
  * 点击行为(按 detail 字段派发 —— ADR-0001 契约:容器形态由类型定义声明,
- * 新增复用 modal/drawer 的类型无需改本组件):
+ * 新增复用 modal 的类型无需改本组件):
  *   - 编辑模式:不触发任何详情/跳转(角标操作优先,spec user story 29)
  *   - detail='none':nav 渲染为 <a>(新标签打开目标 URL,spec user story 13)
- *   - detail='modal'/'drawer':查看态点击 → onOpenDetail(icon),父组件按 detail 渲染面板
+ *   - detail='modal':单格类型查看态点击 → onOpenDetail(icon),父组件按 detail 渲染面板;
+ *     跨格大 tile(aihot/changelog,ADR-0022)整块点击无操作,openDetail 下发给
+ *     body 的「更多」按钮直调——详情唯一入口
  *
  * 拖拽(06):本组件是网格画格(grid item),故 useSortable 直接挂在此处。
  * 查看模式与编辑模式均可拖。激活策略由 DashboardPage 的 Mouse/TouchSensor 决定(鼠标移动即拖、
@@ -112,18 +114,18 @@ export default function Icon({
   //   - group:点开分组弹层(票 08)——任意模式(编辑态也要先开弹层才能组内排序)
   //   - 其余类型:编辑模式一律不触发;查看模式按 detail 字段
   //     - detail='none':nav 渲染为 <a> 当前标签打开(保留原生中键/右键菜单)
-  //     - detail='modal'/'drawer':点击 → onOpenDetail,由父组件按 detail 渲染对应面板
+  //     - detail='modal':查看态开详情;单格类型 = 整块点击,跨格大 tile = 块内
+  //       「更多」按钮直调(ADR-0022,openDetail 下发给 body),整块点击无操作
   const isNavLink = icon.type === 'nav' && !editing
   const Tag = isNavLink ? 'a' : 'div'
   const linkProps = isNavLink
     ? { href: url }
     : {}
-  const hasPanel = def?.detail === 'modal' || def?.detail === 'drawer'
+  const hasPanel = def?.detail === 'modal'
   // 组图标点击 = 开弹层(票 08):任意模式(编辑态开弹层才能组内排序),不与编辑态互斥
   const onGroupOpen = icon.type === 'group' && onOpenGroup ? () => onOpenGroup(icon) : undefined
-  const onClick =
-    onGroupOpen ??
-    (!editing && hasPanel && onOpenDetail ? () => onOpenDetail(icon) : undefined)
+  const openDetail = !editing && hasPanel && onOpenDetail ? () => onOpenDetail(icon) : undefined
+  const onClick = onGroupOpen ?? (def?.size ? undefined : openDetail)
 
   const interactive = isNavLink || onClick !== undefined
 
@@ -158,9 +160,9 @@ export default function Icon({
            名称外置下方。点组打开弹层看全部成员 = 票 08。 */
         <GroupBody icon={icon} overlay={overlay} />
       ) : icon.type === 'changelog' ? (
-        <ChangelogIconBody icon={icon} overlay={overlay} />
+        <ChangelogIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
       ) : icon.type === 'aihot' ? (
-        <AiHotIconBody icon={icon} overlay={overlay} />
+        <AiHotIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
       ) : (
         <>
           {/* nav:裸 favicon 直出(ADR-0015 注记 2026-08-23c,回归 ADR-0013):Tile bare
