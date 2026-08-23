@@ -1,6 +1,18 @@
 # {$DOMAIN} 由 compose 注入环境变量。
-# Caddy 自动签发并续期 Let's Encrypt 证书（需域名 A 记录指向本机、80/443 公网可达）。
+# 双 CA 签发:ZeroSSL 优先(需 email)、Let's Encrypt 兜底(两者限额池独立)——
+# LE 单 CA 有 5 张/周/exact-set 限额,发布频繁耗尽后全站 TLS 不可用(2026-08-22 事故),
+# 证书持久化在 compose 的 caddy_data 卷,recreate 不再重签。
+{
+    email 1054595718@qq.com
+}
+
 {$DOMAIN} {
+    tls {
+        issuer acme {
+            dir https://acme.zerossl.com/v2/D90B
+        }
+        issuer acme
+    }
     # API 反代到后端容器
     handle /api/* {
         reverse_proxy backend:8080

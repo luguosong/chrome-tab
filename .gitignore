@@ -1,7 +1,6 @@
 # deps & build
 node_modules/
 dist/
-target/
 *.log
 
 # 运行时 SQLite 数据(backend Node 服务默认 DB_PATH 落点)
@@ -17,10 +16,6 @@ backend/data/
 .idea/
 .vscode/
 *.iml
-.classpath
-.factorypath
-.project
-.settings/
 
 # 本地构建/工具残留(vite 缓存、损坏的 node_modules 副本、增量构建信息、根 node_modules 空文件)
 .vite/

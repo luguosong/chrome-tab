@@ -11,6 +11,8 @@ services:
       - "443:443"
     environment:
       DOMAIN: ${DOMAIN}
+    volumes:
+      - caddy_data:/data
     depends_on:
       - backend
     restart: unless-stopped
@@ -31,3 +33,6 @@ services:
     expose:
       - "8080"
     restart: unless-stopped
+
+volumes:
+  caddy_data:

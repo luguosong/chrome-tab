@@ -1,5 +1,5 @@
-# Node 后端栈:caddy(前端构建 + TLS 反代,根 Dockerfile 零改动)+ Node backend,无 mysql。
-# 用途:阶段 A 骨架验证(票 02)、服务器演练(票 11);切换日(票 12)按此形态改写 prod compose。
+# Node 后端栈:caddy(前端构建 + TLS 反代,根 Dockerfile 零改动)+ Node backend。
+# 用途:本地以容器形态起整套栈(8081/8082 端口映射,不占线上 80/443);线上用 docker-compose.prod.yml。
 # 注意:backend build context 必须是仓库根(pnpm workspace 的 lockfile 与包清单在根,
 # 「backend/ 路径」由 dockerfile 路径沿用),caddy 服务定义与 prod 零差异(端口映射除外)。
 services:
@@ -13,6 +13,8 @@ services:
       - "8443:443"
     environment:
       DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - caddy_data:/data
     depends_on:
       - backend
     restart: unless-stopped
@@ -24,3 +26,6 @@ services:
     expose:
       - "8080"
     restart: unless-stopped
+
+volumes:
+  caddy_data:

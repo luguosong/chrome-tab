@@ -2,6 +2,8 @@
 
 个人浏览器新标签页:背景壁纸 + 时钟 + 搜索框 + 用户可自由编排的图标网格,图标分布在多个页面间。
 
+技术栈:前端 React + Vite,后端 Hono/Node + SQLite 单文件(WAL),前后端共享契约类型(pnpm workspace,ADR-0018);部署为 Caddy + backend 两容器(ADR-0019,Java + MySQL 旧栈已下线)。
+
 ## Language
 
 **图标 (Icon)**:

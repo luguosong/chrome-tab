@@ -1,8 +1,7 @@
-# 宿主依赖/构建产物一律排除：容器内自行 npm ci / mvn，
+# 宿主依赖/构建产物一律排除：容器内自行 pnpm install，
 # 避免宿主（如 Windows）的 node_modules 覆盖容器内产物
 **/node_modules
 **/dist
-**/target
 
 # 无关项
 .git
