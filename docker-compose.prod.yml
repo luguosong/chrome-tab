@@ -17,6 +17,16 @@ services:
       - backend
     restart: unless-stopped
 
+  # 译制外呼代理(2026-08-23):aihubmix/raw.githubusercontent 被 GFW 阻断,经 mihomo 出境。
+  # 配置 ./mihomo/config.yaml(含订阅 token,只在服务器,不进 git)。
+  mihomo:
+    image: metacubex/mihomo:latest
+    volumes:
+      - ./mihomo:/root/.config/mihomo
+    expose:
+      - "7890"
+    restart: unless-stopped
+
   backend:
     build:
       context: . # pnpm workspace:lockfile 与全部包清单必须在 context 内(票 02)
@@ -28,6 +38,10 @@ services:
       AIHUBMIX_API_KEY: ${AIHUBMIX_API_KEY}
       QWEATHER_API_KEY: ${QWEATHER_API_KEY}
       QWEATHER_API_HOST: ${QWEATHER_API_HOST}
+      # Node24 原生 fetch 默认忽略代理变量,须开此开关(译制/拉原文走 mihomo,qweather/npm 直连)
+      NODE_USE_ENV_PROXY: "1"
+      HTTPS_PROXY: http://mihomo:7890
+      NO_PROXY: localhost,127.0.0.1,.qweatherapi.com,registry.npmjs.org
     volumes:
       - ./backend/data:/app/backend/data
     expose:

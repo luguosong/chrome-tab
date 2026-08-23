@@ -35,3 +35,6 @@ node_modules.root-broken/
 # 本地诊断/复现脚本（依赖 npx 缓存 playwright、含机器相关绝对路径）
 frontend/scripts/clip-repro.mjs
 frontend/scripts/scale-repro.mjs
+
+# 译制代理 mihomo 本地配置(含订阅 token,服务器版不进 git)
+mihomo/
