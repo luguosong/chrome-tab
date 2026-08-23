@@ -4,9 +4,13 @@ import {
   GRID_COLUMNS,
   GRID_ROWS,
   GROUP_PAD_PX,
+  LABEL_GAP_PX,
+  LABEL_LINE_HEIGHT,
+  TILE_FONT_TIERS,
   faviconPx,
   iconCellGeometry,
   labelBlockPx,
+  tileFont,
 } from './iconLayout'
 
 // ADR-0016 单档化:fav = FAV_BASE_PX × iconScale,无档位、不随 gap。
@@ -28,6 +32,40 @@ describe('固定网格', () => {
   it('8×8', () => {
     expect(GRID_COLUMNS).toBe(8)
     expect(GRID_ROWS).toBe(8)
+  })
+})
+
+// 「上块下字」字号档(ADR-0016 注记 e):全类型统一主/次两档,长文本随块宽
+// (cqw 容器查询单位)收缩不溢出。tileFont 是档位的唯一公式来源(TilePrimary/
+// TileSecondary 消费),调字号只改 TILE_FONT_TIERS 一处。
+describe('tileFont', () => {
+  it('主/次两档:px 随 iconScale 同比缩放,cqw 档位钳制块宽占比', () => {
+    expect(TILE_FONT_TIERS.primary).toEqual({ px: 14, cqw: 24 })
+    expect(TILE_FONT_TIERS.secondary).toEqual({ px: 12, cqw: 20 })
+  })
+
+  it('默认档 scale=1 → min(基准px, 档位cqw)', () => {
+    expect(tileFont(1, 'primary')).toBe('min(14px, 24cqw)')
+    expect(tileFont(1, 'secondary')).toBe('min(12px, 20cqw)')
+  })
+
+  it('iconScale 同比缩放 px 档(cqw 档不变——块宽约束与缩放无关)', () => {
+    expect(tileFont(1.5, 'primary')).toBe('min(21px, 24cqw)')
+    expect(tileFont(2, 'secondary')).toBe('min(24px, 20cqw)')
+  })
+})
+
+// 常数同源:名称行行高与画格 gap 此前是 iconLayout 硬编码镜像 Icon.tsx 的
+// Tailwind 默认(leading 1.5 / gap-1),改样式侧会静默错位——现在同引一份导出。
+describe('labelBlockPx 常数同源', () => {
+  it('行高 1.5、gap 4,与 IconLabel/画格引用同一常量', () => {
+    expect(LABEL_LINE_HEIGHT).toBe(1.5)
+    expect(LABEL_GAP_PX).toBe(4)
+    expect(labelBlockPx(true, 12)).toBe(Math.ceil(12 * LABEL_LINE_HEIGHT) + LABEL_GAP_PX)
+  })
+
+  it('名称隐藏 → 0(行开销不含 gap)', () => {
+    expect(labelBlockPx(false, 12)).toBe(0)
   })
 })
 

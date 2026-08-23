@@ -1,50 +1,25 @@
-import { useChangelog } from '../hooks/useChangelog'
-import { useLayoutSettings } from '../context/LayoutSettingsContext'
-import { faviconPx } from '../lib/iconLayout'
+import { useIconData } from '../context/IconDataContext'
 import type { Icon } from '../lib/types'
-import { IconLabel, TileFrame } from './Icon'
+import Tile, { TilePrimary, TileSecondary } from './Tile'
 
 /**
- * 更新日志图标的专属网格渲染(单例;ADR-0016 单档;注记 2026-08-23b 统一「上块下字」
- * 结构,c 反转块内取舍):块内直接呈现「最后更新版本 + 发布日期」两行(用户要求,
- * 替换 23b 的循环箭头装饰)——版本号 mono accent 为视觉主体,日期小一号次级行;
- * 下方名称行「Claude Code」与其他类型的名称行语义一致(块内 = 现在的状态,
- * 下方 = 这是什么)。完整版本列表与译文走底部 Drawer(ChangelogDrawer)。
- * 数据直接订阅 useChangelog(与 IconDataContext 同 queryKey,命中缓存零额外请求,
- * 同 GroupBody 用 useConfig 的先例);releasedAt = 后端 npm registry 代理的最新版
- * 发布时间(ADR-0016,标准 ISO,取月-日——年内更新频繁,年份归 Drawer),失败/无数据
- * 降级 —。版本行字号受块宽钳制(min(px, 20cqw)),块是 inline-size 容器。
+ * 更新日志图标的专属网格渲染(单例;ADR-0016 单档;注记 2026-08-23c 块内两行):
+ * 块内 = 「最后更新版本(mono accent 主体)+ 发布日期(次级行,ISO 月-日,年份归
+ * Drawer)」——当前状态;下方名称行「Claude Code」= 这是什么。完整版本列表与译文走
+ * 底部 Drawer(ChangelogDrawer)。数据走 IconDataContext 集中下发(单例集中拉取的
+ * 同一份 query,不再各自订阅 useChangelog);releasedAt = 后端 npm registry 代理的
+ * 最新版发布时间(ADR-0016),失败/无数据降级 —。
+ * 「上块下字」组装与字号档(ADR-0016 注记 e)归 Tile。
  */
 export default function ChangelogIconBody({ icon: _icon, overlay = false }: { icon: Icon; overlay?: boolean }) {
-  const { iconScale } = useLayoutSettings()
-  const { data } = useChangelog()
-  const px = (n: number) => n * iconScale
-  const latest = data?.versions[0]?.title ?? null
-  const released = data?.releasedAt ?? null
+  const { changelog, changelogReleasedAt } = useIconData()
+  const latest = changelog?.[0]?.title ?? null
+  const released = changelogReleasedAt
 
   return (
-    <>
-      <TileFrame
-        favPx={faviconPx(iconScale)}
-        overlay={overlay}
-        className="flex-col gap-[4%] [container-type:inline-size]"
-      >
-        <span
-          className="font-mono text-accent leading-none max-w-full truncate"
-          style={{ fontSize: `min(${px(13)}px, 24cqw)` }}
-        >
-          {latest ?? '—'}
-        </span>
-        {released && (
-          <span
-            className="text-white/70 leading-none"
-            style={{ fontSize: `min(${px(12)}px, 20cqw)` }}
-          >
-            {released.slice(5, 10)}
-          </span>
-        )}
-      </TileFrame>
-      <IconLabel>Claude Code</IconLabel>
-    </>
+    <Tile label="Claude Code" overlay={overlay}>
+      <TilePrimary className="font-mono text-accent">{latest ?? '—'}</TilePrimary>
+      {released && <TileSecondary className="text-white/70">{released.slice(5, 10)}</TileSecondary>}
+    </Tile>
   )
 }

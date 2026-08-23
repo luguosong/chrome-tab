@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { get, type EditorField, type IconTypeDefinition } from '../lib/iconTypeRegistry'
@@ -6,11 +6,11 @@ import StockIconBody from './StockIcon'
 import WeatherIconBody from './WeatherIcon'
 import ChangelogIconBody from './ChangelogIcon'
 import LocationPicker from './LocationPicker'
+import Tile from './Tile'
 import type { Icon as IconModel } from '../lib/types'
 import { useEditMode } from '../context/EditModeContext'
 import { useGroupGesture } from '../context/GroupGestureContext'
-import { useLayoutSettings } from '../context/LayoutSettingsContext'
-import { GROUP_PAD_PX, faviconPx } from '../lib/iconLayout'
+import { GROUP_PAD_PX, LABEL_GAP_PX } from '../lib/iconLayout'
 import { extractString, buildIconData, navIconSrc } from '../lib/iconData'
 import IconPicker from './IconPicker'
 import { useSiteInfoAutofill } from '../api/siteInfo'
@@ -28,7 +28,7 @@ import { ApiError } from '../api/client'
  *   - nav:favicon 块 + 名称行(直接渲染,iOS 主屏式)
  *   - group:iOS 文件夹式——块内成员 favicon 3×2 迷你预览(GroupBody,ADR-0011)+ 名称行
  *   - stock / weather / changelog:专属 body(StockIcon / WeatherIcon / ChangelogIcon)
- *     自行渲染同款 TileFrame + IconLabel(块内主体 / 数据行),本组件不再包玻璃卡
+ *     自行组装同款 Tile(块内主体 / 数据行,见 Tile.tsx),本组件不再包玻璃卡
  *
  * 点击行为(按 detail 字段派发 —— ADR-0001 契约:容器形态由类型定义声明,
  * 新增复用 modal/drawer 的类型无需改本组件):
@@ -43,35 +43,6 @@ import { ApiError } from '../api/client'
  * data 带 pageId 供 DndContext handler 读取(跨页 07 用)。
  * 编辑模式角标(EditActions)的交互按钮 onPointerDown stopPropagation,避免点角标误启拖拽。
  */
-
-/**
- * 图标下方的一行文字(见 CONTEXT.md「图标名称」):外置块下方,iOS 主屏式——
- * 名称行(nav/分组)与数据行(stock 价格 / weather 温度 / changelog 版本号)共用同一
- * 样式口径(显隐/字号随「布局设置」,全体行高一致 → 网格行整齐);颜色默认用户
- * labelColor,数据行可传 color 覆盖(涨跌色 / accent)。shrink-0 保证行高不被压缩。
- */
-export function IconLabel({
-  children,
-  mono,
-  color,
-}: {
-  children: ReactNode
-  /** 数据行用等宽字体(数字对齐)。 */
-  mono?: boolean
-  /** 覆盖默认 labelColor 的文字色(如 var(--color-up) 涨跌色)。 */
-  color?: string
-}) {
-  const { labelVisible, labelSize, labelColor } = useLayoutSettings()
-  if (!labelVisible) return null
-  return (
-    <span
-      className={`shrink-0 max-w-full truncate text-center${mono ? ' font-mono' : ''}`}
-      style={{ fontSize: labelSize, color: color ?? labelColor }}
-    >
-      {children}
-    </span>
-  )
-}
 
 export default function Icon({
   icon,
@@ -92,7 +63,6 @@ export default function Icon({
 }) {
   const def = get(icon.type)
   const { editing } = useEditMode()
-  const { iconScale } = useLayoutSettings()
   const delIcon = useDeleteIcon()
   const editIcon = useUpdateIconData()
   // 分组 × = 解散(POST dissolve),区别于普通图标 × 的删除;容量 409 提示见下方浮层
@@ -115,9 +85,6 @@ export default function Icon({
     data: { pageId: icon.pageId },
     disabled: overlay,
   })
-
-  // favicon 边长(ADR-0016 单档):基准 48 × iconScale(注记 2026-08-23b 上调)。
-  const favPx = faviconPx(iconScale)
 
   const style: CSSProperties = {
     // 拖拽变换仅作用于网格内本体(06);overlay 幽灵由 DragOverlay 负责定位,不重复套 transform。
@@ -157,16 +124,17 @@ export default function Icon({
   return (
     <Tag
       ref={overlay ? undefined : setNodeRef}
-      style={style}
+      // 画格「块↔名称行」间距与 lib/iconLayout 的 labelBlockPx 同源(常数,非 gap-1 目测)
+      style={{ gap: LABEL_GAP_PX, ...style }}
       {...linkProps}
       {...(editing && !overlay ? attributes : {})}
       {...(overlay ? {} : listeners)}
       onClick={onClick}
       title={def?.label}
       className={
-        // 画格透明居中:玻璃块在图标层(TileFrame,全类型同款),文字在块外画格上
+        // 画格透明居中:玻璃块在图标层(Tile,全类型同款),文字在块外画格上
         // (iOS 主屏式:块=图标本体,文字=壁纸层)。不能加 overflow-hidden:编辑角标在卡外。
-        'relative flex flex-col items-center justify-center gap-1 transition ' +
+        'relative flex flex-col items-center justify-center transition ' +
         (interactive ? 'cursor-pointer' : 'cursor-default') +
         // 合并手势达标放大(dwell):目标非被拖项、无 dnd transform 冲突;transition 已有
         (dwellTarget === icon.id && !overlay ? ' scale-[1.15] z-10 ' : '') +
@@ -182,29 +150,24 @@ export default function Icon({
       ) : icon.type === 'group' ? (
         /* 分组(ADR-0011,ADR-0015 容器化):iOS 文件夹式——玻璃块内成员 favicon 迷你预览,
            名称外置下方。点组打开弹层看全部成员 = 票 08。 */
-        <>
-          <GroupBody icon={icon} favPx={favPx} overlay={overlay} />
-          {name && <IconLabel>{name}</IconLabel>}
-        </>
+        <GroupBody icon={icon} overlay={overlay} />
       ) : icon.type === 'changelog' ? (
         <ChangelogIconBody icon={icon} overlay={overlay} />
       ) : (
         <>
           {/* nav:玻璃 squircle 块 = 图标本体(ADR-0015 修订:玻璃下沉到图标层,只包
-              favicon,名称外置块下方),favicon 撑满块(pad=0,图形即块)。 */}
-          {favicon && (
-            <TileFrame favPx={favPx} overlay={overlay}>
+              favicon,名称外置块下方),favicon 撑满块(pad=0,图形即块);「上块下字」
+              组装归 Tile(label 空值不渲染行,favicon 缺失留空玻璃块占位)。 */}
+          <Tile label={name} overlay={overlay}>
+            {favicon && (
               <img
                 src={favicon}
                 alt=""
                 referrerPolicy="no-referrer"
                 className="w-full h-full rounded-[22%] object-contain"
               />
-            </TileFrame>
-          )}
-
-          {/* 名称:外置图标下方(iOS 主屏式),样式见 IconLabel。 */}
-          {name && <IconLabel>{name}</IconLabel>}
+            )}
+          </Tile>
         </>
       )}
 
@@ -238,85 +201,23 @@ export default function Icon({
 // ── 辅助 ──────────────────────────────────────────────────────────────────
 
 /**
- * 图标本体玻璃块(ADR-0015 修订;ADR-0016 注记 2026-08-23b 起为**全类型**统一外壳):
- * squircle 玻璃容器即图标本体——nav favicon 撑满块(pad=0,图形即块,iOS app 图标式),
- * 分组预览/小组件主体(stock ticker / weather 状况图标 / changelog 版本符号)同样
- * 在块内居中,边长推导同一 faviconPx——视觉尺寸一致由本组件统一保证。名称/数据行
- * 在块外画格上(iOS 主屏层级:块=图标本体,文字=壁纸层)。
- * 块边 = min(推导值, 画格可用高度)——maxWidth/maxHeight 双上限 + aspect-square 与
- * favicon 时代的收缩机制同款(同档位画格等高,收缩全体一致);overlay 幽灵无画格约束
- * (shrink-wrap),固定推导值。hover/active 缩放作用于**整块**(图形随块,iOS 无溢出
- * 裁切问题),提亮由 .glass-soft 自身规则承担(ADR-0012)。
- */
-export function TileFrame({
-  favPx,
-  padPx = 0,
-  overlay,
-  className = '',
-  children,
-}: {
-  favPx: number
-  padPx?: number
-  overlay: boolean
-  className?: string
-  children: ReactNode
-}) {
-  const bound = favPx + padPx * 2
-  return (
-    <div
-      className={
-        // flex 居中:小组件主体(ticker/SVG/状况图标)在块内居中;nav favicon 与分组
-        // 预览是 w-full/h-full 撑满式,不受影响。
-        'glass-soft rounded-[22%] flex items-center justify-center ' +
-        (!overlay
-          ? 'flex-1 min-h-0 aspect-square transition-transform hover:scale-110 active:scale-95 '
-          : '') +
-        className
-      }
-      style={
-        overlay
-          ? { width: bound, height: bound, padding: padPx }
-          : {
-              // maxWidth 取 min(推导值, 画格宽):行高改由图标几何推导(iconCellGeometry)
-              // 后轨道宽是防重叠的硬上限——极端窄轨(如 gridWidth 最小 + 大间距)时块
-              // 宁可收缩也不侵入相邻画格;min() 是兜底,常规由几何层先钳。
-              maxWidth: `min(${bound}px, 100%)`,
-              maxHeight: bound,
-              padding: padPx,
-            }
-      }
-    >
-      {children}
-    </div>
-  )
-}
-
-/**
- * 分组图标内容(ADR-0011,ADR-0015 修订):iOS 文件夹式——玻璃块(TileFrame)内
- * 3×2 网格,按组内序取**前 6 个**成员的 favicon(不足留空)。取 3×2 而非 iOS 原版
- * 3×3:块受画格高度所限(正方形块 ~48px),3×3 每子仅约 10px 不可辨认,3×2 每子
- * 约 19px 是辨认下限;块内 pad 用小固定值(3px,不随 scale),为子图标争取空间
- * (iOS 文件夹块内边距同样小于 app 图标)。
+ * 分组图标内容(ADR-0011,ADR-0015 修订):iOS 文件夹式——玻璃块内 3×2 网格,按组内序
+ * 取**前 6 个**成员的 favicon(不足留空)。取 3×2 而非 iOS 原版 3×3:块受画格高度所限
+ * (正方形块 ~48px),3×3 每子仅约 10px 不可辨认,3×2 每子约 19px 是辨认下限;块内
+ * pad 用小固定值(3px,不随 scale),为子图标争取空间(iOS 文件夹块内边距同样小于
+ * app 图标)。「上块下字」组装归 Tile(padPx=GROUP_PAD_PX,名称行随组 data)。
  * 成员从聚合缓存按 parentId 派生(groupMembers)。
  * 在组件内(而非 Icon 主体)调 useConfig:仅 group 类型挂载时才订阅,['config'] 命中缓存
  * 无网络开销;overlay 拖拽幽灵同路径渲染(React 上下文随 React 树,不随 DOM)。
  */
-function GroupBody({
-  icon,
-  favPx,
-  overlay,
-}: {
-  icon: IconModel
-  favPx: number
-  overlay: boolean
-}) {
+function GroupBody({ icon, overlay }: { icon: IconModel; overlay: boolean }) {
   const { data } = useConfig()
   const members = useMemo(
     () => groupMembers(data?.icons ?? [], icon.id).slice(0, 6),
     [data?.icons, icon.id],
   )
   return (
-    <TileFrame favPx={favPx} padPx={GROUP_PAD_PX} overlay={overlay}>
+    <Tile label={extractString(icon.data, 'name')} padPx={GROUP_PAD_PX} overlay={overlay}>
       <div className="grid w-full h-full grid-cols-3 grid-rows-2 place-items-center gap-[6%]">
         {members.map((m) => {
           // 组成员只能是 nav(后端把关),但防御式兜底非 nav 的占位灰块;成员图标同样
@@ -335,7 +236,7 @@ function GroupBody({
           )
         })}
       </div>
-    </TileFrame>
+    </Tile>
   )
 }
 

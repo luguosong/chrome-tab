@@ -25,6 +25,8 @@ interface IconDataValue {
   changelog: ChangelogVersion[] | null
   /** 已有译文的版本号(ADR-0017),Drawer 对其余版本渲染「翻译」按钮。 */
   changelogTranslated: string[]
+  /** 最新版 npm 发布时间(ADR-0016),网格图标的日期行消费。 */
+  changelogReleasedAt: string | null
   weather: Record<string, WeatherBundle | null>
   quotesError: Error | null
   changelogError: Error | null
@@ -83,6 +85,7 @@ export function IconDataProvider({
       quotes: quotesQ.data ?? {},
       changelog: changelogQ.data?.versions ?? null,
       changelogTranslated: changelogQ.data?.translatedVersions ?? [],
+      changelogReleasedAt: changelogQ.data?.releasedAt ?? null,
       weather: weatherQ.data ?? {},
       quotesError: quotesQ.isError ? (quotesQ.error as Error) : null,
       changelogError: changelogQ.isError ? (changelogQ.error as Error) : null,
@@ -125,6 +128,7 @@ export function useIconData(): IconDataValue {
       quotes: {},
       changelog: null,
       changelogTranslated: [],
+      changelogReleasedAt: null,
       weather: {},
       quotesError: null,
       changelogError: null,

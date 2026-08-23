@@ -23,11 +23,38 @@ export function faviconPx(iconScale = 1): number {
 export const GROUP_PAD_PX = 3
 
 /**
- * 图标名称行占据的画格高度(labelSize 字号 × 1.5 行高 + 与块的 gap-1)。
- * 与 IconLabel 渲染口径一致(Tailwind 默认行高 1.5);label 隐藏时为 0。
+ * 名称行行高与「块↔行」间距(常数同源,ADR-0016 注记 e):此前 iconLayout 硬编码
+ * 镜像 Icon.tsx 样式侧的 Tailwind 默认(行高 1.5 / gap-1),改样式会静默错位——
+ * 现在 IconLabel/画格(Tile.tsx)与 labelBlockPx 同引这一份导出。
+ */
+export const LABEL_LINE_HEIGHT = 1.5
+export const LABEL_GAP_PX = 4
+
+/**
+ * 图标名称行占据的画格高度(labelSize 字号 × 行高 + 与块的 gap)。
+ * 与 IconLabel 渲染口径一致(同引 LABEL_* 常数);label 隐藏时为 0。
  */
 export function labelBlockPx(labelVisible: boolean, labelSize: number): number {
-  return labelVisible ? Math.ceil(labelSize * 1.5) + 4 : 0
+  return labelVisible ? Math.ceil(labelSize * LABEL_LINE_HEIGHT) + LABEL_GAP_PX : 0
+}
+
+/**
+ * 「上块下字」字号档(ADR-0016 注记 e):全类型统一主行/次行两档,px 随 iconScale
+ * 同比缩放、cqw 钳制块宽占比(块是 inline-size 容器,长 ticker/版本号随块收缩不
+ * 溢出)。tileFont 是档位唯一公式来源(components/Tile.tsx 的 TilePrimary/
+ * TileSecondary 消费)——调字号只改这一处。
+ */
+export const TILE_FONT_TIERS = {
+  primary: { px: 14, cqw: 24 },
+  secondary: { px: 12, cqw: 20 },
+} as const
+
+export type TileFontTier = keyof typeof TILE_FONT_TIERS
+
+/** 档位字号 CSS 值:min(px 档 × iconScale, cqw 档)。 */
+export function tileFont(iconScale: number, tier: TileFontTier): string {
+  const { px, cqw } = TILE_FONT_TIERS[tier]
+  return `min(${px * iconScale}px, ${cqw}cqw)`
 }
 
 /**

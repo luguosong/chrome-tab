@@ -52,8 +52,8 @@ export default function IconGrid({
   }, [])
 
   const usedRows = Math.ceil(icons.length / GRID_COLUMNS)
-  // edge 不直接进 style:它经 rowH 驱动 TileFrame 的 flex 填充高度,块再被
-  // maxHeight(标称)与 maxWidth min(标称,100%) 双向钳制(见 Icon.tsx TileFrame)
+  // edge 不直接进 style:它经 rowH 驱动 Tile 块(TileFrame,Tile.tsx 私有)的 flex
+  // 填充高度,块再被 maxHeight(标称)与 maxWidth min(标称,100%) 双向钳制
   const { rowH } = iconCellGeometry({
     iconScale,
     labelBlock: labelBlockPx(labelVisible, labelSize),
