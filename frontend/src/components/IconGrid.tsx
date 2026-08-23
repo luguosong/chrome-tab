@@ -14,7 +14,7 @@ import IconView from './Icon'
  * 固定 8×8 CSS grid,每图标占 1 格(ADR-0016 单档化)。
  * section 自身透明(玻璃背景由 DashboardPage 的整页面板提供),走 h-full 填满走马灯 slide,
  * grid 元素 flex-1 仍占满画布(空页与满页网格区域同尺寸),但**行轨道不再平分画布**:
- * gridAutoRows = 图标几何行高(实际占用的行才存在,簇 align-content:center 居中)——
+ * gridAutoRows = 图标几何行高(实际占用的行才存在,簇 align-content:start 自上向下排列)——
  * 旧行为 repeat(8,1fr) 把画布强切 8 行,矮视口下图标被「画布高/8」钳死,iconScale 失效
  * (见 iconCellGeometry)。
  * 拖拽(06):整页用一个 SortableContext 包裹,items=本页 iconId,grid 布局用
@@ -86,7 +86,8 @@ export default function IconGrid({
     gridTemplateColumns: `repeat(${GRID_COLUMNS}, minmax(0, 1fr))`,
     // 行 = 图标几何行高(仅实际占用行存在);不再 repeat(8,1fr) 平分画布。
     gridAutoRows: rowH,
-    alignContent: 'center',
+    // 自上向下排列:稀疏页剩余空隙沉底,图标簇贴画布顶部(用户要求,原为垂直居中)。
+    alignContent: 'start',
     maxWidth: gridWidth,
     // 「布局设置」间距拆分:横向(列)= gridGap,竖向(行)= gridGapY(上限宽,固定画布防溢出)。
     columnGap: gridGap,

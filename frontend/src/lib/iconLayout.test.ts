@@ -12,15 +12,15 @@ import {
 // ADR-0016 单档化:fav = FAV_BASE_PX × iconScale,无档位、不随 gap。
 
 describe('faviconPx', () => {
-  it('默认 scale=1 → 基准 32', () => {
-    expect(faviconPx()).toBe(32)
-    expect(FAV_BASE_PX).toBe(32)
+  it('默认 scale=1 → 基准 56(1x 再放大,ADR-0016 注记 2026-08-23c)', () => {
+    expect(faviconPx()).toBe(56)
+    expect(FAV_BASE_PX).toBe(56)
   })
 
   it('iconScale 同比缩放', () => {
-    expect(faviconPx(1.5)).toBe(48)
-    expect(faviconPx(0.75)).toBe(24)
-    expect(faviconPx(2)).toBe(64)
+    expect(faviconPx(1.5)).toBe(84)
+    expect(faviconPx(0.75)).toBe(42)
+    expect(faviconPx(2)).toBe(112)
   })
 })
 
@@ -41,7 +41,7 @@ describe('iconCellGeometry', () => {
       const { edge } = iconCellGeometry({
         iconScale: s, labelBlock: 22, gapY: 8, usedRows: 2, trackW: 121, gridH: 417,
       })
-      expect(edge).toBe(32 * s)
+      expect(edge).toBe(56 * s)
     }
   })
 
@@ -66,15 +66,15 @@ describe('iconCellGeometry', () => {
     const { edge, rowH } = iconCellGeometry({
       iconScale: 1.5, labelBlock: 0, gapY: 8, usedRows: 2, trackW: 121, gridH: 417,
     })
-    expect(edge).toBe(48)
-    expect(rowH).toBe(48 + GROUP_PAD_PX * 2)
+    expect(edge).toBe(84)
+    expect(rowH).toBe(84 + GROUP_PAD_PX * 2)
   })
 
   it('测量未回报(首帧):退化为标称值,不闪没', () => {
     const { edge } = iconCellGeometry({
       iconScale: 1.5, labelBlock: 22, gapY: 8, usedRows: 2, trackW: 0, gridH: 0,
     })
-    expect(edge).toBe(48)
+    expect(edge).toBe(84)
   })
 
   it('极端矮画布:heightFit 为负时钳 0,不留负尺寸', () => {

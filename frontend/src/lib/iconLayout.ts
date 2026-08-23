@@ -7,10 +7,12 @@ export const GRID_COLUMNS = 8
 export const GRID_ROWS = 8
 
 /**
- * favicon 基准边长(ADR-0014 遗产,ADR-0016 单档化):32px,
- * 只随 iconScale 同比缩放,gridGap 不再参与推导。
+ * favicon 基准边长(ADR-0014 遗产,ADR-0016 单档化;上调史见 ADR-0016 注记 2026-08-23b/c):
+ * 56px——用户要求默认档再放大(23b 的 48 仍偏小)。注意 iconScale 默认 1.5(前后端
+ * LayoutLimits),默认视觉 = 56×1.5 = 84px;上调对所有 scale 档位同比生效。
+ * 只随 iconScale 同比缩放,gridGap 不参与推导。
  */
-export const FAV_BASE_PX = 32
+export const FAV_BASE_PX = 56
 
 /** 裸 favicon 类型(nav / 分组)的 favicon 边长 = 基准 × iconScale。 */
 export function faviconPx(iconScale = 1): number {

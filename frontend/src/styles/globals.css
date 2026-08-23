@@ -193,11 +193,3 @@ code {
   }
 }
 
-/* 更新日志图标(ADR-0016 单档两行卡):画格高度(content-box)极端不足时隐日期行、
-   保版本号主信息。查询容器 = Icon.tsx 小组件外壳 [container-type:size];
-   断点按 content-box 高度(不含外壳 padding):两行约需 46px。 */
-@container (max-height: 46px) {
-  .cl-date {
-    display: none;
-  }
-}
