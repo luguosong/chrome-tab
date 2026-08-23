@@ -26,6 +26,15 @@ export default function ChangelogDrawer({ onClose }: { onClose: () => void }) {
   const latest = versions[0]?.title
   const translated = useMemo(() => new Set(changelogTranslated), [changelogTranslated])
 
+  // 译制失败感知:后端译制失败仅记日志、保持英文仍返 200(如 LLM 网关不可达),
+  // 请求版本不在响应 translatedVersions 内即失败——据此提示,而非「按钮一闪」无感知。
+  // pending 期间 data 是上次的旧值,须排除以免新旧 variables/data 错配误报。
+  const translateFailed = useMemo(() => {
+    if (translateMut.isPending || !translateMut.data || !translateMut.variables) return []
+    const done = new Set(translateMut.data.translatedVersions)
+    return translateMut.variables.filter((v) => !done.has(v))
+  }, [translateMut.isPending, translateMut.data, translateMut.variables])
+
   // 过滤:命中版本号 OR 任一条目文本(真实诉求是搜某个功能/改动,而非版本号)
   const shown = useMemo(() => {
     const kw = q.trim().toLowerCase()
@@ -125,6 +134,14 @@ export default function ChangelogDrawer({ onClose }: { onClose: () => void }) {
               </div>
 
               {q.trim() && <p className="mb-1.5 text-xs text-white/45">{shown.length} 个结果</p>}
+
+              {(translateMut.isError || translateFailed.length > 0) && (
+                <p className="mb-1.5 text-xs text-red-300/90">
+                  {translateMut.isError
+                    ? '翻译请求失败，请稍后重试'
+                    : `${translateFailed.join('、')} 翻译失败，已保留英文（译制服务暂不可用）`}
+                </p>
+              )}
 
               <div className="max-h-[60vh] overflow-auto pr-1.5">
                 {shown.length === 0 && (
