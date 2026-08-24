@@ -22,15 +22,18 @@ export default function WeatherIconBody({ icon, overlay = false }: { icon: Icon;
   const hours = hourlyWindow(bundle?.hourly, new Date())
 
   return (
-    <Tile label={loc?.name || '天气'} overlay={overlay} fill>
+    // padPx=8:块内容与玻璃边缘留呼吸——首格高亮不顶边(否则直角伸出跨格块的固定圆角
+    // 弧线之外,观感「左侧多一块背景」);fill 模式 padding 直接生效,不参与钳制。
+    <Tile label={loc?.name || '天气'} overlay={overlay} fill padPx={8}>
       {hours.length ? (
-        <div className="flex w-full h-full items-stretch gap-[4%]">
+        <div className="flex w-full h-full items-stretch gap-[3%]">
           {hours.map((h, i) => (
             <div
               key={h.fxTime}
               className={
-                'flex-1 min-w-0 flex flex-col items-center justify-center gap-[6%] ' +
-                (i === 0 ? 'bg-white/15 rounded-[14%]' : '')
+                'flex-1 min-w-0 flex flex-col items-center justify-center gap-[4%] ' +
+                // 高亮块是宽扁小卡:固定圆角,不用百分比(同 TileFrame fill 的椭圆化教训)
+                (i === 0 ? 'bg-white/15 rounded-lg' : '')
               }
             >
               <TileSecondary className="text-white/60">

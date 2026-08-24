@@ -66,7 +66,11 @@ function TileFrame({
         // flex 居中:块内主体在块内居中;nav favicon 与分组预览是 w-full/h-full
         // 撑满式,不受影响。Tile 固定追加块内纵排 + inline-size 容器(字号 cqw 钳制)。
         // bare 时不挂 glass-soft:hover 提亮随之消失,反馈只剩下方 hover 缩放(0013 语言)。
-        (bare ? '' : 'glass-soft rounded-[22%] ') + 'flex items-center justify-center ' +
+        // 圆角:单格 22% 近似 squircle(正方形上 x/y 半径相等);fill 跨格块是宽扁形,
+        // 百分比圆角会椭圆化(角与直边衔接处曲率突变,观感「有棱角」),改固定圆角,
+        // 与 BigTile(3×2 跨格先例)rounded-3xl 同口径。
+        (bare ? '' : 'glass-soft ' + (fill ? 'rounded-3xl ' : 'rounded-[22%] ')) +
+        'flex items-center justify-center ' +
         (!overlay
           ? fill
             ? // fill:撑满画格(宽随 span 格数,高 = 行高 − 名称行),不缩放
