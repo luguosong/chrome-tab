@@ -33,6 +33,8 @@ const app = createApp({
     apiKey: process.env.QWEATHER_API_KEY ?? '',
     apiHost: process.env.QWEATHER_API_HOST ?? '',
   },
+  // 滴答清单「待办」(CONTEXT.md):API 口令 env 注入,不入前端
+  dida: { token: process.env.DIDA365_TOKEN ?? '' },
 })
 
 const port = Number(process.env.PORT ?? 8080)

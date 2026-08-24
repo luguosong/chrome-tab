@@ -38,10 +38,12 @@ services:
       AIHUBMIX_API_KEY: ${AIHUBMIX_API_KEY}
       QWEATHER_API_KEY: ${QWEATHER_API_KEY}
       QWEATHER_API_HOST: ${QWEATHER_API_HOST}
+      # 滴答清单「待办」(CONTEXT.md):API 口令,同 bing/virxact 先例国内直连
+      DIDA365_TOKEN: ${DIDA365_TOKEN}
       # Node24 原生 fetch 默认忽略代理变量,须开此开关(译制/拉原文走 mihomo,qweather/npm 直连)
       NODE_USE_ENV_PROXY: "1"
       HTTPS_PROXY: http://mihomo:7890
-      NO_PROXY: localhost,127.0.0.1,.qweatherapi.com,registry.npmjs.org,.bing.com,.virxact.com
+      NO_PROXY: localhost,127.0.0.1,.qweatherapi.com,registry.npmjs.org,.bing.com,.virxact.com,.dida365.com
     volumes:
       - ./backend/data:/app/backend/data
     expose:

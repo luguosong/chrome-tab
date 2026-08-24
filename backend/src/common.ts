@@ -43,6 +43,20 @@ export class TtlCache<V> {
   }
 }
 
+// ── wire DTO 防御式读取(weather/aihot/dida 三处同形,第三份触发提取)────────────
+
+export type Rec = Record<string, unknown> | undefined
+
+/** 非法输入(非对象/数组/null)收敛为 undefined,供链式取字段。 */
+export const asRec = (v: unknown): Rec =>
+  typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Rec) : undefined
+
+/** 字段读为 string;缺失/null → null(其余类型 String() 收敛)。 */
+export const str = (m: Rec, k: string): string | null => {
+  const v = m?.[k]
+  return v === undefined || v === null ? null : String(v)
+}
+
 /** config_version bump(ADR-0006):upsert 当前用户版本为 now。必须在写事务末尾调用,与配置写原子。 */
 export async function touchVersion(db: Db, userId: number): Promise<void> {
   const now = new Date().toISOString()

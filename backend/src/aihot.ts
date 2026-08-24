@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { asRec, str } from './common'
 
 /**
  * AIHOT 热点后端代理(CONTEXT.md「AI 热点」):匿名 GET /api/v1/hot-topics,
@@ -32,14 +33,6 @@ export interface AihotTopicDto {
   sourceCount: number
   /** 最新报道时间(ISO)。 */
   latestAt: string | null
-}
-
-type Rec = Record<string, unknown> | undefined
-const asRec = (v: unknown): Rec =>
-  typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Rec) : undefined
-const str = (m: Rec, k: string): string | null => {
-  const v = m?.[k]
-  return v === undefined || v === null ? null : String(v)
 }
 
 /** 解析 hot-topics 响应:非数组 items 抛;条目缺 rank/title 跳过。纯函数可直测。 */

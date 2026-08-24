@@ -6,6 +6,7 @@ import StockIconBody from './StockIcon'
 import WeatherIconBody from './WeatherIcon'
 import ChangelogIconBody from './ChangelogIcon'
 import AiHotIconBody from './AiHotIcon'
+import TodoIconBody from './TodoIcon'
 import LocationPicker from './LocationPicker'
 import Tile from './Tile'
 import type { Icon as IconModel } from '../lib/types'
@@ -163,6 +164,8 @@ export default function Icon({
         <ChangelogIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
       ) : icon.type === 'aihot' ? (
         <AiHotIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
+      ) : icon.type === 'todo' ? (
+        <TodoIconBody icon={icon} overlay={overlay} />
       ) : (
         <>
           {/* nav:裸 favicon 直出(ADR-0015 注记 2026-08-23c,回归 ADR-0013):Tile bare

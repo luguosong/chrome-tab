@@ -12,6 +12,7 @@ import { layoutRoutes } from './layout'
 import { pageRoutes } from './pages'
 import { createWallpaperHandler } from './wallpaper'
 import { createSiteInfoHandler } from './siteInfo'
+import { didaRoutes, type DidaConfig } from './dida'
 import { weatherRoutes, type WeatherConfig } from './weather'
 
 /**
@@ -25,11 +26,13 @@ export function createApp({
   cookieSecure = false,
   changelog,
   weather,
+  dida,
 }: {
   db: Db
   cookieSecure?: boolean
   changelog?: ChangelogServices
   weather?: WeatherConfig
+  dida?: DidaConfig
 }) {
   const app = new Hono<AuthEnv>()
     .get('/healthz', async (c) => {
@@ -56,6 +59,8 @@ export function createApp({
   app.route('/', weatherRoutes(weather))
   // AIHOT 热点代理(单例图标「AI 热点」):无配置,失败降级见 aihot.ts
   app.route('/', aihotRoutes())
+  // 滴答待办代理(单例图标「待办」,首个可写类型):未配置口令 → 400,降级见 dida.ts
+  app.route('/', didaRoutes(dida))
   app.get('/api/wallpaper', createWallpaperHandler())
   // 站点信息抓取(CONTEXT.md「站点信息」):新增/编辑表单自动填充用,/api/* 鉴权横切覆盖
   app.get('/api/site-info', createSiteInfoHandler())

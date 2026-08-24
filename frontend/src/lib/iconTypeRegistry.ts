@@ -33,8 +33,8 @@ export type EditorField =
 
 /** 刷新配置(spec §刷新策略):hook key + 间隔(ms)。0 = 不刷新。 */
 export type RefreshConfig = {
-  /** 'quotes' = useQuotes 轮询(60s); 'changelog' = useChangelog staleTime(1h); 'weather' = useWeather(后端缓存 10/30/5min); 'aihot' = useAiHot 自持(后端缓存 300s,单例不入集中层); 'none' = 不刷新。 */
-  kind: 'quotes' | 'changelog' | 'weather' | 'aihot' | 'none'
+  /** 'quotes' = useQuotes 轮询(60s); 'changelog' = useChangelog staleTime(1h); 'weather' = useWeather(后端缓存 10/30/5min); 'aihot' = useAiHot 自持(后端缓存 300s,单例不入集中层); 'todo' = useTodo 自持(后端缓存 60s,单例不入集中层); 'none' = 不刷新。 */
+  kind: 'quotes' | 'changelog' | 'weather' | 'aihot' | 'todo' | 'none'
 }
 
 /** 实时摘要数据(见 summarize 注释:ADR-0001 契约字段,当前无网格消费方)。 */
@@ -216,6 +216,20 @@ export const AIHOT_DEF: IconTypeDefinition = {
   summarize: () => null, // 网格渲染走专属 AiHotIconBody,契约字段无消费方(同 nav)
 }
 
+/** 待办:扩展类型,单例(见 CONTEXT.md「待办」——今日待办是账号级视图,无可绑实例参数)。
+ *  data 无字段(单例无参数);网格渲染 1×1(未完成数 + 最紧迫一条),详情=Modal
+ *  (TodoModal:完整列表 + 点掉完成 + 速记入收集箱)——首个可写图标类型。 */
+export const TODO_DEF: IconTypeDefinition = {
+  id: 'todo',
+  label: '待办',
+  kind: 'extension',
+  singleton: true,
+  refresh: { kind: 'todo' },
+  detail: 'modal',
+  editor: [],
+  summarize: () => null, // 网格渲染走专属 TodoIconBody,契约字段无消费方(同 nav/aihot)
+}
+
 /**
  * 分组(ADR-0011):iOS 文件夹式收纳容器(块内成员 favicon 3×2 迷你预览,ADR-0015)。
  * kind='group' 不属于 base/extension 任一分区,
@@ -240,4 +254,5 @@ register('stock', STOCK_DEF)
 register('changelog', CHANGELOG_DEF)
 register('weather', WEATHER_DEF)
 register('aihot', AIHOT_DEF)
+register('todo', TODO_DEF)
 register('group', GROUP_DEF)

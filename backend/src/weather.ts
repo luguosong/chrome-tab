@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { asRec, str, type Rec } from './common'
 import { TtlCache } from './common'
 
 /**
@@ -108,16 +109,9 @@ export interface WeatherConfig {
   lang?: string
 }
 
-// ── 防御式读取(v7 字段多为字符串、v1 多为数值,数值读取两者皆收)──────────────────
+// ── 防御式读取(v7 字段多为字符串、v1 多为数值,数值读取两者皆收;
+//    asRec/str 为三域同形,已提至 common.ts,此处留数值族私有)──────────────────
 
-type Rec = Record<string, unknown> | undefined
-
-const asRec = (v: unknown): Rec =>
-  typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Rec) : undefined
-const str = (m: Rec, k: string): string | null => {
-  const v = m?.[k]
-  return v === undefined || v === null ? null : String(v)
-}
 const num = (m: Rec, k: string): number | null => {
   const s = str(m, k)
   if (s === null || s.trim() === '') return null
