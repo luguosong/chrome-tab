@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { aihotRoutes, createAihotService, parseHotTopics } from './aihot'
+import { aihotRoutes, createAihotService, parseHotTopics, parseModelPicks } from './aihot'
 
 // CONTEXT.md「AI 热点」。纯解析直测 + HTTP 层经真实 stub 上游(127.0.0.1 随机端口)
 // 探测缓存/降级;鉴权横切由契约测试统一覆盖,此处直挂路由(同 weather.test)。
@@ -56,6 +56,54 @@ describe('parseHotTopics(纯解析)', () => {
   })
 })
 
+// items 端点(模型精选)fixture:字段与 hot-topics 不同(无 rank/sourceCount,
+// 有 summary/score/reason 等我们不透传的增值字段)。
+const PICKS_FIXTURE = {
+  schemaVersion: 1,
+  items: [
+    {
+      id: 'cmt2qvfnj03zxro6tehwcikx4',
+      title: 'DeepSeek-V4-Flash-Vision-Exp 发布',
+      originalTitle: null,
+      summary: 'DeepSeek 上线实验性多模态视觉理解模型…',
+      source: { name: 'DeepSeek：API 更新日志' },
+      links: {
+        aihot: 'https://aihot.virxact.com/items/cmt2qvfnj03zxro6tehwcikx4',
+        original: 'https://api-docs.deepseek.com/zh-cn/updates',
+      },
+      publishedAt: '2026-08-21T09:26:04.727Z',
+      discoveredAt: '2026-08-21T09:26:04.727Z',
+      category: 'ai-models',
+      score: 67,
+      selected: true,
+      reason: '实验版补齐视觉…',
+    },
+    { title: '缺 id,跳过' },
+    { id: 'x2' },
+    'not-an-object',
+  ],
+}
+
+describe('parseModelPicks(纯解析)', () => {
+  it('裁剪为前端消费字段子集(summary/score/reason 不透传)', () => {
+    expect(parseModelPicks(PICKS_FIXTURE)).toEqual([
+      {
+        id: 'cmt2qvfnj03zxro6tehwcikx4',
+        title: 'DeepSeek-V4-Flash-Vision-Exp 发布',
+        sourceName: 'DeepSeek：API 更新日志',
+        aihotUrl: 'https://aihot.virxact.com/items/cmt2qvfnj03zxro6tehwcikx4',
+        originalUrl: 'https://api-docs.deepseek.com/zh-cn/updates',
+        publishedAt: '2026-08-21T09:26:04.727Z',
+      },
+    ])
+  })
+
+  it('缺 items 抛;脏条目(缺 id/title)跳过,不拖垮整表', () => {
+    expect(() => parseModelPicks({ items2: [] })).toThrow('缺 items')
+    expect(parseModelPicks({ items: [] })).toEqual([])
+  })
+})
+
 // ── HTTP 层(stub 上游)─────────────────────────────────────────────────────────
 
 let upstream: Server | null = null
@@ -77,7 +125,9 @@ async function startUpstream(): Promise<string> {
     seenUa = req.headers['user-agent'] ?? ''
     res.setHeader('content-type', 'application/json')
     res.statusCode = upstreamStatus
-    res.end(JSON.stringify(upstreamStatus === 200 ? FIXTURE : { status: 500, title: 'internal' }))
+    // 按路径分档:items(模型精选)与 hot-topics 各回各的 fixture
+    const body = req.url?.includes('/items') ? PICKS_FIXTURE : FIXTURE
+    res.end(JSON.stringify(upstreamStatus === 200 ? body : { status: 500, title: 'internal' }))
   })
   await new Promise<void>((r) => upstream!.listen(0, '127.0.0.1', r))
   return `http://127.0.0.1:${(upstream.address() as AddressInfo).port}`
@@ -138,5 +188,16 @@ describe('GET /api/aihot/hot-topics(缓存与降级)', () => {
     await createAihotService(base).hotTopics()
     await createAihotService(base).hotTopics()
     expect(hits).toBe(2)
+  })
+})
+
+describe('GET /api/aihot/model-picks', () => {
+  // TTL/lastGood 与 hot-topics 共用 createCachedSource,由上方用例覆盖;此处验证
+  // 路由确实打上游 items 路径(stub 按路径分档,打错路径会解析出空表使断言失败)。
+  it('200 返回裁剪后的模型精选', async () => {
+    const base = await startUpstream()
+    const res = await client(base).request('/api/aihot/model-picks')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual(parseModelPicks(PICKS_FIXTURE))
   })
 })

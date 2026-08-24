@@ -15,7 +15,7 @@ export function AccountPane() {
     <div className="flex flex-col items-center pt-10">
       <div
         aria-hidden
-        className="w-16 h-16 rounded-full bg-accent shadow-lg flex items-center justify-center text-2xl font-medium text-white select-none"
+        className="w-16 h-16 rounded-full bg-accent flex items-center justify-center text-2xl font-medium text-white select-none shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_8px_24px_rgba(0,0,0,0.3)]"
       >
         {initial}
       </div>

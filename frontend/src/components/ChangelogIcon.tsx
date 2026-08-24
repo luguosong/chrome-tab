@@ -13,8 +13,8 @@ const MAX_ROWS = 30
  * 更新日志图标的专属网格渲染(非单例、每实例绑一个外源,ADR-0020;ADR-0022 跨格
  * 第二消费者):外壳/标头走 BigTile(ADR-0022 抽取),主体 = 单列滚动版本榜(一行一
  * 版本:版本号 mono + 相对时间;最新版 accent,与 Modal「最新」药丸同强调;行不可点
- * → 不做 hover 高亮,免暗示交互)。版本时间 = 后端 npm releaseTimes 全表(ADR-0022),
- * npm 失败/版本号错位条目降级不显示时间;标头鲜度回退 releasedAt——重启恢复窗口
+ * → 不做 hover 高亮,免暗示交互)。版本时间 = 后端 releaseTimes 全表(ADR-0022),
+ * 发布信息失败/版本号错位条目降级不显示时间;标头鲜度回退 releasedAt——重启恢复窗口
  * (快照表只有 released_at 列)靠它显示。整块点击无操作(ADR-0022):详情唯一入口 =
  * 「更多」按钮(ChangelogModal)。空榜/取数失败降级 ···(BigTile 空态)。
  * 数据按源经 useChangelog 拉取(同源共享缓存)。
@@ -38,10 +38,16 @@ export default function ChangelogIconBody({
   const latest = versions[0]
   const fresh = latest ? (times[latest.title] ?? data?.releasedAt ?? null) : null
   const fontSize = tileFont(iconScale, 'secondary')
+  const sourceDef = getChangelogSource(source)
 
   return (
     <BigTile
-      title={getChangelogSource(source).label}
+      title={sourceDef.label}
+      link={
+        onOpenDetail
+          ? { href: sourceDef.repositoryUrl, label: '仓库', title: `打开 ${sourceDef.label} 仓库` }
+          : undefined
+      }
       fresh={fresh}
       onOpenDetail={onOpenDetail}
       moreTitle="查看完整更新日志"
@@ -49,8 +55,8 @@ export default function ChangelogIconBody({
     >
       {versions.length === 0 ? null : (
         <ol
-          // 原生滚动翻阅(隐藏滚动条,触屏 pan-y 保原生滚动,TouchSensor 分流拖拽),同 aihot
-          className="flex-1 min-h-0 overflow-y-auto flex flex-col px-2 py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [touch-action:pan-y]"
+          // 原生滚动翻阅(雾胶囊滚动条 tile-scroll,触屏 pan-y 保原生滚动,TouchSensor 分流拖拽),同 aihot
+          className="flex-1 min-h-0 overflow-y-auto flex flex-col px-2 py-1.5 tile-scroll [touch-action:pan-y]"
         >
           {versions.slice(0, MAX_ROWS).map((v, i) => {
             const at = times[v.title]

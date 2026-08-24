@@ -18,7 +18,8 @@ import { pageTransitionFrame } from '../lib/pageTransition'
  * 走马灯：基于 CSS scroll-snap，原生顺滑、自带触控/触控板支持。
  * - 横向滚动 + snap-x mandatory，每页宽度 = 容器宽度
  * - 左右玻璃箭头、常驻 PageTabs 页签条(切换/重排/管理,见 PageTabs)
- * - 滚轮纵向 → 翻页(阻止页面内滚动,见 CONTEXT.md「页面」:固定画布)
+ * - 滚轮纵向 → 翻页(阻止页面内滚动,见 CONTEXT.md「页面」:固定画布;例外——
+ *   跨格大 tile 的滚动主体内部优先,滚到边后链式翻页,见 wheel 守卫)
  * - 键盘 ←/→ 翻页
  * - 滚轮/方向键越界时首尾环形相接(首页↑→末页,末页↓→首页):相邻环形经克隆位
  *   连续滑动(修订 ADR-0008),多步越界瞬间跳切;跨页拖拽不环形
@@ -256,16 +257,33 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
     }
   }, [active, labels.length, onActiveChange])
 
-  // 滚轮翻页(CONTEXT.md「页面」:滚轮用于页间切换,而非页内滚动)。
-  // 只接管"纵向滚轮"(常规鼠标):deltaY 占主导时翻页并 preventDefault;
-  // 横向(触控板横扫 |deltaX|≥|deltaY|)交给原生 snap。400ms 节流防一次手势连翻多页。
-  // 与 06/07 图标拖拽的 PointerSensor 不冲突:wheel 与 pointer 是不同事件流。
+  // 滚轮翻页(CONTEXT.md「页面」:滚轮用于页间切换,而非页内滚动;例外——跨格大
+  // tile 的滚动主体,ADR-0021/0022)。只接管"纵向滚轮"(常规鼠标):deltaY 占主导时
+  // 翻页并 preventDefault;横向(触控板横扫 |deltaX|≥|deltaY|)交给原生 snap。
+  // 400ms 节流防一次手势连翻多页。与 06/07 图标拖拽的 PointerSensor 不冲突:
+  // wheel 与 pointer 是不同事件流。
   const lastWheel = useRef(0)
   useEffect(() => {
     const el = ref.current
     if (!el) return
+    // target 起的祖先链(不含走马灯容器自身)里有「纵向可滚且未到该方向边」的元素
+    // (大 tile 版本榜/热点流/收集箱)→ 放行原生滚动,滚到边后继续滚才链式翻页
+    // (scroll chaining 肌肉记忆)。preventDefault 会取消整个冒泡路径的原生滚动,
+    // 故必须在祖先监听里让路,而不是 tile 侧 stopPropagation 硬切。
+    const inScrollableTile = (target: EventTarget | null, down: boolean): boolean => {
+      for (let n = target as Element | null; n && n !== el; n = n.parentElement) {
+        if (/(auto|scroll)/.test(getComputedStyle(n).overflowY) && n.scrollHeight > n.clientHeight) {
+          const atEdge = down
+            ? n.scrollTop + n.clientHeight >= n.scrollHeight - 1
+            : n.scrollTop <= 1
+          if (!atEdge) return true
+        }
+      }
+      return false
+    }
     const onWheel = (e: WheelEvent) => {
       if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return // 横向交给原生
+      if (inScrollableTile(e.target, e.deltaY > 0)) return
       e.preventDefault()
       const now = Date.now()
       if (now - lastWheel.current < 400) return

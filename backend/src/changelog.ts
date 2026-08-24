@@ -70,15 +70,15 @@ export interface ChangelogDeps {
   fetchMarkdown: () => Promise<string>
   /** 译制单个版本块。返回 null = 拒绝(如未配置 Key);抛错 = 译制失败。 */
   translate: (versionBlock: string) => Promise<string | null>
-  /** npm registry 全量发布信息:dist-tags.latest + time 全表(版本号→ISO,大 tile
-   *  版本榜单一行一版本带时间)。失败由实现方吞掉返回 null,不阻塞主链路。 */
+  /** 外源全量发布信息:latest + times(版本号→ISO,大 tile 版本榜单一行一版本
+   *  带时间)。失败由实现方吞掉返回 null,不阻塞主链路。 */
   fetchReleaseInfo: () => Promise<{ latest: string | null; times: Record<string, string> } | null>
 }
 
 export interface Snapshot {
   markdown: string
   releasedAt: string | null
-  /** 每版本发布时间(版本号→ISO);npm 失败/版本号错位为空条目,前端行级降级不显示。 */
+  /** 每版本发布时间(版本号→ISO);发布信息失败/版本号错位为空条目,前端行级降级不显示。 */
   releaseTimes: Record<string, string>
   translatedVersions: string[]
   /** 供按需补译免重切 */
@@ -115,7 +115,7 @@ export class ChangelogService {
       .executeTakeFirst()
     if (!row) return
     const blocks = splitBlocks(row.raw_markdown)
-    // releaseTimes 不落库:恢复镜像时置空表,启动紧跟的 refreshQuietly(见调度器)拉 npm 补齐,
+    // releaseTimes 不落库:恢复镜像时置空表,启动紧跟的 refreshQuietly(见调度器)拉发布信息补齐,
     // 缺失窗口仅重启后数秒——省一列迁移与快照表读写。
     this.memory = this.assemble(blocks, await this.loadTranslations(blocks), row.released_at, {})
   }
@@ -218,7 +218,7 @@ export class ChangelogService {
     for (const b of blocks.blocks) {
       const translated = byHash.get(sha256(b.raw))
       if (translated !== undefined) {
-        markdown += translated
+        markdown += translated.endsWith('\n') ? translated : `${translated}\n`
         translatedVersions.push(b.title)
       } else {
         markdown += b.raw
@@ -241,7 +241,7 @@ export function changelogRoutes(services: ChangelogServices): Hono<AuthEnv> {
   const toResponse = (s: Snapshot) => ({
     markdown: s.markdown,
     releasedAt: s.releasedAt, // 失败时显式 null(输出不省略),前端日期行降级「—」
-    releaseTimes: s.releaseTimes, // 空表 = npm 失败/重启恢复窗口,前端版本行时间降级不显示
+    releaseTimes: s.releaseTimes, // 空表 = 发布信息失败/重启恢复窗口,前端版本行时间降级不显示
     translatedVersions: s.translatedVersions,
   })
   return new Hono<AuthEnv>()
@@ -311,8 +311,22 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
   const models = modelCandidates()
   // 解构到 const:narrowing 才能保进 fetchText 回调(属性访问的收窄不进闭包)
   const rawUrl = def.changelogUrl
-  const fetchNpmReleaseInfo = async () => {
+  const fetchReleaseInfo = async () => {
     try {
+      if (def.githubReleasesApiUrl) {
+        // ponytail:只取前 100 个 release;Matt 当前不足 10 个,超过后按 GitHub Link 头分页。
+        const releases = JSON.parse(await fetchText(def.githubReleasesApiUrl, 30_000)) as Array<{
+          tag_name?: string
+          published_at?: string
+        }>
+        const times: Record<string, string> = {}
+        for (const release of releases) {
+          if (release.tag_name && release.published_at) {
+            times[release.tag_name.replace(/^v/, '')] = release.published_at
+          }
+        }
+        return { latest: Object.keys(times)[0] ?? null, times }
+      }
       const root = JSON.parse(
         await fetchText(`https://registry.npmjs.org/${def.npmPackage}`, 30_000),
       ) as {
@@ -321,7 +335,7 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
       }
       return { latest: root['dist-tags']?.latest ?? null, times: root.time ?? {} }
     } catch (e) {
-      console.warn('拉取 npm 发布信息失败,版本时间降级:', e)
+      console.warn('拉取发布信息失败,版本时间降级:', e)
       return null
     }
   }
@@ -331,11 +345,11 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
     fetchMarkdown: rawUrl
       ? () => fetchText(rawUrl, 60_000)
       : async () => {
-          const info = await fetchNpmReleaseInfo()
+          const info = await fetchReleaseInfo()
           if (!info) throw new Error(`npm packument(${def.npmPackage}) 拉取失败,无法合成版本流`)
           return synthesizeVersionsMarkdown(info.times)
         },
-    fetchReleaseInfo: fetchNpmReleaseInfo,
+    fetchReleaseInfo,
     translate: async (block) => {
       if (!apiKey) return null // Key 缺失:Service 层据此透传英文原文
       let lastErr: unknown

@@ -3,8 +3,8 @@ import { apiFetch } from '../api/client'
 import { parseChangelog, type ChangelogVersion } from '../lib/changelogParser'
 import { DEFAULT_CHANGELOG_SOURCE, type ChangelogSourceId } from 'chrome-tab-shared'
 
-/** /api/changelog 响应(ADR-0017/0022):markdown = 拼装后全文,releasedAt = 最新版 npm
- *  发布时间,releaseTimes = 每版本发布时间全表(版本号→ISO,空表 = npm 失败/恢复窗口,
+/** /api/changelog 响应(ADR-0017/0022):markdown = 拼装后全文,releasedAt = 最新版
+ *  发布时间,releaseTimes = 每版本发布时间全表(版本号→ISO,空表 = 发布信息失败/恢复窗口,
  *  版本行时间降级不显示),translatedVersions = 已译版本号(UI 对不在此列的版本渲染「翻译」按钮)。 */
 type ChangelogResponse = {
   markdown: string

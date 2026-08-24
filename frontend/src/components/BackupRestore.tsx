@@ -42,7 +42,7 @@ export function BackupRestore() {
 
   return (
     <div className="mt-6 pt-4 border-t border-white/10">
-      <h3 className="text-xs font-semibold text-white/80 mb-2">备份与恢复</h3>
+      <h3 className="mb-2 text-[11px] font-medium tracking-[0.15em] text-white/45">备份与恢复</h3>
       <div className="flex flex-wrap gap-2 text-xs">
         <button
           type="button"

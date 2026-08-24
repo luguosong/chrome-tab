@@ -15,6 +15,7 @@ export default function BigTile({
   title,
   titleHref,
   titleLinkHint,
+  link,
   fresh,
   onOpenDetail,
   moreTitle,
@@ -27,6 +28,8 @@ export default function BigTile({
   titleHref?: string
   /** 标题外链的悬浮提示(有 titleHref 才用)。 */
   titleLinkHint?: string
+  /** 标头右侧的外链按钮。 */
+  link?: { href: string; label: string; title: string }
   /** 榜首/最新版鲜度(ISO);null 不显示。 */
   fresh: string | null
   /** 「更多」按钮直调(ADR-0022);undefined = 编辑模式/overlay,按钮不渲染。 */
@@ -75,6 +78,18 @@ export default function BigTile({
             <span className="font-mono text-white/50" style={{ fontSize }}>
               {timeAgo(fresh)}
             </span>
+          )}
+          {link && (
+            <a
+              href={link.href}
+              target="_blank"
+              rel="noreferrer"
+              title={link.title}
+              className="shrink-0 rounded-full bg-white/15 px-2 py-0.5 text-white/70 hover:bg-white/30 hover:text-accent transition-colors"
+              style={{ fontSize }}
+            >
+              {link.label}
+            </a>
           )}
           <MoreButton onClick={onOpenDetail} fontSize={fontSize} title={moreTitle} />
         </span>

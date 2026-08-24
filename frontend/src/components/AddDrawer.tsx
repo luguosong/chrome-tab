@@ -57,7 +57,7 @@ function TypeSection({
   if (defs.length === 0) return null
   return (
     <section>
-      <h3 className="text-[11px] uppercase tracking-wider text-white/50 mb-2">{title}</h3>
+      <h3 className="mb-2 text-[11px] uppercase tracking-[0.15em] text-white/45">{title}</h3>
       <div className="space-y-3">
         {defs.map((def) => (
           <TypeCard
@@ -128,7 +128,7 @@ function TypeCard({
   if (disabled) {
     // 单例已存在:置灰、不可填、标注"已添加"(spec user story 20)
     return (
-      <div className="rounded-2xl border border-white/15 bg-white/5 p-4 opacity-60">
+      <div className="glass-soft rounded-2xl p-4 opacity-60">
         <div className="flex items-center justify-between">
           <span className="text-sm text-white/80">{def.label}</span>
           <span className="text-[11px] text-white/50">已添加</span>
@@ -139,12 +139,19 @@ function TypeCard({
 
   const noPage = pageId === undefined
   const locMissing = def.editor.some((f) => f.name === 'location') && !values['location']
+  // 格数徽标取真实画格跨度(ADR-0021:缺省 1×1)——加块前告知占地
+  const span = def.size ?? { w: 1, h: 1 }
   return (
-    <form
-      onSubmit={submit}
-      className="rounded-2xl border border-white/20 bg-white/10 p-4 space-y-2.5"
-    >
-      <div className="text-sm text-white/90">{def.label}</div>
+    <form onSubmit={submit} className="glass-soft rounded-2xl p-4 space-y-2.5">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-white/95">{def.label}</span>
+        <span
+          aria-label={`占 ${span.w}×${span.h} 格`}
+          className="rounded-full bg-white/10 px-1.5 py-px font-mono text-[10px] tabular-nums text-white/50"
+        >
+          {span.w}×{span.h}
+        </span>
+      </div>
 
       {def.editor.map((f) =>
         f.name === 'location' ? (
@@ -196,7 +203,7 @@ function TypeCard({
       <button
         type="submit"
         disabled={create.isPending || noPage || locMissing}
-        className="w-full rounded-lg bg-accent/90 hover:bg-accent disabled:opacity-50 text-white text-sm py-1.5 transition"
+        className="w-full rounded-full bg-accent/90 py-1.5 text-sm font-medium text-white transition hover:bg-accent disabled:opacity-50"
       >
         {create.isPending ? '添加中…' : locMissing ? '请选择城市' : `添加${def.label}`}
       </button>

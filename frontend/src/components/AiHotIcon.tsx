@@ -46,10 +46,10 @@ export default function AiHotIconBody({
     >
       {topics.length === 0 ? null : (
         <ol
-          // 原生滚动翻阅全量(隐藏滚动条,触屏 pan-y 保原生滚动,TouchSensor
-          // delay+tolerance 分流拖拽)。单列(2026-08-23 迭代,原双列):一行一条,
-          // 标题 line-clamp-2——「更多文字」由宽度×两行满足,字号维持 secondary 档
-          className="flex-1 min-h-0 overflow-y-auto flex flex-col px-2 py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [touch-action:pan-y]"
+          // 原生滚动翻阅全量(雾胶囊滚动条 tile-scroll,触屏 pan-y 保原生滚动,
+          // TouchSensor delay+tolerance 分流拖拽)。单列(2026-08-23 迭代,原双列):
+          // 一行一条,标题 line-clamp-2——「更多文字」由宽度×两行满足,字号维持 secondary 档
+          className="flex-1 min-h-0 overflow-y-auto flex flex-col px-2 py-1.5 tile-scroll [touch-action:pan-y]"
         >
           {topics.map((t) => (
             <li

@@ -43,8 +43,8 @@ export default function TodoIconBody({
         </div>
       ) : (
         <ol
-          // 原生滚动翻阅全量(隐藏滚动条,触屏 pan-y 保原生滚动,TouchSensor 分流拖拽;同 aihot)
-          className="flex-1 min-h-0 overflow-y-auto flex flex-col px-2 py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [touch-action:pan-y]"
+          // 原生滚动翻阅全量(雾胶囊滚动条 tile-scroll,触屏 pan-y 保原生滚动,TouchSensor 分流拖拽;同 aihot)
+          className="flex-1 min-h-0 overflow-y-auto flex flex-col px-2 py-1.5 tile-scroll [touch-action:pan-y]"
         >
           {inbox.map((t) => (
             <li key={t.id} className="flex items-center gap-2 min-w-0 px-2 py-1 rounded-lg">

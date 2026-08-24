@@ -132,6 +132,36 @@ code {
   background: rgba(18, 18, 23, 0.36);
 }
 
+/* 分段控件滑块(ControlDrawer tab 栏):凸起玻璃小胶囊——纵向白渐变 + 顶部
+   inset 高光 + 轻投影,坐凹轨(bg-white/[0.07] 由使用处声明)内。与 .glass-soft
+   的软档不同:滑块是「浮在轨道上的实体玻璃」,需要投影区分凸起;亮暗双值。 */
+.glass-segment-thumb {
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.32),
+    rgba(255, 255, 255, 0.12)
+  );
+  box-shadow:
+    0 1px 6px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+.dark .glass-segment-thumb {
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.22),
+    rgba(255, 255, 255, 0.07)
+  );
+  box-shadow:
+    0 1px 6px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+/* 滑块滑动属于装饰动效:reduced-motion 下立即就位 */
+@media (prefers-reduced-motion: reduce) {
+  .glass-segment-thumb {
+    transition: none !important;
+  }
+}
+
 /* 走马灯横向滚动条隐藏 */
 .no-scrollbar {
   -ms-overflow-style: none;
@@ -139,6 +169,30 @@ code {
 }
 .no-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+/* 大 tile 主体滚动条(BigTile 三消费者:aihot / changelog / 待办):雾胶囊——
+   track 透明不画槽(玻璃底直接透出),thumb 8px 命中区 + 透明 border 内缩成
+   4px 视觉胶囊;静止 white·12、容器 hover 加深,与标头药丸 / glass-soft 提亮
+   同一强调语汇,明暗双值。勿加 scrollbar-width / scrollbar-color——标准属性
+   非 auto 会让 -webkit-scrollbar 伪元素整体失效(见 no-scrollbar 反例)。 */
+.tile-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.tile-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-clip: padding-box;
+  background-color: rgba(255, 255, 255, 0.12);
+}
+.tile-scroll:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.28);
+}
+.dark .tile-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+.dark .tile-scroll:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.25);
 }
 
 /* 编辑模式：磁贴轻微抖动，提示当前可增删；reduced-motion 下不动 */

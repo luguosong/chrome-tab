@@ -114,6 +114,19 @@ describe('ChangelogService 编排(ADR-0017)', () => {
     expect(snapshotRow?.released_at).toBeNull()
   })
 
+  it('译文无尾换行:后续版本标题仍保持独立块', async () => {
+    const db = openDb(':memory:').db
+    const raw = '## 2.0\n- two\n\n## 1.0\n- one\n'
+    const s = makeService(
+      db,
+      { fetchMarkdown: async () => raw, translate: async (block) => block.trimEnd() },
+      DEFAULT_CHANGELOG_SOURCE,
+      1,
+    )
+
+    expect(splitBlocks((await s.get()).markdown).blocks.map((b) => b.title)).toEqual(['2.0', '1.0'])
+  })
+
   it('同一原文再次 refresh:块哈希全命中 → 零 LLM 调用', async () => {
     const db = openDb(':memory:').db
     let calls = 0
@@ -533,6 +546,31 @@ describe('无原文源 prodChangelogDeps(codex):fetchMarkdown 走 npm 合成', (
 
     globalThis.fetch = vi.fn(async () => new Response('nope', { status: 503 })) as typeof fetch
     await expect(prodChangelogDeps('codex').fetchMarkdown()).rejects.toThrow('npm packument')
+  })
+})
+
+describe('Matt Skills prodChangelogDeps:发布日期走 GitHub Releases', () => {
+  const realFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = realFetch
+  })
+
+  it('v 前缀标签映射为 CHANGELOG 版本号', async () => {
+    globalThis.fetch = vi.fn(async (url: unknown) => {
+      expect(String(url)).toBe('https://api.github.com/repos/mattpocock/skills/releases?per_page=100')
+      return new Response(JSON.stringify([
+        { tag_name: 'v1.2.3', published_at: '2026-08-06T14:05:28Z' },
+        { tag_name: 'v1.2.2', published_at: '2026-08-05T18:10:19Z' },
+      ]))
+    }) as typeof fetch
+
+    await expect(prodChangelogDeps('matt-skills').fetchReleaseInfo()).resolves.toEqual({
+      latest: '1.2.3',
+      times: {
+        '1.2.3': '2026-08-06T14:05:28Z',
+        '1.2.2': '2026-08-05T18:10:19Z',
+      },
+    })
   })
 })
 

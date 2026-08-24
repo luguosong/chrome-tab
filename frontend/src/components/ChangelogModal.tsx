@@ -10,7 +10,7 @@ import { inline } from '../lib/changelogParser'
  * staleTime,与网格图标共享同源 queryKey 缓存),展示完整版本列表(纵向滚动)。
  * 真实 CHANGELOG 无日期、无 ### 小节,条目直接挂在版本下,故按「发布时间线」呈现:
  * 左侧连续细轨 + 每版本一个节点,最新版 accent 高亮 + 「最新」药丸,旧版弱化;每版本
- * 日期 = npm releaseTimes 全表(ADR-0022)绝对日期,失败/错位降级不显示。
+ * 日期 = 后端 releaseTimes 全表(ADR-0022)绝对日期,失败/错位降级不显示。
  * 未译版本(不在 translatedVersions 内)显示「翻译」按钮 → POST /translate 按需补译,
  * 译毕后端持久化、invalidate 重拉即变中文(ADR-0017)。
  *

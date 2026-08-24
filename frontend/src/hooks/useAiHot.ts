@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiFetch } from '../api/client'
-import type { AiHotTopic } from '../lib/aihot'
+import type { AiHotModelPick, AiHotTopic } from '../lib/aihot'
 
 /**
  * AIHOT 热点取数(单例图标,CONTEXT.md「AI 热点」)。不进 IconDataContext 集中层:
@@ -14,6 +14,21 @@ export function useAiHot() {
   return useQuery<AiHotTopic[] | null>({
     queryKey: ['aihot'],
     queryFn: () => apiFetch<AiHotTopic[] | null>('/api/aihot/hot-topics'),
+    staleTime: 5 * 60_000,
+    refetchInterval: 10 * 60_000,
+    retry: 1,
+  })
+}
+
+/**
+ * 模型精选取数(CONTEXT.md「模型精选」,Modal 第二 tab;分类与窗口在后端硬编码)。
+ * queryKey 挂 ['aihot'] 下与热点榜同族不同键,互不失效。精选更新节奏低(上游每天
+ * 几次到几十次),轮询同热点 10min 足够;仅 Modal 打开该 tab 才挂载组件、才发请求。
+ */
+export function useAiHotModelPicks() {
+  return useQuery<AiHotModelPick[] | null>({
+    queryKey: ['aihot', 'model-picks'],
+    queryFn: () => apiFetch<AiHotModelPick[] | null>('/api/aihot/model-picks'),
     staleTime: 5 * 60_000,
     refetchInterval: 10 * 60_000,
     retry: 1,

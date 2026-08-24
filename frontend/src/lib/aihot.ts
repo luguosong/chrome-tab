@@ -15,3 +15,18 @@ export type AiHotTopic = {
 }
 
 // timeAgo 已移至 lib/timeAgo.ts(ADR-0022:changelog 版本榜共用,中立位)。
+
+/**
+ * 模型精选(CONTEXT.md「模型精选」):AIHOT 精选流 ×「模型发布」分类的条目级
+ * 策展视图,数据形态 = 后端 AihotModelPickDto 直透(裁剪口径见 backend/src/aihot.ts)。
+ */
+export type AiHotModelPick = {
+  id: string
+  title: string
+  sourceName: string | null
+  /** AIHOT 站内阅读页(中文摘要 + 原文入口),Modal 主跳目标。 */
+  aihotUrl: string | null
+  /** 第三方原文出处,Modal 次链接。 */
+  originalUrl: string | null
+  publishedAt: string | null
+}

@@ -9,4 +9,6 @@
 3. **ChangelogDrawer → ChangelogModal**:容器已是居中 Dialog,实质是砍检索框、对齐 aihot/weather Modal 范式并更名;`DetailContainer` 枚举随之收敛为 `'none' | 'modal'`(drawer 值无消费者,删)。**保留按需「翻译」按钮**(砍掉则未译版本永久英文——补译主要靠按需 POST,ADR-0017);砍检索框(版本列表纵向滚动即达,大 tile 榜单已把「找最新」解决)。
 4. **每版本发布时间:npm `time` 全表透传,不落库**。`fetchReleasedAt` 升级 `fetchReleaseInfo`({latest, times}),`releasedAt = times[latest]`,响应加 `releaseTimes`(版本号→ISO)。快照表不加列:重启恢复(loadFromDb)时置空表,启动紧跟的 refreshQuietly 拉 npm 补齐,缺失窗口仅重启后数秒——省一列迁移与读写;npm 失败时空表降级,版本行不显示时间。npm 版本号与 CHANGELOG 标题错位(ADR-0020 已注记的已知错位)的条目同样降级不显示。
 
+> **注记(2026-08-24)**:Matt Skills 的 npm `time` 只含 `1.3.0`,与 CHANGELOG/GitHub Releases 的 `1.2.x` 版本键不一致,故该外源的 `releaseTimes` 改取 GitHub Releases `tag_name`/`published_at`;其余外源仍取 npm。
+
 **代价与取舍。** tile 榜单只渲染前 30 版(全量 300+ 版 DOM 无谓,看全量走 Modal);tile 上相对时间(同 aihot `timeAgo`),Modal 里绝对日期(YYYY-MM-DD)。「更多」按钮两处复用抽成 `MoreButton` 组件。检索功能整体移除——若未来版本量级到需要检索(如全局搜某功能何时引入),在 Modal 顶部再加回,不是本次范围。

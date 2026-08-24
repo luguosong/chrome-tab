@@ -99,18 +99,27 @@ export default function ControlDrawer({
       aria-modal="true"
       aria-label="设置"
     >
-      {/* 遮罩:点击关闭 */}
-      <div className="absolute inset-0 bg-black/50" onClick={close} />
+      {/* 遮罩:点击关闭;与面板滑入同步淡入 */}
+      <div className="absolute inset-0 bg-black/40 animate-fade-in" onClick={close} />
 
-      <aside className="glass-panel glass-panel-readable relative h-full w-full max-w-sm animate-slide-in-right overflow-y-auto">
-        {/* 顶栏:tab 即标题 + 关闭 */}
-        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 px-5 py-3 border-b border-white/20 bg-[inherit]">
+      <aside className="glass-panel glass-panel-readable relative h-full w-full max-w-sm animate-slide-in-right overflow-y-auto rounded-l-3xl">
+        {/* 顶栏:tab 即标题 + 关闭。半透明底 + 自身 blur,滚动内容从栏下柔透(iOS nav 栏) */}
+        <div className="sticky top-0 z-10 flex items-center gap-3 px-5 py-3 border-b border-white/10 bg-white/35 backdrop-blur-md dark:bg-[#101012]/55">
+          {/* 分段控件(签名元素):凹轨 + 凸起玻璃滑块,等宽三段,滑块随选中滑动 */}
           <div
             role="tablist"
             aria-label="设置分类"
             onKeyDown={onTablistKeyDown}
-            className="flex gap-1"
+            className="relative grid flex-1 grid-cols-3 rounded-full bg-white/[0.07] p-1"
           >
+            <span
+              aria-hidden
+              className="glass-segment-thumb absolute top-1 bottom-1 left-1 rounded-full transition-transform duration-200"
+              style={{
+                width: 'calc((100% - 8px) / 3)',
+                transform: `translateX(${tabs.findIndex((t) => t.id === tab) * 100}%)`,
+              }}
+            />
             {tabs.map((t) => (
               <button
                 key={t.id}
@@ -120,10 +129,8 @@ export default function ControlDrawer({
                 aria-selected={tab === t.id}
                 aria-controls={`panel-${t.id}`}
                 onClick={() => setTab(t.id)}
-                className={`px-3 py-1 rounded-full text-xs transition ${
-                  tab === t.id
-                    ? 'bg-white/25 text-white'
-                    : 'text-white/60 hover:bg-white/15'
+                className={`relative z-10 rounded-full py-1.5 text-xs transition-colors ${
+                  tab === t.id ? 'text-white' : 'text-white/55 hover:text-white/85'
                 }`}
               >
                 {t.label}
@@ -134,7 +141,7 @@ export default function ControlDrawer({
             type="button"
             onClick={close}
             aria-label="关闭"
-            className="w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/70 transition hover:bg-white/25 hover:text-white focus-visible:outline-2 focus-visible:outline-white/60"
           >
             ×
           </button>

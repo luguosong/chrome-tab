@@ -240,9 +240,9 @@ function Slider({
 }) {
   return (
     <div className="mb-5">
-      <div className="flex justify-between text-xs text-white/80 mb-1.5">
+      <div className="flex items-center justify-between mb-1.5 text-xs text-white/80">
         <span>{label}</span>
-        <span className="font-mono">
+        <span className="rounded-full bg-white/10 px-2 py-0.5 font-mono text-[11px] tabular-nums text-white/70">
           {value}
           {unit}
         </span>
