@@ -59,13 +59,13 @@ check(
 const cookie = setCookie.split(';')[0]
 const authed = (path) => fetch(`${base}${path}`, { headers: { cookie } })
 
-// 4. config:数据对账(HTTP 层)——行数 ≥ 演练基线(票 11:3 页 / 19 图标,期间只增不减)
+// 4. config:数据对账(HTTP 层)——行数下限只为确认非空(2026-08-24:19→10,线上已删减至 16)
 const config = await authed('/api/config')
 const cfg = config.status === 200 ? await config.json() : {}
 const pages = cfg.pages?.length ?? 0
 const icons = cfg.icons?.length ?? 0
 check('GET /api/config → 200', config.status === 200, config.status)
-check('数据在(pages≥3, icons≥19, updatedAt 非空)', pages >= 3 && icons >= 19 && !!cfg.updatedAt, `pages=${pages} icons=${icons}`)
+check('数据在(pages≥1, icons≥10, updatedAt 非空)', pages >= 1 && icons >= 10 && !!cfg.updatedAt, `pages=${pages} icons=${icons}`)
 
 // 5. changelog:快照表已迁,秒级可服务(ADR-0017 启动恢复)
 const changelog = await authed('/api/changelog')
