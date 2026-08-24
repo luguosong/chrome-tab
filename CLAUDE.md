@@ -1,15 +1,2 @@
-# chrome-tab
-
-## Agent skills
-
-### Issue tracker
-
-Issues live as markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Canonical five labels, used as-is: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context — root `CONTEXT.md` + `docs/adr/`, created lazily by `/domain-modeling`. See `docs/agents/domain.md`.
+<!-- 事实源是同目录 AGENTS.md（Codex 原生读取）；本文件仅是 Claude Code 的导入指针，勿在此追加内容。背景见 docs/adr/0011 -->
+@AGENTS.md
