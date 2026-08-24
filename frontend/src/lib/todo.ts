@@ -1,5 +1,5 @@
 /**
- * 待办(CONTEXT.md「待办」)的前端类型与纯函数。数据形态 = 后端 TodoTaskDto
+ * 待办(CONTEXT.md「待办」)的前端类型与纯函数。数据形态 = 后端 TodoBundleDto
  * 的直透(见 backend/src/dida.ts,字段裁剪的唯一口径);null = 从未取到。
  */
 export type TodoTask = {
@@ -8,8 +8,15 @@ export type TodoTask = {
   title: string
   /** 0 无 1 低 3 中 5 高(滴答原值)。 */
   priority: number
-  /** 到期时间(ISO,滴答原串带偏移);今日+过期口径下必有,null 兜底。 */
+  /** 到期时间(ISO,滴答原串带偏移);today/week 口径下必有,inbox 常为 null。 */
   dueDate: string | null
+}
+
+/** 三视图 bundle(后端分拣好的唯一样):tile 主显 inbox,Modal 按 tab 分取;week 含 today。 */
+export type TodoBundle = {
+  today: TodoTask[]
+  week: TodoTask[]
+  inbox: TodoTask[]
 }
 
 const p2 = (n: number) => String(n).padStart(2, '0')

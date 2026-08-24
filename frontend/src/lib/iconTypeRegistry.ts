@@ -216,9 +216,10 @@ export const AIHOT_DEF: IconTypeDefinition = {
   summarize: () => null, // 网格渲染走专属 AiHotIconBody,契约字段无消费方(同 nav)
 }
 
-/** 待办:扩展类型,单例(见 CONTEXT.md「待办」——今日待办是账号级视图,无可绑实例参数)。
- *  data 无字段(单例无参数);网格渲染 1×1(未完成数 + 最紧迫一条),详情=Modal
- *  (TodoModal:完整列表 + 点掉完成 + 速记入收集箱)——首个可写图标类型。 */
+/** 待办:扩展类型,单例(见 CONTEXT.md「待办」——三视图是账号级视图,无可绑实例参数)。
+ *  data 无字段(单例无参数);网格渲染 3×2 大 tile(主体=收集箱滚动列表,ADR-0021),
+ *  详情=Modal(TodoModal 三 tab:当天/7 天/收集箱 + 点掉完成 + 速记入收集箱)——
+ *  首个可写图标类型。 */
 export const TODO_DEF: IconTypeDefinition = {
   id: 'todo',
   label: '待办',
@@ -226,6 +227,7 @@ export const TODO_DEF: IconTypeDefinition = {
   singleton: true,
   refresh: { kind: 'todo' },
   detail: 'modal',
+  size: { w: 3, h: 2 },
   editor: [],
   summarize: () => null, // 网格渲染走专属 TodoIconBody,契约字段无消费方(同 nav/aihot)
 }

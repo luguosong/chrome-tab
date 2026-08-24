@@ -1,30 +1,53 @@
 import { useTodo } from '../hooks/useTodo'
+import { tileFont } from '../lib/iconLayout'
+import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import type { Icon } from '../lib/types'
-import Tile, { TilePrimary, TileSecondary } from './Tile'
+import BigTile from './BigTile'
 
 /**
- * 待办图标的专属网格渲染(见 CONTEXT.md「待办」):1×1,块内 = 未完成数(主行
- * mono)+ 最紧迫一条标题(次行截断,后端已按到期升序排好);下方名称行固定「待办」。
- * 加载中/取数失败/从未取到一律降级 ···(失败详情与重试入口在 Modal)。
- * 今日无待办显示 0 +「今日无事」。数据自持 useTodo;操作(点掉/速记)全归 Modal。
+ * 待办图标的专属网格渲染(见 CONTEXT.md「待办」;3×2 大 tile,同「AI 热点」
+ * ADR-0021/0022 范式):外壳/标头走 BigTile,主体 = **收集箱**滚动列表(一行一条
+ * 标题单行截断——收集箱任务名短,单行换得更多条目;行首中性小圆点呼应 Modal 的
+ * 完成语汇,不承载优先级)。空收集箱居中提示。三视图切换/勾选/速记全归 Modal
+ * (标头「更多」唯一入口);tile 只做收集箱的「进箱即见」速览。数据自持 useTodo。
  */
-export default function TodoIconBody({ icon, overlay = false }: { icon: Icon; overlay?: boolean }) {
+export default function TodoIconBody({
+  icon,
+  overlay = false,
+  onOpenDetail,
+}: {
+  icon: Icon
+  overlay?: boolean
+  /** 「更多」按钮直调(ADR-0022);undefined = 编辑模式/overlay,按钮不渲染。 */
+  onOpenDetail?: () => void
+}) {
   void icon // 单例无实例参数(data 无字段);保留形参对齐其它 body 的接口
   const { data } = useTodo()
-  const tasks = data ?? []
+  const { iconScale } = useLayoutSettings()
+  const fontSize = tileFont(iconScale, 'secondary')
+  const inbox = data?.inbox ?? []
 
   return (
-    <Tile label="待办" overlay={overlay}>
-      {data === undefined || data === null ? (
-        <span className="text-white/40 text-sm leading-none">···</span>
+    <BigTile title="待办" fresh={null} onOpenDetail={onOpenDetail} moreTitle="查看全部待办" overlay={overlay}>
+      {data === undefined || data === null ? null : inbox.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center text-white/40" style={{ fontSize }}>
+          收集箱是空的
+        </div>
       ) : (
-        <>
-          <TilePrimary className="font-mono text-white/90">{tasks.length}</TilePrimary>
-          <TileSecondary className="text-white/60">
-            {tasks.length === 0 ? '今日无事' : tasks[0].title}
-          </TileSecondary>
-        </>
+        <ol
+          // 原生滚动翻阅全量(隐藏滚动条,触屏 pan-y 保原生滚动,TouchSensor 分流拖拽;同 aihot)
+          className="flex-1 min-h-0 overflow-y-auto flex flex-col px-2 py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [touch-action:pan-y]"
+        >
+          {inbox.map((t) => (
+            <li key={t.id} className="flex items-center gap-2 min-w-0 px-2 py-1 rounded-lg">
+              <span aria-hidden className="shrink-0 w-1 h-1 rounded-full bg-white/25" />
+              <span className="min-w-0 truncate text-white/90" title={t.title} style={{ fontSize }}>
+                {t.title}
+              </span>
+            </li>
+          ))}
+        </ol>
       )}
-    </Tile>
+    </BigTile>
   )
 }

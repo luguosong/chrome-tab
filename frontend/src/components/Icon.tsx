@@ -165,7 +165,7 @@ export default function Icon({
       ) : icon.type === 'aihot' ? (
         <AiHotIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
       ) : icon.type === 'todo' ? (
-        <TodoIconBody icon={icon} overlay={overlay} />
+        <TodoIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
       ) : (
         <>
           {/* nav:裸 favicon 直出(ADR-0015 注记 2026-08-23c,回归 ADR-0013):Tile bare
