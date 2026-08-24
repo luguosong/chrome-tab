@@ -4,8 +4,8 @@ import { useCompleteTodo, useCreateTodo, useTodo } from '../hooks/useTodo'
 import { dueLabel, isOverdue, type TodoBundle, type TodoTask } from '../lib/todo'
 
 /**
- * 待办详情 Modal(见 CONTEXT.md「待办」,3×2 迭代起为三视图):当天 / 7 天 / 收集箱
- * 三 tab(下划线式,计数徽标 mono 小字;7 天含当天)。列表 = 点掉按钮(乐观完成)+
+ * 待办详情 Modal(见 CONTEXT.md「待办」,3×2 迭代起为三视图):收集箱 / 当天 / 7 天
+ * 三 tab(下划线式,计数徽标 mono 小字;7 天含当天;收集箱为默认首 tab)。列表 = 点掉按钮(乐观完成)+
  * 标题 + 到期标签(过期红,收集箱无日期不显);高优先级行首色点。底部速记输入:
  * Enter → 滴答收集箱,成功即切到收集箱 tab——「速记即入箱」闭环,刚记的条目立见。
  * 失败区分:未配置(400)给出生成口令指引,其余给重试。容器:fixed 遮罩 + 居中
@@ -13,16 +13,16 @@ import { dueLabel, isOverdue, type TodoBundle, type TodoTask } from '../lib/todo
  */
 type TodoTab = keyof TodoBundle
 const TABS: { key: TodoTab; label: string }[] = [
+  { key: 'inbox', label: '收集箱' },
   { key: 'today', label: '当天' },
   { key: 'week', label: '7 天' },
-  { key: 'inbox', label: '收集箱' },
 ]
 
 export default function TodoModal({ onClose }: { onClose: () => void }) {
   const { data, error, isError, refetch, isFetching } = useTodo()
   const complete = useCompleteTodo()
   const create = useCreateTodo()
-  const [tab, setTab] = useState<TodoTab>('today')
+  const [tab, setTab] = useState<TodoTab>('inbox')
   const [draft, setDraft] = useState('')
   // 失败 = 网络错(isError)或后端从未取到(data===null,HTTP 200);
   // data===undefined 是首次加载中,不算失败(区别于 null,AiHotModal 同款)。
@@ -66,7 +66,20 @@ export default function TodoModal({ onClose }: { onClose: () => void }) {
         </button>
 
         <div className="mb-3">
-          <div className="text-lg text-white/90">待办</div>
+          <div className="flex items-center gap-2">
+            <div className="text-lg text-white/90">待办</div>
+            {/* 主动刷新:轮询间隔内想立刻对账(如在别端记了任务)时用 */}
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              disabled={isFetching}
+              aria-label="刷新"
+              title="刷新"
+              className="w-6 h-6 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center text-sm disabled:opacity-50"
+            >
+              <span className={isFetching ? 'animate-spin inline-block' : 'inline-block'}>↻</span>
+            </button>
+          </div>
           <div className="text-xs text-white/50">滴答清单 · 勾掉即完成,速记存入收集箱</div>
         </div>
 

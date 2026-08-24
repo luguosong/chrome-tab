@@ -51,7 +51,7 @@ export function endOfPlus8(now = new Date(), addDays = 0): string {
   return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())}T23:59:59+08:00`
 }
 
-/** 解析响应:非数组抛;条目缺 id/title 跳过。due 视图按到期升序(最紧迫在前,null 排尾),inbox 保留上游序。 */
+/** 解析响应:非数组抛;条目缺 id/title 跳过。优先级降序为主键(高置顶);due 视图同级按到期升序(最紧迫在前,null 排尾),inbox 同级保留上游序。 */
 export function parseTodoTasks(resp: unknown, view: 'due' | 'inbox' = 'due'): TodoTaskDto[] {
   if (!Array.isArray(resp)) throw new Error('滴答响应缺任务数组')
   const out: TodoTaskDto[] = []
@@ -68,10 +68,8 @@ export function parseTodoTasks(resp: unknown, view: 'due' | 'inbox' = 'due'): To
       dueDate: str(m, 'dueDate'),
     })
   }
-  if (view === 'due') {
-    const due = (t: TodoTaskDto) => t.dueDate ?? '9999'
-    out.sort((a, b) => due(a).localeCompare(due(b)))
-  }
+  const due = (t: TodoTaskDto) => t.dueDate ?? '9999'
+  out.sort((a, b) => b.priority - a.priority || (view === 'due' ? due(a).localeCompare(due(b)) : 0))
   return out
 }
 

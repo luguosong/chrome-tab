@@ -19,7 +19,7 @@ const WEEK_TASKS = [
   { id: 't9', projectId: 'p2', title: '7 天外', priority: 0, dueDate: '2026-09-15T00:00:00.000+0000' },
   '脏条目',
 ]
-/** filter(inbox)侧:无日期杂项,上游序保留。 */
+/** filter(inbox)侧:无日期杂项,高优 i2 应排到 i1 前。 */
 const INBOX_TASKS = [
   { id: 'i1', projectId: 'inbox1020103842', title: 'claude code学习', priority: 0 },
   { id: 'i2', projectId: 'inbox1020103842', title: '速记的牛奶', priority: 3 },
@@ -37,16 +37,16 @@ describe('endOfPlus8(UTC+8 时区边界)', () => {
 })
 
 describe('parseTodoTasks(纯解析)', () => {
-  it('due 视图:裁剪子集,按到期升序(最紧迫在前),无 due 排尾', () => {
+  it('due 视图:优先级降序为主键,同级按到期升序(最紧迫在前),无 due 排尾', () => {
     expect(parseTodoTasks(WEEK_TASKS)).toEqual([
-      expect.objectContaining({ id: 't1' }),
-      expect.objectContaining({ id: 't2' }),
-      expect.objectContaining({ id: 't3' }),
+      expect.objectContaining({ id: 't3' }), // priority 5
+      expect.objectContaining({ id: 't2' }), // priority 3
+      expect.objectContaining({ id: 't1' }), // 同 0:过期在前
       expect.objectContaining({ id: 't9' }),
     ])
   })
-  it('inbox 视图:保留上游序;due 视图不保留', () => {
-    expect(parseTodoTasks(INBOX_TASKS, 'inbox').map((t) => t.id)).toEqual(['i1', 'i2'])
+  it('inbox 视图:优先级降序,同级保留上游序;due 视图同级不保留', () => {
+    expect(parseTodoTasks(INBOX_TASKS, 'inbox').map((t) => t.id)).toEqual(['i2', 'i1'])
     expect(parseTodoTasks([...INBOX_TASKS].reverse(), 'due').map((t) => t.id)).toEqual(['i2', 'i1'])
   })
   it('非数组抛;空数组得空列(非失败)', () => {
@@ -58,7 +58,7 @@ describe('parseTodoTasks(纯解析)', () => {
 describe('splitToday(分拣,毫秒比较)', () => {
   it('today ⊆ week:到期 ≤ 今晚;偏移格式混用(ISO Z 与 +0000)不受字符串序影响', () => {
     const week = parseTodoTasks(WEEK_TASKS)
-    expect(splitToday(week, NOW).map((t) => t.id)).toEqual(['t1', 't2', 't3'])
+    expect(splitToday(week, NOW).map((t) => t.id)).toEqual(['t3', 't2', 't1'])
     // 同一时刻用 Z 后缀表达:字符串序 '+'<'Z' 会误判,毫秒比较不会
     expect(splitToday([{ ...parseTodoTasks([WEEK_TASKS[1]])[0], dueDate: '2026-08-20T00:00:00Z' }], NOW)).toHaveLength(1)
   })
@@ -120,9 +120,9 @@ describe('GET /api/todo(三视图口径与降级)', () => {
     const res = await app(base).request('/api/todo')
     expect(res.status).toBe(200)
     const body = (await res.json()) as { today: unknown[]; week: unknown[]; inbox: unknown[] }
-    expect(body.today.map((t) => (t as { id: string }).id)).toEqual(['t1', 't2', 't3'])
-    expect(body.week.map((t) => (t as { id: string }).id)).toEqual(['t1', 't2', 't3', 't9'])
-    expect(body.inbox.map((t) => (t as { id: string }).id)).toEqual(['i1', 'i2'])
+    expect(body.today.map((t) => (t as { id: string }).id)).toEqual(['t3', 't2', 't1'])
+    expect(body.week.map((t) => (t as { id: string }).id)).toEqual(['t3', 't2', 't1', 't9'])
+    expect(body.inbox.map((t) => (t as { id: string }).id)).toEqual(['i2', 'i1'])
     const search = hits.find((h) => h.url.includes('/task/search'))!
     expect(search.auth).toBe(`Bearer ${TOKEN}`)
     expect(JSON.parse(search.body)).toEqual({

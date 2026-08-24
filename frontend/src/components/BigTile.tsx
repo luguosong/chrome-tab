@@ -13,6 +13,8 @@ import MoreButton from './MoreButton'
  */
 export default function BigTile({
   title,
+  titleHref,
+  titleLinkHint,
   fresh,
   onOpenDetail,
   moreTitle,
@@ -21,6 +23,10 @@ export default function BigTile({
 }: {
   /** 标头左侧名称。 */
   title: string
+  /** 标题直达外链(新 tab);undefined = 纯文本。 */
+  titleHref?: string
+  /** 标题外链的悬浮提示(有 titleHref 才用)。 */
+  titleLinkHint?: string
   /** 榜首/最新版鲜度(ISO);null 不显示。 */
   fresh: string | null
   /** 「更多」按钮直调(ADR-0022);undefined = 编辑模式/overlay,按钮不渲染。 */
@@ -48,9 +54,22 @@ export default function BigTile({
       }
     >
       <div className="flex items-baseline justify-between gap-3 px-3.5 pt-2.5 pb-1.5 border-b border-white/10">
-        <span className="truncate text-white/90" style={{ fontSize: tileFont(iconScale, 'primary') }}>
-          {title}
-        </span>
+        {titleHref ? (
+          <a
+            href={titleHref}
+            target="_blank"
+            rel="noreferrer"
+            title={titleLinkHint}
+            className="truncate text-white/90 hover:text-accent hover:underline underline-offset-4 transition-colors"
+            style={{ fontSize: tileFont(iconScale, 'primary') }}
+          >
+            {title}
+          </a>
+        ) : (
+          <span className="truncate text-white/90" style={{ fontSize: tileFont(iconScale, 'primary') }}>
+            {title}
+          </span>
+        )}
         <span className="flex shrink-0 items-baseline gap-2.5">
           {fresh && (
             <span className="font-mono text-white/50" style={{ fontSize }}>

@@ -11,9 +11,10 @@ import BigTile from './BigTile'
  * 外壳/标头走 BigTile(ADR-0022 抽取),主体 = 单列滚动新闻流(一行一条,标题
  * 最多两行:超一行自动换行、超两行 line-clamp 省略——中文热点标题 20~40 字基本
  * 完整可读;序号锚第一行基线,top-3 accent)。点击派发(ADR-0022):整块点击
- * 无操作,详情 Modal(AiHotModal,完整榜单)唯一入口 = 标头「更多」按钮;条目链接
- * stopPropagation 外跳 AIHOT 事件页照旧。空榜/取数失败降级 ···(BigTile 空态,
- * 重试入口在 Modal)。数据自持 useAiHot。
+ * 无操作,详情 Modal(AiHotModal,完整榜单)入口 = 标头「更多」按钮;标题即
+ * 外链直达 AIHOT 站点(同待办标题直达收集箱);条目链接 stopPropagation 外跳
+ * AIHOT 事件页照旧。空榜/取数失败降级 ···(BigTile 空态,重试入口在 Modal)。
+ * 数据自持 useAiHot。
  */
 export default function AiHotIconBody({
   icon,
@@ -36,6 +37,8 @@ export default function AiHotIconBody({
   return (
     <BigTile
       title={name}
+      titleHref="https://aihot.virxact.com/"
+      titleLinkHint="打开 AIHOT 站点"
       fresh={fresh}
       onOpenDetail={onOpenDetail}
       moreTitle="查看完整榜单"

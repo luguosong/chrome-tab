@@ -9,7 +9,7 @@ import BigTile from './BigTile'
  * ADR-0021/0022 范式):外壳/标头走 BigTile,主体 = **收集箱**滚动列表(一行一条
  * 标题单行截断——收集箱任务名短,单行换得更多条目;行首中性小圆点呼应 Modal 的
  * 完成语汇,不承载优先级)。空收集箱居中提示。三视图切换/勾选/速记全归 Modal
- * (标头「更多」唯一入口);tile 只做收集箱的「进箱即见」速览。数据自持 useTodo。
+ * (标头「更多」唯一入口);标题即外链,直达滴答网页版收集箱。数据自持 useTodo。
  */
 export default function TodoIconBody({
   icon,
@@ -28,7 +28,15 @@ export default function TodoIconBody({
   const inbox = data?.inbox ?? []
 
   return (
-    <BigTile title="待办" fresh={null} onOpenDetail={onOpenDetail} moreTitle="查看全部待办" overlay={overlay}>
+    <BigTile
+      title="待办"
+      titleHref="https://dida365.com/webapp/#p/inbox/tasks"
+      titleLinkHint="打开滴答清单收集箱"
+      fresh={null}
+      onOpenDetail={onOpenDetail}
+      moreTitle="查看全部待办"
+      overlay={overlay}
+    >
       {data === undefined || data === null ? null : inbox.length === 0 ? (
         <div className="flex-1 flex items-center justify-center text-white/40" style={{ fontSize }}>
           收集箱是空的
