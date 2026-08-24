@@ -15,10 +15,11 @@ import type { Db } from './db'
 export const CAPACITY_CELLS = 81
 
 /**
- * 跨格类型格数(ADR-0021,对齐前端注册表 size):AIHOT 3×2=6 格,其余缺省 1 格。
+ * 跨格类型格数(ADR-0021,对齐前端注册表 size):AIHOT/CHANGELOG/TODO 3×2=6 格,
+ * WEATHER 3×1=3 格(首个非 3×2 跨格),其余缺省 1 格。
  * 容量口径唯一来源——requireCapacity/dissolve/POST/move/blob 全量替换共用。
  */
-export const TYPE_SPANS: Partial<Record<IconType, number>> = { AIHOT: 6, CHANGELOG: 6, TODO: 6 }
+export const TYPE_SPANS: Partial<Record<IconType, number>> = { AIHOT: 6, CHANGELOG: 6, TODO: 6, WEATHER: 3 }
 
 /** 类型格数:未声明 = 1。 */
 export const spanOf = (type: string): number =>

@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import { useIconData } from '../context/IconDataContext'
-import { locationKey, qweatherIconUrl, readWeatherLocation, type WeatherAir, type WeatherAlert, type WeatherDay, type WeatherHour, type WeatherNow } from '../lib/weather'
+import { hourHM, locationKey, qweatherIconUrl, readWeatherLocation, type WeatherAir, type WeatherAlert, type WeatherDay, type WeatherHour, type WeatherNow } from '../lib/weather'
 import type { Icon } from '../lib/types'
 
 /**
@@ -140,7 +140,7 @@ export default function WeatherModal({
 function HourCell({ h }: { h: WeatherHour }) {
   return (
     <div className="flex flex-col items-center gap-1 shrink-0">
-      <span className="text-xs text-white/60">{h.fxTime?.slice(11, 16)}</span>
+      <span className="text-xs text-white/60">{hourHM(h.fxTime)}</span>
       <img
         src={qweatherIconUrl(h.icon)}
         alt={h.text}

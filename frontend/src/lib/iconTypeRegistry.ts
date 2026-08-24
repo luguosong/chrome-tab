@@ -60,6 +60,12 @@ export interface IconTypeDefinition {
   /** 画格跨度(ADR-0021):缺省(不声明)= 1×1。跨格类型的位置仍是顺序流,CSS span 排布。 */
   size?: IconSpan
   /**
+   * 详情入口(ADR-0022 范式显式化):'block' = 整块点击打开(缺省,单格类型与跨格
+   * 但无滚动主体的类型——如天气 3×1 小时序列);'header' = 块内标头「更多」按钮是
+   * 唯一入口、整块点击无操作(跨格滚动大 tile,滚动主体与整块点击冲突)。
+   */
+  detailEntry?: 'block' | 'header'
+  /**
    * 从图标 data + 实时数据取摘要。纯函数,无 DOM。返回 null 表示无摘要或刷新失败。
    * 注:ADR-0001 契约字段。票 10 换肤后四个内置类型的网格渲染全部走专属 body
    * (StockIcon/WeatherIcon/ChangelogIcon/Icon nav 分支),网格层暂无 summarize
@@ -165,6 +171,7 @@ export const CHANGELOG_DEF: IconTypeDefinition = {
   refresh: { kind: 'changelog' },
   detail: 'modal',
   size: { w: 3, h: 2 },
+  detailEntry: 'header',
   editor: [
     {
       name: 'source',
@@ -182,8 +189,10 @@ export const CHANGELOG_DEF: IconTypeDefinition = {
   },
 }
 
-/** 天气:扩展类型,非单例,data={location:{name,adm1,adm2,lat,lon}}。取数走后端代理(ADR-0009),详情=Modal。
- *  多实例 → 取数在 IconDataContext 集中批量;网格渲染走专属 WeatherIconBody(单档极简,ADR-0016)。 */
+/** 天气:扩展类型,非单例,data={location:{name,adm1,adm2,lat,lon}}。取数走后端代理(ADR-0009),详情=Modal(点块打开)。
+ *  网格 3×1 跨格(首个非 3×2 跨格尺寸):块内小时序列(当前小时居首高亮 + 3 个未来
+ *  小时,见 WeatherIconBody);无滚动主体,不入 BigTile「更多」标头范式。多实例 →
+ *  取数在 IconDataContext 集中批量。 */
 export const WEATHER_DEF: IconTypeDefinition = {
   id: 'weather',
   label: '天气',
@@ -191,6 +200,7 @@ export const WEATHER_DEF: IconTypeDefinition = {
   singleton: false,
   refresh: { kind: 'weather' },
   detail: 'modal',
+  size: { w: 3, h: 1 },
   editor: [{ name: 'location', label: '城市', placeholder: '搜索城市' }],
   summarize: (data, live) => {
     const loc = readWeatherLocation(data)
@@ -212,6 +222,7 @@ export const AIHOT_DEF: IconTypeDefinition = {
   refresh: { kind: 'aihot' },
   detail: 'modal',
   size: { w: 3, h: 2 },
+  detailEntry: 'header',
   editor: [{ name: 'name', label: '名称', placeholder: '名称(默认 AI 热点)' }],
   summarize: () => null, // 网格渲染走专属 AiHotIconBody,契约字段无消费方(同 nav)
 }
@@ -228,6 +239,7 @@ export const TODO_DEF: IconTypeDefinition = {
   refresh: { kind: 'todo' },
   detail: 'modal',
   size: { w: 3, h: 2 },
+  detailEntry: 'header',
   editor: [],
   summarize: () => null, // 网格渲染走专属 TodoIconBody,契约字段无消费方(同 nav/aihot)
 }

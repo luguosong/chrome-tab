@@ -23,6 +23,9 @@ export function faviconPx(iconScale = 1): number {
 /** 分组块内边距(见 Icon.tsx GroupBody):块边 = favicon + 2×pad,是宽度钳制要预留的最坏块。 */
 export const GROUP_PAD_PX = 3
 
+/** 跨 3 列块拖拽幽灵估宽(24 = 2×列 gap 近似;BigTile 先例,Tile fill 变体同口径)。 */
+export const ghostWidth3Cols = (favPx: number): number => favPx * 3 + 24
+
 /**
  * 名称行行高与「块↔行」间距(常数同源,ADR-0016 注记 e):此前 iconLayout 硬编码
  * 镜像 Icon.tsx 样式侧的 Tailwind 默认(行高 1.5 / gap-1),改样式会静默错位——

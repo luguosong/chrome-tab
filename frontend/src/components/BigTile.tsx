@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { timeAgo } from '../lib/timeAgo'
-import { faviconPx, tileFont } from '../lib/iconLayout'
+import { faviconPx, ghostWidth3Cols, tileFont } from '../lib/iconLayout'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import MoreButton from './MoreButton'
 
@@ -49,7 +49,7 @@ export default function BigTile({
       style={
         overlay
           ? {
-              width: faviconPx(iconScale) * 3 + 24,
+              width: ghostWidth3Cols(faviconPx(iconScale)),
               height: faviconPx(iconScale) * 2 + 56,
               flex: 'none',
             }

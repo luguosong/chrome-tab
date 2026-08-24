@@ -7,8 +7,8 @@ import { iconCells } from './iconTypeRegistry'
 // ADR-0021:图标默认 1 格,类型可声明 size 跨格(AIHOT 3×2 = 6 格)。
 
 describe('iconCells — 类型格数(ADR-0021/0022)', () => {
-  it('未声明 size 的类型恒 1 格(nav/stock/…)', () => {
-    for (const t of ['nav', 'stock', 'weather', 'group'] as const) {
+  it('未声明 size 的类型恒 1 格(nav/stock/group)', () => {
+    for (const t of ['nav', 'stock', 'group'] as const) {
       expect(iconCells(t)).toBe(1)
     }
   })
@@ -16,6 +16,7 @@ describe('iconCells — 类型格数(ADR-0021/0022)', () => {
   it('跨格类型 3×2 = 6 格(aihot / changelog,ADR-0022 changelog 为第二消费者)', () => {
     expect(iconCells('aihot')).toBe(6)
     expect(iconCells('changelog')).toBe(6)
+    expect(iconCells('todo')).toBe(6)
   })
 })
 
@@ -45,14 +46,14 @@ describe('cellsUsed — 顶层图标格数求和', () => {
     expect(cellsUsed([{ parentId: null, type: 'aihot' as const }])).toBe(6)
   })
 
-  it('混合:3 个 1 格 + 1 个 aihot = 9 格', () => {
+  it('混合:2 个 1 格 + weather 3 格 + aihot 6 格 = 11 格', () => {
     const icons = [
       { parentId: null, type: 'nav' as const },
       { parentId: null, type: 'stock' as const },
       { parentId: null, type: 'weather' as const },
       { parentId: null, type: 'aihot' as const },
     ]
-    expect(cellsUsed(icons)).toBe(9)
+    expect(cellsUsed(icons)).toBe(11)
   })
 })
 

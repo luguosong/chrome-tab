@@ -115,8 +115,9 @@ export default function Icon({
   //   - group:点开分组弹层(票 08)——任意模式(编辑态也要先开弹层才能组内排序)
   //   - 其余类型:编辑模式一律不触发;查看模式按 detail 字段
   //     - detail='none':nav 渲染为 <a> 当前标签打开(保留原生中键/右键菜单)
-  //     - detail='modal':查看态开详情;单格类型 = 整块点击,跨格大 tile = 块内
-  //       「更多」按钮直调(ADR-0022,openDetail 下发给 body),整块点击无操作
+  //     - detail='modal':查看态开详情;整块点击(detailEntry 缺省 'block'——单格类型
+  //       与跨格无滚动主体的类型如天气 3×1);跨格滚动大 tile(detailEntry='header',
+  //       ADR-0022)= 块内「更多」按钮直调(openDetail 下发给 body),整块点击无操作
   const isNavLink = icon.type === 'nav' && !editing
   const Tag = isNavLink ? 'a' : 'div'
   const linkProps = isNavLink
@@ -126,7 +127,7 @@ export default function Icon({
   // 组图标点击 = 开弹层(票 08):任意模式(编辑态开弹层才能组内排序),不与编辑态互斥
   const onGroupOpen = icon.type === 'group' && onOpenGroup ? () => onOpenGroup(icon) : undefined
   const openDetail = !editing && hasPanel && onOpenDetail ? () => onOpenDetail(icon) : undefined
-  const onClick = onGroupOpen ?? (def?.size ? undefined : openDetail)
+  const onClick = onGroupOpen ?? (def?.detailEntry === 'header' ? undefined : openDetail)
 
   const interactive = isNavLink || onClick !== undefined
 

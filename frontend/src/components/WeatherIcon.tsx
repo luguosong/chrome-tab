@@ -1,24 +1,52 @@
 import { useIconData } from '../context/IconDataContext'
-import { locationKey, qweatherIconUrl, readWeatherLocation } from '../lib/weather'
+import { hourHM, hourlyWindow, locationKey, qweatherIconUrl, readWeatherLocation } from '../lib/weather'
 import type { Icon } from '../lib/types'
-import Tile, { TilePrimary } from './Tile'
+import Tile, { TilePrimary, TileSecondary } from './Tile'
 
 /**
- * 天气图标的专属网格渲染(见 ADR-0009;ADR-0016 单档;注记 2026-08-23b/c 块内两行):
- * 块内 = 和风状况图标(反色适配玻璃底,尺寸随块百分比缩放)+ 温度(mono 次级行)——
- * 当前状态;下方城市名行(多实例互区分的判据,取数失败也照常显示)= 这是什么。
- * 湿度/风向/空气/预警/24h/7d 预报全归详情 Modal。天气数据来自 IconDataContext 集中
+ * 天气图标的专属网格渲染(见 ADR-0009;3×1 跨格,首个非 3×2 跨格尺寸,CONTEXT.md「天气」):
+ * 块内 = 小时序列横排 4 格(hourlyWindow 过滤缓存滞留条目,当前小时天然居首)——首格
+ * 「现在」高亮(当前小时格即实况职责),其余格 HH:mm 直取 fxTime(同 Modal 口径,不做
+ * 时区换算);每格 = 时间 + 状况图标(反色适配玻璃底)+ 温度。hourly 缺失/空窗 → 降级
+ * 实况摘要(图标 + 温度);实况也无 → ···。城市名行(多实例互区分的判据,取数失败也
+ * 照常显示)= 这是什么;完整 24h/7d/空气/预警归详情 Modal(点块打开,detailEntry 缺省
+ * 'block'——无滚动主体,不入 BigTile「更多」标头范式)。数据来自 IconDataContext 集中
  * 下发的 weather 批量结果(键 locationKey),由 Icon.tsx 作为外壳在 type==='weather'
- * 时委托调用。「上块下字」组装与字号档(ADR-0016 注记 e)归 Tile。
+ * 时委托调用。「上块下字」组装与字号档(ADR-0016 注记 e)归 Tile(fill 变体撑满画格)。
  */
 export default function WeatherIconBody({ icon, overlay = false }: { icon: Icon; overlay?: boolean }) {
   const { weather } = useIconData()
   const loc = readWeatherLocation(icon.data)
-  const now = loc ? weather[locationKey(loc)]?.now ?? null : null
+  const bundle = loc ? weather[locationKey(loc)] ?? null : null
+  const now = bundle?.now ?? null
+  const hours = hourlyWindow(bundle?.hourly, new Date())
 
   return (
-    <Tile label={loc?.name || '天气'} overlay={overlay}>
-      {now ? (
+    <Tile label={loc?.name || '天气'} overlay={overlay} fill>
+      {hours.length ? (
+        <div className="flex w-full h-full items-stretch gap-[4%]">
+          {hours.map((h, i) => (
+            <div
+              key={h.fxTime}
+              className={
+                'flex-1 min-w-0 flex flex-col items-center justify-center gap-[6%] ' +
+                (i === 0 ? 'bg-white/15 rounded-[14%]' : '')
+              }
+            >
+              <TileSecondary className="text-white/60">
+                {i === 0 ? '现在' : hourHM(h.fxTime)}
+              </TileSecondary>
+              <img
+                src={qweatherIconUrl(h.icon)}
+                alt={h.text}
+                className="w-1/2 aspect-square object-contain"
+                style={{ filter: 'invert(1)' }}
+              />
+              <TilePrimary className="font-mono text-white/90">{h.temp}°</TilePrimary>
+            </div>
+          ))}
+        </div>
+      ) : now ? (
         <>
           <img
             src={qweatherIconUrl(now.icon)}

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   canAdd,
   get,
+  iconCells,
   listTypes,
   register,
   type IconTypeDefinition,
@@ -197,12 +198,26 @@ describe('AI 热点类型 aihot(单例,CONTEXT.md「AI 热点」)', () => {
     expect(get('aihot')?.detail).toBe('modal')
   })
 
-  it('声明跨格 size 3×2(ADR-0021/0022):aihot 与 changelog 跨格,其余不声明', () => {
+  it('声明跨格 size(ADR-0021):aihot/changelog/todo 3×2,weather 3×1(首个非 3×2),其余不声明', () => {
     expect(get('aihot')?.size).toEqual({ w: 3, h: 2 })
     expect(get('changelog')?.size).toEqual({ w: 3, h: 2 })
-    for (const t of ['nav', 'stock', 'weather', 'group'] as const) {
+    expect(get('todo')?.size).toEqual({ w: 3, h: 2 })
+    expect(get('weather')?.size).toEqual({ w: 3, h: 1 })
+    for (const t of ['nav', 'stock', 'group'] as const) {
       expect(get(t)?.size).toBeUndefined()
     }
+  })
+
+  it('detailEntry(ADR-0022 显式化):跨格滚动大 tile = header,其余(含跨格无滚动的天气)缺省 block', () => {
+    for (const t of ['aihot', 'changelog', 'todo'] as const) {
+      expect(get(t)?.detailEntry).toBe('header')
+    }
+    expect(get('weather')?.detailEntry).toBeUndefined()
+    expect(get('nav')?.detailEntry).toBeUndefined()
+  })
+
+  it('iconCells:weather 3×1 占 3 格', () => {
+    expect(iconCells('weather')).toBe(3)
   })
 
   it('单例:不存在时允许,已存在时拒绝(跨页全局判断)', () => {

@@ -111,3 +111,29 @@ export function readWeatherLocation(data: Record<string, unknown> | null): Weath
     lon: l.lon,
   }
 }
+
+/**
+ * 小时条目显示时刻:ISO 串直取 HH:mm,不做时区换算——fxTime 即城市当地时间
+ * (网格 3×1 小时序列与详情 Modal 共用的唯一口径)。
+ */
+export const hourHM = (fxTime: string): string => fxTime?.slice(11, 16)
+
+/**
+ * 天气 3×1 图标的小时序列窗口(见 CONTEXT.md「天气」):丢弃 fxTime 早于当前整点的
+ * 条目(后端 hourly 缓存 30min,过整点后首位可能滞留上一小时),取前 4 条(当前
+ * 小时 + 3 个未来)——过滤后首位即当前小时,「现在」标记天然居首。比较按绝对时刻
+ * (fxTime 带城市时区偏移,与浏览器 now 对齐)。空/非法 fxTime 跳过;hourly 缺失
+ * 或全被过滤 → 空窗(调用方降级实况摘要)。
+ */
+export function hourlyWindow(hourly: WeatherHour[] | undefined, now: Date): WeatherHour[] {
+  if (!hourly?.length) return []
+  const floor = new Date(now)
+  floor.setMinutes(0, 0, 0)
+  const floorMs = floor.getTime()
+  return hourly
+    .filter((h) => {
+      const t = Date.parse(h.fxTime)
+      return !Number.isNaN(t) && t >= floorMs
+    })
+    .slice(0, 4)
+}
