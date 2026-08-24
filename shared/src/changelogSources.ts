@@ -1,10 +1,12 @@
 /**
  * 更新日志的外源注册表(ADR-0020):每源 = npm 包(版本列表与发布日期的权威源,
- * ADR-0016)+ repo raw CHANGELOG.md(版本块原文,译制哈希的输入)。
- * 前后端共享:后端按它取数,前端按它取显示名与源下拉。枚举两源、代码即配置;
- * 第三个真实外源出现时再考虑自由输入。
+ * ADR-0016)+ 版本块原文来源——repo raw CHANGELOG.md(译制哈希的输入);changelogUrl
+ * 缺省即「无原文源」(如 Codex:上游 CHANGELOG.md 仅一行链接、GitHub release 正文是
+ * 空壳),版本流由后端从 npm time 表合成(剔 prerelease),无原文可译,详情只给外链。
+ * 前后端共享:后端按它取数,前端按它取显示名与源下拉。代码即配置;
+ * 需要自由输入源时再考虑。
  */
-export type ChangelogSourceId = 'claude-code' | 'matt-skills'
+export type ChangelogSourceId = 'claude-code' | 'matt-skills' | 'codex'
 
 export interface ChangelogSourceDef {
   id: ChangelogSourceId
@@ -12,8 +14,10 @@ export interface ChangelogSourceDef {
   label: string
   /** npm 包名:packument 的 dist-tags.latest + time[latest] = 最新版号与发布日期。 */
   npmPackage: string
-  /** repo raw CHANGELOG.md 地址。 */
-  changelogUrl: string
+  /** repo raw CHANGELOG.md 地址;缺省 = 无原文源(版本流走 npm 合成,详见文件头)。 */
+  changelogUrl?: string
+  /** 无原文源的详情外链(GitHub Releases 列表页);有 changelogUrl 的源不设。 */
+  releasesUrl?: string
 }
 
 export const CHANGELOG_SOURCES: readonly ChangelogSourceDef[] = [
@@ -28,6 +32,12 @@ export const CHANGELOG_SOURCES: readonly ChangelogSourceDef[] = [
     label: 'Matt Skills',
     npmPackage: 'mattpocock-skills',
     changelogUrl: 'https://raw.githubusercontent.com/mattpocock/skills/main/CHANGELOG.md',
+  },
+  {
+    id: 'codex',
+    label: 'Codex',
+    npmPackage: '@openai/codex',
+    releasesUrl: 'https://github.com/openai/codex/releases',
   },
 ]
 

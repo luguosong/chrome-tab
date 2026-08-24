@@ -20,9 +20,13 @@ await bootstrap(db, {
 // cookie secure 照 Java prod profile:NODE_ENV=production 下默认 true,COOKIE_SECURE=false 可关(裸 IP HTTP 部署)
 const cookieSecure =
   process.env.NODE_ENV === 'production' && process.env.COOKIE_SECURE !== 'false'
-// 每源一个 Service(ADR-0020):快照/预热/定时独立,译文表按块哈希跨源共享
+// 每源一个 Service(ADR-0020):快照/预热/定时独立,译文表按块哈希跨源共享;
+// 无原文源(changelogUrl 缺省,如 codex)译制窗口传 0——合成空块无可译内容
 const changelog = Object.fromEntries(
-  CHANGELOG_SOURCES.map((s) => [s.id, new ChangelogService(db, s.id, prodChangelogDeps(s.id))]),
+  CHANGELOG_SOURCES.map((s) => [
+    s.id,
+    new ChangelogService(db, s.id, prodChangelogDeps(s.id), s.changelogUrl ? 5 : 0),
+  ]),
 ) as ChangelogServices
 // 和风天气(ADR-0009):Key/个人专用主机走环境变量、不入库;缺省未配置 → 端点 500
 const app = createApp({

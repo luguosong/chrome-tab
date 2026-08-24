@@ -50,6 +50,18 @@ export function splitBlocks(markdown: string): Blocks {
 
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex')
 
+/** 无原文源(如 Codex,changelogUrl 缺省)的版本流合成:npm time 表 → 每版本一行 `## `
+ *  标题空块的 markdown,下游 splitBlocks / 前端 parseChangelog 照常切出版本列表(块内无
+ *  条目、也无从译制)。剔 created/modified 元键与 prerelease(alpha 比稳定版多且新,进榜
+ *  只添噪);npm time 值为等长 ISO 串,字典序即时间序,倒排 = 新版在前。 */
+export function synthesizeVersionsMarkdown(times: Record<string, string>): string {
+  return Object.entries(times)
+    .filter(([v]) => /^\d+(\.\d+)*$/.test(v))
+    .sort(([, a], [, b]) => b.localeCompare(a))
+    .map(([v]) => `## ${v}\n`)
+    .join('')
+}
+
 // ---- 编排(Java ChangelogService)----
 
 /** IO 协作器,测试注入假实现(Java 的函数式接口对应物)。 */
@@ -297,22 +309,33 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
   const def = getChangelogSource(source)
   const apiKey = process.env.AIHUBMIX_API_KEY ?? ''
   const models = modelCandidates()
-  return {
-    fetchMarkdown: () => fetchText(def.changelogUrl, 60_000),
-    fetchReleaseInfo: async () => {
-      try {
-        const root = JSON.parse(
-          await fetchText(`https://registry.npmjs.org/${def.npmPackage}`, 30_000),
-        ) as {
-          'dist-tags'?: { latest?: string }
-          time?: Record<string, string>
-        }
-        return { latest: root['dist-tags']?.latest ?? null, times: root.time ?? {} }
-      } catch (e) {
-        console.warn('拉取 npm 发布信息失败,版本时间降级:', e)
-        return null
+  // 解构到 const:narrowing 才能保进 fetchText 回调(属性访问的收窄不进闭包)
+  const rawUrl = def.changelogUrl
+  const fetchNpmReleaseInfo = async () => {
+    try {
+      const root = JSON.parse(
+        await fetchText(`https://registry.npmjs.org/${def.npmPackage}`, 30_000),
+      ) as {
+        'dist-tags'?: { latest?: string }
+        time?: Record<string, string>
       }
-    },
+      return { latest: root['dist-tags']?.latest ?? null, times: root.time ?? {} }
+    } catch (e) {
+      console.warn('拉取 npm 发布信息失败,版本时间降级:', e)
+      return null
+    }
+  }
+  return {
+    // 无原文源(changelogUrl 缺省,如 codex):版本流从 npm time 表合成。npm 拉不动作
+    // 主链路失败上抛——refresh 沿用旧快照 / 冷启动 500,与「拉 CHANGELOG.md 失败」同语义。
+    fetchMarkdown: rawUrl
+      ? () => fetchText(rawUrl, 60_000)
+      : async () => {
+          const info = await fetchNpmReleaseInfo()
+          if (!info) throw new Error(`npm packument(${def.npmPackage}) 拉取失败,无法合成版本流`)
+          return synthesizeVersionsMarkdown(info.times)
+        },
+    fetchReleaseInfo: fetchNpmReleaseInfo,
     translate: async (block) => {
       if (!apiKey) return null // Key 缺失:Service 层据此透传英文原文
       let lastErr: unknown

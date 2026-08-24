@@ -10,6 +10,7 @@ import {
   modelCandidates,
   prodChangelogDeps,
   splitBlocks,
+  synthesizeVersionsMarkdown,
   type ChangelogDeps,
 } from './changelog'
 
@@ -68,6 +69,26 @@ describe('splitBlocks(块边界即哈希边界,错一字符即失配)', () => {
 
   it('title 去掉 ## 前缀(与前端 parseChangelog 的 h[1].trim() 同规则)', () => {
     expect(splitBlocks('## 2.0.14\n- x\n').blocks[0]!.title).toBe('2.0.14')
+  })
+})
+
+describe('synthesizeVersionsMarkdown(无原文源版本流合成,如 codex)', () => {
+  // npm time 表形态:含 created/modified 元键,prerelease(alpha)比稳定版多且新
+  const CODEX_TIMES = {
+    created: '2025-04-01T00:00:00.000Z',
+    modified: '2026-08-23T00:00:00.000Z',
+    '0.150.0-alpha.7': '2026-08-23T12:00:00.000Z',
+    '0.149.0-alpha.4.3': '2026-08-23T10:00:00.000Z',
+    '0.148.0': '2026-08-20T00:00:00.000Z',
+    '0.149.1': '2026-08-24T00:28:28.000Z',
+  }
+
+  it('剔元键与 prerelease,按发布时间倒序,每版本一行 ## 空块', () => {
+    expect(synthesizeVersionsMarkdown(CODEX_TIMES)).toBe('## 0.149.1\n## 0.148.0\n')
+  })
+
+  it('空表 → 空串(splitBlocks 得 0 块,前端空榜)', () => {
+    expect(synthesizeVersionsMarkdown({})).toBe('')
   })
 })
 
@@ -327,6 +348,74 @@ describe('多源(ADR-0020:每源一 Service,快照按源分行;译文按块哈�
   })
 })
 
+describe('无原文源(codex:changelogUrl 缺省,版本流 npm 合成、零译制)', () => {
+  const CODEX_TIMES = {
+    created: '2025-04-01T00:00:00.000Z',
+    '0.150.0-alpha.7': '2026-08-23T12:00:00.000Z',
+    '0.148.0': '2026-08-20T00:00:00.000Z',
+    '0.149.1': '2026-08-24T00:28:28.000Z',
+  }
+
+  it('translateRecent=0:refresh 全程零 LLM 调用,合成版本行照常入快照', async () => {
+    const db = openDb(':memory:').db
+    let calls = 0
+    const s = new ChangelogService(
+      db,
+      'codex',
+      {
+        fetchMarkdown: async () => synthesizeVersionsMarkdown(CODEX_TIMES),
+        translate: async (b) => (calls++, TRANSLATOR(b)),
+        fetchReleaseInfo: async () => ({ latest: '0.149.1', times: CODEX_TIMES }),
+      },
+      0, // index.ts 对无原文源的同款构造
+    )
+
+    const snap = await s.get()
+
+    expect(snap.markdown).toBe('## 0.149.1\n## 0.148.0\n')
+    expect(snap.translatedVersions).toEqual([])
+    expect(snap.releaseTimes).toEqual(CODEX_TIMES)
+    expect(calls).toBe(0)
+    const row = await db
+      .selectFrom('changelog_snapshots')
+      .selectAll()
+      .where('source', '=', 'codex')
+      .executeTakeFirst()
+    expect(row?.raw_markdown).toBe('## 0.149.1\n## 0.148.0\n')
+    expect(row?.released_at).toBe('2026-08-24T00:28:28.000Z')
+  })
+
+  it('重启恢复:合成快照从 loadFromDb 重建,块标题即版本行', async () => {
+    const db = openDb(':memory:').db
+    await new ChangelogService(
+      db,
+      'codex',
+      {
+        fetchMarkdown: async () => synthesizeVersionsMarkdown(CODEX_TIMES),
+        translate: async () => null,
+        fetchReleaseInfo: async () => null,
+      },
+      0,
+    ).get()
+
+    const restarted = new ChangelogService(
+      db,
+      'codex',
+      {
+        fetchMarkdown: async () => { throw new Error('任何外呼即失败') },
+        translate: async () => { throw new Error('任何 LLM 即失败') },
+        fetchReleaseInfo: async () => null,
+      },
+      0,
+    )
+    await restarted.loadFromDb()
+
+    const snap = await restarted.get()
+    expect(snap.blocks.blocks.map((b) => b.title)).toEqual(['0.149.1', '0.148.0'])
+    expect(snap.markdown).toContain('## 0.149.1')
+  })
+})
+
 describe('extractContent(畸形响应 → null 触发降级,不抛)', () => {
   it('取 choices[0].message.content', () => {
     expect(extractContent({ choices: [{ message: { content: '译文' } }] })).toBe('译文')
@@ -423,11 +512,38 @@ describe('translate 候选链(候选失效=403/404/no_available_channel 换下�
   })
 })
 
+describe('无原文源 prodChangelogDeps(codex):fetchMarkdown 走 npm 合成', () => {
+  const realFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = realFetch
+  })
+
+  it('packument time 表 → 合成 markdown;npm 不可达 → 上抛(refresh 沿用旧快照/冷启动 500 同 CHANGELOG.md 拉取失败)', async () => {
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            'dist-tags': { latest: '0.149.1' },
+            time: { created: '2025-04-01T00:00:00.000Z', '0.150.0-alpha.7': '2026-08-23T12:00:00.000Z', '0.148.0': '2026-08-20T00:00:00.000Z', '0.149.1': '2026-08-24T00:28:28.000Z' },
+          }),
+          { status: 200 },
+        ),
+    ) as typeof fetch
+    await expect(prodChangelogDeps('codex').fetchMarkdown()).resolves.toBe('## 0.149.1\n## 0.148.0\n')
+
+    globalThis.fetch = vi.fn(async () => new Response('nope', { status: 503 })) as typeof fetch
+    await expect(prodChangelogDeps('codex').fetchMarkdown()).rejects.toThrow('npm packument')
+  })
+})
+
 // ---- HTTP 契约(app.request() seam,api-contract.md §6)----
 
 const httpDb = openDb(':memory:').db
 const service = makeService(httpDb)
-const app = createApp({ db: httpDb, changelog: { 'claude-code': service, 'matt-skills': service } })
+const app = createApp({
+  db: httpDb,
+  changelog: { 'claude-code': service, 'matt-skills': service, codex: makeService(httpDb, {}, 'codex') },
+})
 
 let cookie = ''
 beforeAll(async () => {
@@ -468,7 +584,7 @@ describe('GET /api/changelog ?source 分流(ADR-0020)', () => {
   )
   const app2 = createApp({
     db: db2,
-    changelog: { 'claude-code': makeService(db2), 'matt-skills': svcB },
+    changelog: { 'claude-code': makeService(db2), 'matt-skills': svcB, codex: makeService(db2, {}, 'codex') },
   })
   let cookie2 = ''
   beforeAll(async () => {

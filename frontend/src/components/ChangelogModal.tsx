@@ -26,7 +26,11 @@ export default function ChangelogModal({
   source: ChangelogSourceId
   onClose: () => void
 }) {
-  const sourceLabel = getChangelogSource(source).label
+  const def = getChangelogSource(source)
+  const sourceLabel = def.label
+  // 无原文源(如 Codex,changelogUrl 缺省):版本流为 npm 合成空块,无条目无译制,
+  // 每版本行给 GitHub 外链代替,「翻译」按钮不渲染。
+  const noRaw = !def.changelogUrl
   const { data, isError, refetch } = useChangelog(source)
   const translateMut = useTranslateVersions(source)
 
@@ -110,6 +114,12 @@ export default function ChangelogModal({
                   <div className="text-white/60 text-sm py-4">加载中…</div>
                 )}
 
+                {noRaw && versions.length > 0 && (
+                  <p className="mb-2 text-xs text-white/40">
+                    上游无逐版更新说明正文,详情走每版本行的 GitHub 外链。
+                  </p>
+                )}
+
                 <ol className="relative pl-6 [&_a]:text-accent [&_a]:underline">
                   {/* 时间线左轨 */}
                   <span
@@ -147,7 +157,18 @@ export default function ChangelogModal({
                               最新
                             </span>
                           )}
-                          {!translated.has(v.title) && (
+                          {noRaw && (
+                            <a
+                              href={def.releasesUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="GitHub Releases(新标签页打开)"
+                              className="rounded-full border border-white/25 px-2 py-0.5 text-[10px] leading-none text-white/60 hover:border-accent hover:text-accent transition-colors"
+                            >
+                              GitHub ↗
+                            </a>
+                          )}
+                          {!noRaw && !translated.has(v.title) && (
                             <button
                               type="button"
                               disabled={translateMut.isPending}
