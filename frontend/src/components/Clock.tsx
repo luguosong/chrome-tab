@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { getAlmanac } from '../lib/lunar'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
 
 /** 顶部时钟:iOS 锁屏式大字裸排(不上玻璃),双层 text-shadow 保可读 —— 暗晕压住
  *  亮壁纸 + 1px 白光提字重(原型 prototype/liquid-glass @3f10ddf 定稿)。
  *  字号(clockFont)与时制(clock24h)来自「布局设置」;字号只作用大字时间行,
- *  日期小行不随动。显隐由 DashboardPage 按 clockVisible 控制挂载。 */
+ *  日期小行不随动。显隐由 DashboardPage 按 clockVisible 控制挂载。
+ *  日期行附农历(逢节气括号附注),第三行宜忌各 3 条、title 承载完整列表(lib/lunar)。 */
 export default function Clock() {
   const { clockFont, clock24h } = useLayoutSettings()
   const [now, setNow] = useState(() => new Date())
@@ -18,6 +20,9 @@ export default function Clock() {
     hour12: !clock24h,
   })
   const w = '日一二三四五六'[now.getDay()]
+  // 农历/宜忌按天重算:dep 是日期键而非 now,10s 心跳不触发
+  const dayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`
+  const almanac = useMemo(() => getAlmanac(now), [dayKey]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div
       className="text-white select-none"
@@ -30,7 +35,14 @@ export default function Clock() {
         {time}
       </div>
       <small className="block text-xs font-light mt-1 opacity-85">
-        {now.getMonth() + 1}月{now.getDate()}日 周{w}
+        {now.getMonth() + 1}月{now.getDate()}日 周{w} · {almanac.lunarText}
+        {almanac.term ? `(${almanac.term})` : ''}
+      </small>
+      <small
+        className="block text-xs font-light mt-0.5 opacity-85"
+        title={`宜:${almanac.fullYi.join(' ')} / 忌:${almanac.fullJi.join(' ')}`}
+      >
+        宜 {almanac.yi.join(' ')} · 忌 {almanac.ji.join(' ')}
       </small>
     </div>
   )
