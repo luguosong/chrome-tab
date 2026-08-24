@@ -125,7 +125,11 @@ describe('GET /api/todo(三视图口径与降级)', () => {
     expect(body.inbox.map((t) => (t as { id: string }).id)).toEqual(['i1', 'i2'])
     const search = hits.find((h) => h.url.includes('/task/search'))!
     expect(search.auth).toBe(`Bearer ${TOKEN}`)
-    expect(JSON.parse(search.body)).toEqual({ status: [0], dueTo: '2026-08-31T23:59:59+08:00' })
+    expect(JSON.parse(search.body)).toEqual({
+      keywords: '', // 上游 2026-08-24 起要求该字段必须存在
+      status: [0],
+      dueTo: '2026-08-31T23:59:59+08:00',
+    })
     const filter = hits.find((h) => h.url.includes('/task/filter'))!
     expect(JSON.parse(filter.body)).toEqual({ projectIds: ['inbox'], status: [0] })
   })

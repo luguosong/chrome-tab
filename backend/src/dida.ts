@@ -122,6 +122,7 @@ export function createDidaService(cfg: DidaConfig, baseUrl = DEFAULT_BASE) {
         const now = new Date()
         const [week, inbox] = await Promise.all([
           postJson('/open/v1/task/search', {
+            keywords: '', // 上游 2026-08-24 起缺失即 500(空串 = 不过滤,线上实测)
             status: [0],
             dueTo: endOfPlus8(now, WEEK_DAYS),
           }).then((r) => parseTodoTasks(r, 'due')),
