@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { aihotRoutes, createAihotService, parseHotTopics, parseModelPicks } from './aihot'
+import { aihotRoutes, createAihotService, parseDaily, parseHotTopics, parseModelPicks } from './aihot'
 
 // CONTEXT.md「AI 热点」。纯解析直测 + HTTP 层经真实 stub 上游(127.0.0.1 随机端口)
 // 探测缓存/降级;鉴权横切由契约测试统一覆盖,此处直挂路由(同 weather.test)。
@@ -104,6 +104,73 @@ describe('parseModelPicks(纯解析)', () => {
   })
 })
 
+// dailies/latest(AI 日报)fixture:report 包一层;条目无 id(区别于 items 流),
+// lead/flashes/generatedAt 等不透传(lead 当天可为 null、flashes 可为空,不稳定)。
+const DAILY_FIXTURE = {
+  schemaVersion: 1,
+  report: {
+    date: '2026-08-25',
+    generatedAt: '2026-08-25T00:00:00.987Z',
+    windowStart: '2026-08-24T16:00:00.000Z',
+    windowEnd: '2026-08-25T00:00:00.000Z',
+    links: { aihot: 'https://aihot.virxact.com/daily' },
+    attribution: { name: 'AIHOT', url: 'https://aihot.virxact.com' },
+    lead: null,
+    sections: [
+      {
+        label: '模型发布/更新',
+        items: [
+          {
+            title: 'GPT-5.6 登陆 Kiro,为开发者提升性价比',
+            summary: 'GPT-5.6 模型家族现已登陆软件开发智能体 Kiro…',
+            source: { name: 'OpenAI：官网动态（RSS）' },
+            links: {
+              aihot: 'https://aihot.virxact.com/items/cmt7nzq6i2c27ro73tqxagz44',
+              original: 'https://openai.com/index/gpt-56-kiro',
+            },
+            attribution: { name: 'OpenAI' },
+          },
+          { summary: '缺 title,跳过' },
+        ],
+      },
+      { label: '行业动态', items: [] },
+      'not-a-section',
+    ],
+    flashes: [],
+  },
+}
+
+describe('parseDaily(纯解析)', () => {
+  it('裁剪为前端消费字段子集(generatedAt/lead/flashes 不透传)', () => {
+    expect(parseDaily(DAILY_FIXTURE)).toEqual({
+      date: '2026-08-25',
+      sections: [
+        {
+          label: '模型发布/更新',
+          items: [
+            {
+              title: 'GPT-5.6 登陆 Kiro,为开发者提升性价比',
+              summary: 'GPT-5.6 模型家族现已登陆软件开发智能体 Kiro…',
+              sourceName: 'OpenAI：官网动态（RSS）',
+              aihotUrl: 'https://aihot.virxact.com/items/cmt7nzq6i2c27ro73tqxagz44',
+              originalUrl: 'https://openai.com/index/gpt-56-kiro',
+            },
+          ],
+        },
+        { label: '行业动态', items: [] },
+      ],
+    })
+  })
+
+  it('缺 report.sections 抛;空 sections 得空报(非失败,出刊前)', () => {
+    expect(() => parseDaily({ items: [] })).toThrow('缺 report.sections')
+    expect(parseDaily({ report: { date: '2026-08-25', sections: [] } })).toEqual({
+      date: '2026-08-25',
+      sections: [],
+    })
+  })
+})
+
 // ── HTTP 层(stub 上游)─────────────────────────────────────────────────────────
 
 let upstream: Server | null = null
@@ -125,8 +192,12 @@ async function startUpstream(): Promise<string> {
     seenUa = req.headers['user-agent'] ?? ''
     res.setHeader('content-type', 'application/json')
     res.statusCode = upstreamStatus
-    // 按路径分档:items(模型精选)与 hot-topics 各回各的 fixture
-    const body = req.url?.includes('/items') ? PICKS_FIXTURE : FIXTURE
+    // 按路径分档:items(模型精选)/ dailies(AI 日报)与 hot-topics 各回各的 fixture
+    const body = req.url?.includes('/items')
+      ? PICKS_FIXTURE
+      : req.url?.includes('/dailies')
+        ? DAILY_FIXTURE
+        : FIXTURE
     res.end(JSON.stringify(upstreamStatus === 200 ? body : { status: 500, title: 'internal' }))
   })
   await new Promise<void>((r) => upstream!.listen(0, '127.0.0.1', r))
@@ -199,5 +270,15 @@ describe('GET /api/aihot/model-picks', () => {
     const res = await client(base).request('/api/aihot/model-picks')
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual(parseModelPicks(PICKS_FIXTURE))
+  })
+})
+
+describe('GET /api/aihot/daily', () => {
+  // 缓存/降级同用 createCachedSource,由 hot-topics 用例覆盖;同样只验证路由打对路径。
+  it('200 返回裁剪后的最新一期日报', async () => {
+    const base = await startUpstream()
+    const res = await client(base).request('/api/aihot/daily')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual(parseDaily(DAILY_FIXTURE))
   })
 })

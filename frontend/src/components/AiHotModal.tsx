@@ -1,23 +1,28 @@
 import { useEffect, useState } from 'react'
-import { useAiHot, useAiHotModelPicks } from '../hooks/useAiHot'
+import { useAiHot, useAiHotDaily, useAiHotModelPicks } from '../hooks/useAiHot'
+import { formatDailyDate } from '../lib/aihot'
 import { timeAgo } from '../lib/timeAgo'
 import { extractString } from '../lib/iconData'
 import type { Icon } from '../lib/types'
 
 /**
- * AI 热点详情 Modal(见 CONTEXT.md「AI 热点」,与天气同范式的详情容器),双 tab:
+ * AI 热点详情 Modal(见 CONTEXT.md「AI 热点」,与天气同范式的详情容器),三 tab:
  *  - 热点榜(默认):事件级聚合排名流,条目主跳 AIHOT 站内事件页(links.story,
  *    报道时间线 + AI 综述),原文出处(links.original)作次链接直给;
  *  - 模型精选:精选流 ×「模型发布」分类的条目级策展(CONTEXT.md「模型精选」),
- *    主跳 AIHOT 站内阅读页(中文摘要),原文作次链;懒挂载——切到该 tab 才取数。
- * 数据自持 useAiHot / useAiHotModelPicks(图标 body 与热点同 queryKey 去重);
- * 失败(null / isError)→ 面板内「刷新失败,重试」。容器:fixed 遮罩 + 居中玻璃
- * 面板;Esc / 点遮罩关闭(同 WeatherModal;tab 为 TodoModal 同款下划线式)。
+ *    主跳 AIHOT 站内阅读页(中文摘要),原文作次链;懒挂载——切到该 tab 才取数;
+ *  - 日报:每早八时定稿的带日期快照(CONTEXT.md「AI 日报」),日期标头 + 五分类
+ *    分组 + 摘要全显的阅读视图;懒挂载同上,取数无轮询(定稿一天一版)。
+ * 数据自持 useAiHot / useAiHotModelPicks / useAiHotDaily(图标 body 与热点同
+ * queryKey 去重);失败(null / isError)→ 面板内「刷新失败,重试」。容器:fixed
+ * 遮罩 + 居中玻璃面板;Esc / 点遮罩关闭(同 WeatherModal;tab 为 TodoModal 同款
+ * 下划线式)。
  */
-type Tab = 'hot' | 'picks'
+type Tab = 'hot' | 'picks' | 'daily'
 const TABS: { key: Tab; label: string }[] = [
   { key: 'hot', label: '热点榜' },
   { key: 'picks', label: '模型精选' },
+  { key: 'daily', label: '日报' },
 ]
 
 export default function AiHotModal({ icon, onClose }: { icon: Icon; onClose: () => void }) {
@@ -59,7 +64,7 @@ export default function AiHotModal({ icon, onClose }: { icon: Icon; onClose: () 
           <div className="text-lg text-white/90">
             {extractString(icon.data, 'name') || 'AI 热点'}
           </div>
-          <div className="text-xs text-white/50">AIHOT 事件热点榜 + 模型发布精选</div>
+          <div className="text-xs text-white/50">AIHOT 事件热点榜 + 模型精选 + AI 日报</div>
         </div>
 
         <div role="tablist" aria-label="AI 热点视图" className="flex gap-4 border-b border-white/10 mb-2">
@@ -142,8 +147,10 @@ export default function AiHotModal({ icon, onClose }: { icon: Icon; onClose: () 
               ))}
             </ol>
           )
-        ) : (
+        ) : tab === 'picks' ? (
           <ModelPicksPanel />
+        ) : (
+          <DailyPanel />
         )}
       </div>
     </div>
@@ -210,5 +217,91 @@ function ModelPicksPanel() {
         </li>
       ))}
     </ul>
+  )
+}
+
+/**
+ * 日报 tab 面板:懒挂载(只在选中时渲染),三态与热点面板同款;出刊前(空
+ * sections)按空态而非失败处理。条目无 id,key 用 section/条目双下标——定稿
+ * 快照渲染期不重排,安全(见 lib/aihot.ts 类型注释)。
+ */
+function DailyPanel() {
+  const { data, isError, refetch, isFetching } = useAiHotDaily()
+  const failed = isError || data === null
+
+  if (failed) {
+    return (
+      <div className="flex items-center gap-3">
+        <span className="text-sm text-white/60">日报刷新失败</span>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          disabled={isFetching}
+          className="border border-white/30 text-white/80 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent disabled:opacity-50"
+        >
+          刷新失败,重试
+        </button>
+      </div>
+    )
+  }
+  if (data === undefined) {
+    return <div className="text-xs text-white/40 py-6 text-center">加载中…</div>
+  }
+  const sections = data.sections.filter((s) => s.items.length > 0)
+  if (sections.length === 0) {
+    return <div className="text-sm text-white/50 py-6 text-center">今日日报还未出刊(每早 8:00)</div>
+  }
+  const total = sections.reduce((n, s) => n + s.items.length, 0)
+  return (
+    <div>
+      <div className="text-sm text-white/80 mb-2">
+        {data.date && (
+          <>
+            {formatDailyDate(data.date)}
+            <span className="text-white/40"> · </span>
+          </>
+        )}
+        <span className="text-white/40">共 {total} 条</span>
+      </div>
+      {sections.map((s, si) => (
+        <section key={si}>
+          <div className="text-xs text-accent/80 mt-3 first:mt-0 mb-1">{s.label}</div>
+          <ul className="space-y-1">
+            {s.items.map((it, ii) => (
+              <li key={ii} className="rounded-xl px-3 py-2.5 hover:bg-white/10 transition">
+                {it.aihotUrl ? (
+                  <a
+                    href={it.aihotUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sm text-white/90 leading-snug hover:text-accent"
+                  >
+                    {it.title}
+                  </a>
+                ) : (
+                  <span className="text-sm text-white/90 leading-snug">{it.title}</span>
+                )}
+                <div className="text-[11px] text-white/50 mt-1 flex items-center gap-2 flex-wrap">
+                  {it.sourceName && <span className="truncate max-w-[40%]">{it.sourceName}</span>}
+                  {it.originalUrl && (
+                    <a
+                      href={it.originalUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline underline-offset-2 hover:text-accent"
+                    >
+                      原文
+                    </a>
+                  )}
+                </div>
+                {it.summary && (
+                  <p className="text-[13px] text-white/60 leading-relaxed mt-1.5">{it.summary}</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
   )
 }

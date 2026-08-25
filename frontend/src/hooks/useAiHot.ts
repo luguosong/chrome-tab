@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiFetch } from '../api/client'
-import type { AiHotModelPick, AiHotTopic } from '../lib/aihot'
+import type { AiHotDaily, AiHotModelPick, AiHotTopic } from '../lib/aihot'
 
 /**
  * AIHOT 热点取数(单例图标,CONTEXT.md「AI 热点」)。不进 IconDataContext 集中层:
@@ -31,6 +31,20 @@ export function useAiHotModelPicks() {
     queryFn: () => apiFetch<AiHotModelPick[] | null>('/api/aihot/model-picks'),
     staleTime: 5 * 60_000,
     refetchInterval: 10 * 60_000,
+    retry: 1,
+  })
+}
+
+/**
+ * AI 日报取数(CONTEXT.md「AI 日报」,Modal 第三 tab;仅切到该 tab 才挂载组件、
+ * 才发请求)。定稿快照一天一版,**不设轮询**——区别于热点/精选的 10min interval,
+ * 轮询对定稿数据无意义;staleTime 5min 防同会话重复请求足够。
+ */
+export function useAiHotDaily() {
+  return useQuery<AiHotDaily | null>({
+    queryKey: ['aihot', 'daily'],
+    queryFn: () => apiFetch<AiHotDaily | null>('/api/aihot/daily'),
+    staleTime: 5 * 60_000,
     retry: 1,
   })
 }
