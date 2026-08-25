@@ -44,6 +44,9 @@ services:
       # 无 Cookie 的 B站博主标红待自愈。YouTube RSS/API 走代理,B站三域直连(勿代理,风控敏感)
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
       BILIBILI_COOKIE: ${BILIBILI_COOKIE}
+      # 模型追踪评测(issues/08,CONTEXT.md「评测结果」):Artificial Analysis 免费 API Key,
+      # 可缺省——未配置时评测区显示「未配置」,不影响模型档案;走代理(不在 NO_PROXY)
+      ARTIFICIALANALYSIS_API_KEY: ${ARTIFICIALANALYSIS_API_KEY}
       # Node24 原生 fetch 默认忽略代理变量,须开此开关(译制/拉原文走 mihomo,qweather/npm 直连)
       NODE_USE_ENV_PROXY: "1"
       HTTPS_PROXY: http://mihomo:7890

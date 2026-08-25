@@ -47,6 +47,7 @@ export const EVENT_KIND_LABELS: Record<ModelEventKind, string> = {
   first_party_available: '产品可用',
   weights_available: '权重开放',
   updated: '更新',
+  evaluated: '进入评测',
   alias_repointed: '别名换指向',
   deprecated: '弃用预告',
   retired: '退役',
@@ -103,4 +104,73 @@ export function formatModelPricing(pricing: ModelPricing | null): { region: stri
     region: pricing.region,
     lines: pricing.entries.map((e) => (e.scope ? `${e.text}(${e.scope})` : e.text)),
   }
+}
+
+/**
+ * 评测方归因链接(CONTEXT.md「评测结果」:评测方数据须归因;Artificial Analysis 免费
+ * API 使用条款要求提供指向其站点的归因)。评测区头部统一挂一次,逐行不再重复。
+ */
+export const EVALUATION_ATTRIBUTION = { label: 'Artificial Analysis', url: 'https://artificialanalysis.ai/' }
+
+/** 常见 Benchmark 展示名(后端透传 AA 原始 key;未收录 key 走 prettifyEvaluationKey 兜底)。 */
+export const BENCHMARK_LABELS: Record<string, string> = {
+  artificial_analysis_intelligence_index: 'AA 智能指数',
+  artificial_analysis_coding_index: 'AA 编程指数',
+  artificial_analysis_math_index: 'AA 数学指数',
+  mmlu_pro: 'MMLU-Pro',
+  gpqa: 'GPQA',
+  hle: 'HLE',
+  livecodebench: 'LiveCodeBench',
+  scicode: 'SciCode',
+  math_500: 'MATH-500',
+  aime: 'AIME',
+  gdpval_aa: 'GDPval-AA',
+  critpt: 'CritPt',
+  aa_omniscience_index: 'AA-Omniscience',
+  aa_lcr: 'AA-LCR',
+  text_to_image_elo: '文生图 Elo',
+  image_editing_elo: '图像编辑 Elo',
+  text_to_speech_elo: '语音合成 Elo',
+  text_to_video_elo: '文生视频 Elo',
+  image_to_video_elo: '图生视频 Elo',
+}
+
+/** 未收录 key 的兜底展示:下划线/连字符换空格、词首大写(评测方命名演进不致漏显示)。 */
+export function prettifyEvaluationKey(key: string): string {
+  return key
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((w) => (w.length <= 3 ? w.toUpperCase() : w[0]!.toUpperCase() + w.slice(1)))
+    .join(' ')
+}
+
+export function benchmarkLabel(benchmark: string): string {
+  return BENCHMARK_LABELS[benchmark] ?? prettifyEvaluationKey(benchmark)
+}
+
+/**
+ * 比例型基准名单(原始分为 0–1 准确率,转百分比展示)。**按 key 判定而非数值区间**:
+ * 指数类正值可能恰落 0–1(如 AA-Omniscience 0.5 是 -100..100 指数,须显 0.5 非假 50%)。
+ * AA 基准集演进时未收录的比例型 key 显示原始值——诚实但不百分比化,不猜。
+ */
+export const RATIO_BENCHMARKS = new Set([
+  'mmlu_pro',
+  'gpqa',
+  'hle',
+  'livecodebench',
+  'scicode',
+  'math_500',
+  'aime',
+  'critpt',
+  'gdpval_aa',
+])
+
+/**
+ * 分数展示(Elo 大整数/指数/准确率三态;不跨基准归一,只做可读化):Elo → 整数;
+ * 名单内准确率 → 百分比一位小数;其余(指数类,含负值)→ 原值四舍五入一位小数。
+ */
+export function formatEvaluationScore(benchmark: string, score: number): string {
+  if (benchmark.endsWith('_elo')) return String(Math.round(score))
+  if (RATIO_BENCHMARKS.has(benchmark)) return `${(score * 100).toFixed(1)}%`
+  return (Math.round(score * 10) / 10).toFixed(1)
 }

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   AVAILABILITY_LABELS,
+  benchmarkLabel,
+  formatEvaluationScore,
   EVENT_KIND_LABELS,
   MODEL_KIND_LABELS,
   PROVIDER_LABELS,
@@ -101,5 +103,29 @@ describe('模型追踪:详情缺省值(issues/02)', () => {
     })
     expect(formatModelPricing(null)).toBeNull()
     expect(formatModelPricing({ region: 'x', effectiveFrom: null, entries: [] })).toBeNull()
+  })
+})
+
+describe('评测展示语汇(issues/08)', () => {
+  it('分数三态:Elo 整数、名单内准确率转百分比、指数类原值(0–1 正值指数不误转百分比)', () => {
+    expect(formatEvaluationScore('text_to_image_elo', 1250)).toBe('1250')
+    expect(formatEvaluationScore('mmlu_pro', 0.791)).toBe('79.1%')
+    expect(formatEvaluationScore('artificial_analysis_intelligence_index', 62.9)).toBe('62.9')
+    expect(formatEvaluationScore('aa_omniscience_index', -12.34)).toBe('-12.3')
+    // 按基准 key 判定,不按数值区间:指数 0.5 不是 50%
+    expect(formatEvaluationScore('aa_omniscience_index', 0.5)).toBe('0.5')
+    // 名单外的新比例型基准:原样显示,不猜
+    expect(formatEvaluationScore('some_new_ratio_bench', 0.42)).toBe('0.4')
+  })
+
+  it('Benchmark 标签:已知 key 用展示名,未知 key 兜底可读化(评测方命名演进不漏显示)', () => {
+    expect(benchmarkLabel('mmlu_pro')).toBe('MMLU-Pro')
+    expect(benchmarkLabel('text_to_video_elo')).toBe('文生视频 Elo')
+    expect(benchmarkLabel('terminal_bench_v2_1')).toBe('Terminal Bench V2 1')
+    expect(benchmarkLabel('τ3-banking')).toBe('Τ3 Banking')
+  })
+
+  it('evaluated 动态有展示名(Record 键完整性由 tsc 保障)', () => {
+    expect(EVENT_KIND_LABELS.evaluated).toBe('进入评测')
   })
 })

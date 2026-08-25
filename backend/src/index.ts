@@ -34,7 +34,7 @@ const changelog = Object.fromEntries(
 const videoUpdatesService = new VideoUpdatesService(db, prodVideoDeps())
 // 模型追踪(CONTEXT.md「模型追踪」,issues/01):init 同步完成基线入档(本地写,毫秒级),
 // 首轮取数异步进行——失败照陈旧口径降级,基线数据已保证 tile 即有内容
-const modelTrackingService = new ModelTrackingService(db, prodModelDeps())
+const modelTrackingService = new ModelTrackingService(db, prodModelDeps(), process.env.ARTIFICIALANALYSIS_API_KEY ?? '')
 await modelTrackingService.init()
 const app = createApp({
   db,

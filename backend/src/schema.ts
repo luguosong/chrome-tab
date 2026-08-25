@@ -163,6 +163,27 @@ CREATE TABLE IF NOT EXISTS model_fetch_status (
     last_success_at TEXT,
     last_attempt_at TEXT
 );
+-- 评测结果快照(issues/08,CONTEXT.md「评测结果」):每 (模型,评测方,Benchmark) 一行,
+-- 每轮成功取数整表替换为最新快照(分数漂移只更新行,不产生动态);失败保留最后成功
+-- 快照并标记 model_evaluation_status 陈旧——与厂家信源失败(model_fetch_status)互不影响。
+CREATE TABLE IF NOT EXISTS model_evaluations (
+    id             INTEGER PRIMARY KEY,
+    model_id       INTEGER NOT NULL,
+    evaluator      TEXT NOT NULL,
+    benchmark      TEXT NOT NULL,
+    score          REAL NOT NULL,
+    version        TEXT NOT NULL,
+    url            TEXT NOT NULL,
+    snapshot_date  TEXT NOT NULL,
+    UNIQUE (model_id, evaluator, benchmark),
+    FOREIGN KEY (model_id) REFERENCES model_archive(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS model_evaluation_status (
+    evaluator       TEXT PRIMARY KEY NOT NULL,
+    stale           INTEGER NOT NULL DEFAULT 0,
+    last_success_at TEXT,
+    last_attempt_at TEXT
+);
 `
 
 /** openDb 打开连接后即执行;幂等(IF NOT EXISTS + 增量加列)。 */
@@ -334,6 +355,25 @@ export interface ModelFetchStatusTable {
   last_attempt_at: string | null
 }
 
+export interface ModelEvaluationsTable {
+  id: Generated<number>
+  model_id: number
+  evaluator: string
+  benchmark: string
+  score: number
+  version: string
+  url: string
+  /** YYYY-MM-DD(快照日期,北京时间)。 */
+  snapshot_date: string
+}
+
+export interface ModelEvaluationStatusTable {
+  evaluator: string
+  stale: number
+  last_success_at: string | null
+  last_attempt_at: string | null
+}
+
 export interface SchemaDatabase {
   users: UsersTable
   pages: PagesTable
@@ -349,4 +389,6 @@ export interface SchemaDatabase {
   model_archive: ModelArchiveTable
   model_events: ModelEventsTable
   model_fetch_status: ModelFetchStatusTable
+  model_evaluations: ModelEvaluationsTable
+  model_evaluation_status: ModelEvaluationStatusTable
 }

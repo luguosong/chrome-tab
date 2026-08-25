@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react'
-import type { ModelProviderId, TrackedModel } from 'chrome-tab-shared'
+import type { ModelEvaluationsStatus, ModelProviderId, TrackedModel } from 'chrome-tab-shared'
 import { useModelArchive } from '../hooks/useModelArchive'
 import { timeAgo } from '../lib/timeAgo'
 import {
   AVAILABILITY_LABELS,
+  EVALUATION_ATTRIBUTION,
   EVENT_KIND_LABELS,
   MODEL_KIND_LABELS,
   PROVIDER_LABELS,
   STAGE_LABELS,
+  benchmarkLabel,
   formatModelLimits,
   formatModelPricing,
+  formatEvaluationScore,
   isFreshModelEvent,
   modelEventIso,
 } from '../lib/modelTracking'
@@ -121,6 +124,7 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
             )}
             <ModelList
               models={data.models.filter((m) => tab === 'all' || m.provider === tab)}
+              evaluationStatus={data.evaluations}
               expandedId={expandedId}
               onToggle={(id) => setExpandedId((cur) => (cur === id ? null : id))}
             />
@@ -134,10 +138,12 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
 /** 模型行列表:行头(名称 + 厂家 + 种类·阶段·开放方式 + 最近动态)点击就地展开。 */
 function ModelList({
   models,
+  evaluationStatus,
   expandedId,
   onToggle,
 }: {
   models: TrackedModel[]
+  evaluationStatus: ModelEvaluationsStatus
   expandedId: number | null
   onToggle: (id: number) => void
 }) {
@@ -225,6 +231,7 @@ function ModelList({
                     )
                   })()}
                 </div>
+                <EvaluationSection evaluations={m.evaluations} status={evaluationStatus} />
                 <div className="text-[11px] text-white/50 flex items-center gap-2 flex-wrap">
                   <span className="text-white/40">信源</span>
                   {m.sources.map((s) => (
@@ -266,5 +273,69 @@ function ModelList({
         )
       })}
     </ul>
+  )
+}
+
+/**
+ * 评测区(CONTEXT.md「评测结果」,issues/08):每行 = Benchmark + 原始分数 + 快照日期,
+ * 链接回评测方模型页;标头挂 Artificial Analysis 归因(免费 API 使用条款要求)。不生成
+ * 跨 Benchmark 综合分;未配置 Key 明确显示「未配置」;评测源陈旧只提示评测自身,不牵连
+ * 厂家档案。评测方口径的版本名与模型名不一致时括注展示(可回链核验)。
+ */
+function EvaluationSection({
+  evaluations,
+  status,
+}: {
+  evaluations: TrackedModel['evaluations']
+  status: ModelEvaluationsStatus
+}) {
+  if (!status.configured) {
+    return (
+      <div className="text-[11px] text-white/50">
+        <span className="text-white/40">评测</span> 未配置({EVALUATION_ATTRIBUTION.label} Key)
+      </div>
+    )
+  }
+  if (evaluations.length === 0) {
+    return (
+      <div className="text-[11px] text-white/50">
+        <span className="text-white/40">评测</span> 暂无精确匹配
+      </div>
+    )
+  }
+  const versions = [...new Set(evaluations.map((e) => e.version))]
+  return (
+    <div className="text-[11px] text-white/50 space-y-0.5">
+      <div className="flex items-baseline gap-2 flex-wrap">
+        <span className="text-white/40">评测</span>
+        {versions.length === 1 && versions[0] !== '' && <span>({versions[0]})</span>}
+        <a
+          href={EVALUATION_ATTRIBUTION.url}
+          target="_blank"
+          rel="noreferrer"
+          className="underline underline-offset-2 hover:text-accent"
+        >
+          {EVALUATION_ATTRIBUTION.label}
+        </a>
+        {status.stale && <span className="text-white/40">(同步失败,展示最近快照)</span>}
+      </div>
+      <ul className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+        {evaluations.map((e) => (
+          <li key={e.benchmark} className="min-w-0 flex items-baseline gap-1.5">
+            <a
+              href={e.url}
+              target="_blank"
+              rel="noreferrer"
+              title={`${e.evaluator} · ${e.version} · ${e.date}`}
+              className="min-w-0 truncate hover:text-accent"
+            >
+              <span className="text-white/70">{benchmarkLabel(e.benchmark)}</span>{' '}
+              {formatEvaluationScore(e.benchmark, e.score)}
+            </a>
+            <span className="shrink-0 text-white/30">{e.date.slice(5)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }

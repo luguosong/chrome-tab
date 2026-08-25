@@ -74,13 +74,14 @@ export type ReleaseStage = 'experimental' | 'preview' | 'beta' | 'ga' | 'depreca
 /** 开放方式(CONTEXT.md「开放方式」;同一模型可多选)。 */
 export type AvailabilityMode = 'api' | 'first_party_app' | 'open_weights'
 
-/** 模型动态类型(CONTEXT.md「模型动态」;自动解析只产 updated,语义化类型留给人工核验基线;alias_repointed = 移动别名/退役 ID 换指向,随 issues/05 xAI 引入)。 */
+/** 模型动态类型(CONTEXT.md「模型动态」;自动解析只产 updated/evaluated,语义化类型留给人工核验基线;alias_repointed = 移动别名/退役 ID 换指向,随 issues/05 xAI 引入;evaluated = 首次进入外部评测,随 issues/08 引入)。 */
 export type ModelEventKind =
   | 'released'
   | 'api_available'
   | 'first_party_available'
   | 'weights_available'
   | 'updated'
+  | 'evaluated'
   | 'alias_repointed'
   | 'deprecated'
   | 'retired'
@@ -122,6 +123,26 @@ export type ModelTrainingParams = {
   active: string | null
 }
 
+/**
+ * 单条评测结果(CONTEXT.md「评测结果」;issues/08 首接 Artificial Analysis):分数为
+ * 评测方原始值,不跨 Benchmark 归一、不合成综合分;date 为快照日期(API 无逐项评测
+ * 日期,以取数日为准);url 为该模型页原始链接。
+ */
+export type ModelEvaluation = {
+  /** 评测方展示名(如 'Artificial Analysis';归因链接由前端固定挂评测区头)。 */
+  evaluator: string
+  /** Benchmark 稳定 key(llm:artificial_analysis_intelligence_index/mmlu_pro…;媒体:<endpoint>_elo),前端映射展示名。 */
+  benchmark: string
+  /** 原始分数(Elo 大整数/指数 0-100/准确率 0-1 原样保留,格式化在前端)。 */
+  score: number
+  /** 被评测的模型版本名(评测方口径,如 'GPT Image 1 (high)')。 */
+  version: string
+  /** YYYY-MM-DD(快照日期,北京时间)。 */
+  date: string
+  /** 评测方模型页链接。 */
+  url: string
+}
+
 export type TrackedModel = {
   id: number
   provider: ModelProviderId
@@ -139,6 +160,8 @@ export type TrackedModel = {
   /** 上下文与其他官方限额;未披露 → null。 */
   limits: ModelLimit[] | null
   trainingParams: ModelTrainingParams | null
+  /** 外部评测结果(issues/08,CONTEXT.md「评测结果」);精确匹配不到 → 空数组。 */
+  evaluations: ModelEvaluation[]
   events: ModelEvent[]
 }
 
@@ -150,10 +173,22 @@ export type ModelSourceStatus = {
   lastSuccessAt: string | null
 }
 
+/**
+ * 评测源整体状态(issues/08):与厂家信源状态隔离——评测源失败只标记评测陈旧,不
+ * 影响任一厂家档案(CONTEXT.md「评测结果」)。configured=false(服务端未配 Key)时
+ * 恒不陈旧、无成功时间,前端评测区显示「未配置」。
+ */
+export type ModelEvaluationsStatus = {
+  configured: boolean
+  stale: boolean
+  lastSuccessAt: string | null
+}
+
 /** GET /api/model-tracking/archive 信封。 */
 export type ModelArchiveResponse = {
   models: TrackedModel[]
   sources: ModelSourceStatus[]
+  evaluations: ModelEvaluationsStatus
 }
 
 export * from './changelogSources'
