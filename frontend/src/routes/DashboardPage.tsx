@@ -97,7 +97,7 @@ function PageSlide({
 }
 
 function Dashboard() {
-  const { data } = useConfig()
+  const { data, isError, refetch } = useConfig()
   const layout = withDefaults(data?.layoutSettings)
   const { editing, toggle } = useEditMode()
 
@@ -482,10 +482,13 @@ function Dashboard() {
     >
       <Background />
 
-      {/* 右键编辑提示条 */}
+      {/* 右键编辑提示条:全宽玻璃条 + 内嵌 glass-panel 胶囊(glass-panel 自带投影,
+          替代原实色 accent 块 + shadow——回归玻璃体系而非另起炉灶) */}
       {editing && (
-        <div className="fixed top-0 inset-x-0 z-50 bg-accent text-white text-center text-sm py-1.5 shadow">
-          编辑模式 · 右键退出
+        <div className="fixed top-0 inset-x-0 z-50 text-center text-sm py-2 animate-drop-in">
+          <span className="glass-panel inline-block rounded-full px-4 py-1.5 text-accent">
+            编辑模式 · 右键退出
+          </span>
         </div>
       )}
 
@@ -515,14 +518,14 @@ function Dashboard() {
             {layout.clockVisible && <Clock />}
             {/* 右上控件:极简为单个 ⚙ 圆钮(L2 折射壳退化为 40px 正圆);
                 用户信息与登出移入控制抽屉「账号」tab */}
-            <LensBox radius={22} className="shrink-0 rounded-full p-1">
+            <LensBox radius={20} className="shrink-0 rounded-full p-1">
               {/* 控制抽屉入口(issue 09):右上角 ⚙ 唤起统一抽屉,tab 切换「新增 / 布局 / 账号」 */}
               <button
                 type="button"
                 onClick={() => setControlOpen(true)}
                 aria-label="设置"
                 title="设置"
-                className="w-8 h-8 rounded-full text-white/90 hover:bg-white/25 flex items-center justify-center text-base leading-none transition"
+                className="w-8 h-8 rounded-full text-white/90 hover:bg-white/25 active:bg-white/35 flex items-center justify-center text-base leading-none transition focus-visible:outline-2 focus-visible:outline-white/60 focus-visible:outline-offset-2"
               >
                 ⚙
               </button>
@@ -609,6 +612,19 @@ function Dashboard() {
               </GroupGestureContext.Provider>
               </IconDataProvider>
             </DndContext>
+          ) : isError ? (
+            // 配置拉取失败:区分于加载态,给重试入口(refetch 重发聚合查询,不整页刷新)。
+            // 重试按钮按次级胶囊语汇:bg-white/20 hover:bg-white/30 + 统一焦点环。
+            <div className="text-white/60 text-sm text-center py-8 flex flex-col items-center gap-2">
+              <span>加载失败</span>
+              <button
+                type="button"
+                onClick={() => refetch()}
+                className="rounded-full bg-white/20 hover:bg-white/30 active:bg-white/40 px-4 py-1.5 text-white/90 focus-visible:outline-2 focus-visible:outline-white/60"
+              >
+                重试
+              </button>
+            </div>
           ) : (
             <div className="text-white/60 text-sm text-center py-8">加载中…</div>
           )}
@@ -619,7 +635,9 @@ function Dashboard() {
       {/* 容量拒绝等短暂提示(07):底部居中浮层,pointer-events-none 不挡交互 */}
       {notice && (
         <div className="fixed bottom-8 inset-x-0 z-50 flex justify-center pointer-events-none">
-          <span className="glass-panel text-white/90 text-sm px-4 py-2 rounded-full shadow-lg">
+          {/* animate-pop-in 入场;shadow-lg 删——glass-panel 的 unlayered box-shadow
+              恒胜 Tailwind layered 工具类,该类本就无效(项目已知 CSS 层叠特性) */}
+          <span className="glass-panel animate-pop-in text-white/90 text-sm px-4 py-2 rounded-full">
             {notice}
           </span>
         </div>

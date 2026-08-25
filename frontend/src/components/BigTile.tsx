@@ -56,14 +56,14 @@ export default function BigTile({
           : undefined
       }
     >
-      <div className="flex items-baseline justify-between gap-3 px-3.5 pt-2.5 pb-1.5 border-b border-white/10">
+      <div className="flex items-baseline justify-between gap-3 px-4 pt-2.5 pb-2 border-b border-white/10">
         {titleHref ? (
           <a
             href={titleHref}
             target="_blank"
             rel="noreferrer"
             title={titleLinkHint}
-            className="truncate text-white/90 hover:text-accent hover:underline underline-offset-4 transition-colors"
+            className="truncate text-white/90 hover:text-accent hover:underline underline-offset-4 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
             style={{ fontSize: tileFont(iconScale, 'primary') }}
           >
             {title}
@@ -73,7 +73,7 @@ export default function BigTile({
             {title}
           </span>
         )}
-        <span className="flex shrink-0 items-baseline gap-2.5">
+        <span className="flex shrink-0 items-baseline gap-3">
           {fresh && (
             <span className="font-mono text-white/50" style={{ fontSize }}>
               {timeAgo(fresh)}
@@ -85,7 +85,7 @@ export default function BigTile({
               target="_blank"
               rel="noreferrer"
               title={link.title}
-              className="shrink-0 rounded-full bg-white/15 px-2 py-0.5 text-white/70 hover:bg-white/30 hover:text-accent transition-colors"
+              className="shrink-0 rounded-full bg-white/15 px-2.5 py-1 min-h-8 flex items-center text-white/70 hover:bg-white/30 hover:text-accent active:bg-white/40 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
               style={{ fontSize }}
             >
               {link.label}
@@ -95,8 +95,12 @@ export default function BigTile({
         </span>
       </div>
       {children ?? (
-        <div className="flex-1 flex items-center justify-center text-white/40" style={{ fontSize }}>
-          ···
+        <div
+          className="flex-1 flex items-center justify-center text-white/40"
+          style={{ fontSize }}
+          title="暂无数据,详情入口可重试"
+        >
+          暂无数据
         </div>
       )}
     </div>

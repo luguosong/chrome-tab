@@ -30,7 +30,7 @@ export default function SearchBox() {
   return (
     <form onSubmit={go}>
       <LensBox
-        radius={26}
+        radius={22}
         className="rounded-full flex items-center w-full px-5 py-3 focus-within:outline-2 focus-within:outline-white/45 focus-within:outline-offset-2"
       >
         <svg

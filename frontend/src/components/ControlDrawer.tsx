@@ -81,7 +81,8 @@ export default function ControlDrawer({
       <aside className="glass-panel glass-panel-readable relative h-full w-full max-w-sm animate-slide-in-right overflow-y-auto rounded-l-3xl">
         {/* 顶栏:tab 即标题 + 关闭。半透明底 + 自身 blur,滚动内容从栏下柔透(iOS nav 栏) */}
         <div className="sticky top-0 z-10 flex items-center gap-3 px-5 py-3 border-b border-white/10 bg-white/35 backdrop-blur-md dark:bg-[#101012]/55">
-          {/* 分段控件(签名元素):凹轨 + 凸起玻璃滑块,等宽三段,滑块随选中滑动 */}
+          {/* 分段控件(签名元素):凹轨 + 凸起玻璃滑块,等宽三段,滑块随选中滑动。
+              tab py-2(命中高 32px)+ 焦点环对齐全站语汇;滑块 top-1 bottom-1 自适应不受影响 */}
           <div
             role="tablist"
             aria-label="设置分类"
@@ -105,7 +106,7 @@ export default function ControlDrawer({
                 aria-selected={tab === t.id}
                 aria-controls={`panel-${t.id}`}
                 onClick={() => setTab(t.id)}
-                className={`relative z-10 rounded-full py-1.5 text-xs transition-colors ${
+                className={`relative z-10 rounded-full py-2 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-white/60 ${
                   tab === t.id ? 'text-white' : 'text-white/55 hover:text-white/85'
                 }`}
               >

@@ -31,6 +31,8 @@ export default function LoginPage() {
   return (
     // 与 Dashboard 同语言:壁纸背景 + 居中半透明玻璃登录卡。
     // 登录表单天然居中,这里用 glass-panel 卡(非旧版 opaque 白卡)承袭整体玻璃风格。
+    // 输入框/CTA 对齐全站 drawer 语汇:输入族 bg-white/20 rounded-lg + ring 焦点,
+    // CTA 胶囊 rounded-full(去显式 border,焦点环交由 ring)。
     <div className="relative min-h-screen flex items-center justify-center">
       <Background />
       <main className="glass-panel relative z-10 w-full max-w-sm mx-4 rounded-3xl p-8">
@@ -41,7 +43,7 @@ export default function LoginPage() {
             onChange={(e) => setUsername(e.target.value)}
             placeholder="用户名"
             autoComplete="username"
-            className="bg-white/15 border border-white/25 text-white placeholder-white/50 px-3.5 py-2.5 rounded-xl outline-none transition focus:border-white/40 focus:ring-2 focus:ring-accent/60"
+            className="bg-white/20 text-white placeholder-white/50 px-3 py-2 rounded-lg outline-none transition focus:ring-2 focus:ring-accent/60"
           />
           <input
             type="password"
@@ -49,12 +51,13 @@ export default function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="密码"
             autoComplete="current-password"
-            className="bg-white/15 border border-white/25 text-white placeholder-white/50 px-3.5 py-2.5 rounded-xl outline-none transition focus:border-white/40 focus:ring-2 focus:ring-accent/60"
+            className="bg-white/20 text-white placeholder-white/50 px-3 py-2 rounded-lg outline-none transition focus:ring-2 focus:ring-accent/60"
           />
           {err && <div className="text-down text-sm text-center">{err}</div>}
           <button
             disabled={busy}
-            className="bg-accent text-white py-2.5 rounded-xl font-medium transition disabled:opacity-50 hover:bg-accent/90"
+            className="bg-accent text-white py-2.5 rounded-full font-medium transition disabled:opacity-50 hover:bg-accent/90
+              active:bg-accent/80 focus-visible:outline-2 focus-visible:outline-white/60"
           >
             {busy ? '登录中…' : '登录'}
           </button>

@@ -25,6 +25,9 @@ export function BackupRestore() {
     const f = e.target.files?.[0]
     e.target.value = '' // 允许重复选同一文件
     if (!f) return
+    // 替换是破坏性操作:读文件前 window.confirm 二次确认;取消即原样返回
+    // (value 已清空,同文件再选仍会触发 change)
+    if (mode === 'replace' && !window.confirm('替换将清空当前全部配置并按备份重建,确定继续?')) return
     setMsg(null)
     try {
       const payload = parseBackupPayload(JSON.parse(await f.text()))
@@ -47,23 +50,35 @@ export function BackupRestore() {
         <button
           type="button"
           onClick={doExport}
-          className="px-3 py-1.5 rounded-full bg-white/20 text-white/85 hover:bg-white/30 transition"
+          className="px-3 py-2 rounded-full bg-white/20 text-white/85 hover:bg-white/30 transition"
         >
           导出备份
         </button>
-        <label className="px-3 py-1.5 rounded-full bg-white/20 text-white/85 hover:bg-white/30 cursor-pointer transition">
-          导入(替换)
-          <input type="file" accept="application/json" hidden onChange={(e) => onFile(e, 'replace')} />
+        {/* input 用 sr-only 而非 hidden:保留键盘焦点,label focus-within 显焦点环。
+            替换导入进行中锁半透(label 无 disabled,用 pointer-events-none 等效)防重复提交 */}
+        <label
+          className={`px-3 py-2 rounded-full bg-white/20 text-white/85 transition focus-within:outline-2 focus-within:outline-white/60 ${
+            replace.isPending ? 'pointer-events-none opacity-50' : 'hover:bg-white/30 cursor-pointer'
+          }`}
+        >
+          {replace.isPending ? '导入中…' : '导入(替换)'}
+          <input
+            type="file"
+            accept="application/json"
+            className="sr-only"
+            disabled={replace.isPending}
+            onChange={(e) => onFile(e, 'replace')}
+          />
         </label>
-        <label className="px-3 py-1.5 rounded-full bg-white/20 text-white/85 hover:bg-white/30 cursor-pointer transition">
+        <label className="px-3 py-2 rounded-full bg-white/20 text-white/85 hover:bg-white/30 cursor-pointer transition focus-within:outline-2 focus-within:outline-white/60">
           导入(合并)
-          <input type="file" accept="application/json" hidden onChange={(e) => onFile(e, 'merge')} />
+          <input type="file" accept="application/json" className="sr-only" onChange={(e) => onFile(e, 'merge')} />
         </label>
       </div>
-      <p className="mt-2 text-[11px] text-white/50 leading-relaxed">
+      <p className="mt-2 text-xs text-white/50 leading-relaxed">
         导出当前全部配置为 JSON;「替换」清空服务端后按备份重建,「合并」把备份作为新内容追加(v1 不去重)。
       </p>
-      {msg && <p className="mt-2 text-[11px] text-accent">{msg}</p>}
+      {msg && <p className="mt-2 text-xs text-accent">{msg}</p>}
     </div>
   )
 }

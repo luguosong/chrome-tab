@@ -23,22 +23,31 @@ code {
 
 /* ── Liquid Glass 三档材质(ADR-0012;参数为原型实机验证定稿)────────────── */
 
-/* L1 · regular 玻璃(主力档:弹层 / 抽屉 / Modal),明暗双值 */
-.glass-panel {
-  background: rgba(255, 255, 255, 0.55);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  box-shadow:
+/* L1 参数单源:.glass-panel 与 .lens-panel 的 @supports 回落(下方)共引这组变量,
+   调 L1 定标只改此处——此前兜底整块手抄,是跨浏览器材质漂移的暗坑 */
+:root {
+  --l1-bg: rgba(255, 255, 255, 0.55);
+  --l1-filter: blur(20px) saturate(180%);
+  --l1-border: rgba(255, 255, 255, 0.5);
+  --l1-shadow:
     0 8px 32px rgba(0, 0, 0, 0.18),
     inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
-.dark .glass-panel {
-  background: rgba(24, 24, 27, 0.5); /* zinc-900/50 */
-  border-color: rgba(255, 255, 255, 0.1);
-  box-shadow:
+.dark {
+  --l1-bg: rgba(24, 24, 27, 0.5); /* zinc-900/50 */
+  --l1-border: rgba(255, 255, 255, 0.1);
+  --l1-shadow:
     0 8px 32px rgba(0, 0, 0, 0.35),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* L1 · regular 玻璃(主力档:弹层 / 抽屉 / Modal),明暗双值 */
+.glass-panel {
+  background: var(--l1-bg);
+  backdrop-filter: var(--l1-filter);
+  -webkit-backdrop-filter: var(--l1-filter);
+  border: 1px solid var(--l1-border);
+  box-shadow: var(--l1-shadow);
 }
 
 /* L1 可读性兜底:文本密集面板在 L1 玻璃底上再垫 white·20 / black·20
@@ -77,6 +86,14 @@ code {
 .dark .glass-soft:hover {
   background: rgba(255, 255, 255, 0.14);
 }
+/* pressed 压下档(iOS 26 五态补全):hover 之上再压一档给「按下」物理感;
+   消费者另有 active:scale-95 的几何压感(Icon/IconPicker),本档管材质提亮 */
+.glass-soft:active {
+  background: rgba(255, 255, 255, 0.26);
+}
+.dark .glass-soft:active {
+  background: rgba(255, 255, 255, 0.18);
+}
 
 /* L2 · clear 折射档:近透明底 + 边缘高光;折射部分(backdrop-filter 的 url(#…))
    由 LensBox 按元素实测尺寸注入专属滤镜,CSS 侧只放静态外观 */
@@ -98,23 +115,14 @@ code {
   -webkit-backdrop-filter: blur(2px) saturate(160%);
 }
 /* 环境不支持 backdrop-filter: url()(Safari/Firefox)时回落 L1,
-   与 LensBox 内 CSS.supports 用同一表达式 */
+   与 LensBox 内 CSS.supports 用同一表达式;参数经 --l1-* 与 .glass-panel 同源 */
 @supports not (backdrop-filter: url(#f)) {
   .lens-panel {
-    background: rgba(255, 255, 255, 0.55);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.5);
-    box-shadow:
-      0 8px 32px rgba(0, 0, 0, 0.18),
-      inset 0 1px 0 rgba(255, 255, 255, 0.4);
-  }
-  .dark .lens-panel {
-    background: rgba(24, 24, 27, 0.5);
-    border-color: rgba(255, 255, 255, 0.1);
-    box-shadow:
-      0 8px 32px rgba(0, 0, 0, 0.35),
-      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    background: var(--l1-bg);
+    backdrop-filter: var(--l1-filter);
+    -webkit-backdrop-filter: var(--l1-filter);
+    border: 1px solid var(--l1-border);
+    box-shadow: var(--l1-shadow);
   }
 }
 
@@ -203,12 +211,19 @@ code {
   .animate-slide-in-right {
     animation: slide-in-right 0.22s ease-out;
   }
-  /* 详情 Dialog 入场：遮罩淡入 + 面板轻微放大 */
+  /* 详情 Dialog 入场：遮罩淡入 + 面板轻微放大。pop-in 取 0.3s——iOS 26 动效档
+     (微交互 150 / 按钮 200 / 页面过渡 300-400 / Modal 400)的 Modal 带,遮罩
+     fade-in 留 0.2s 微交互档,两层时长错开让深度可感 */
   .animate-fade-in {
     animation: fade-in 0.2s ease-out;
   }
   .animate-pop-in {
-    animation: pop-in 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
+    animation: pop-in 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+  /* 编辑模式提示条入场:自屏顶下滑(态变解释;横幅自身非玻璃底,
+     transform 动画无 backdrop 采样风险,见 LensBox 禁 opacity 的坑) */
+  .animate-drop-in {
+    animation: drop-in 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
   }
 }
 @keyframes jiggle {
@@ -237,13 +252,22 @@ code {
   }
 }
 @keyframes pop-in {
+  /* 只动 transform 不动 opacity:面板自身带 backdrop-filter,opacity<1 的瞬态会
+     切断 backdrop 采样(LensBox 注释同名坑),玻璃在入场期间闪失;渐显柔性感
+     交给遮罩层 fade-in 承担 */
   from {
-    opacity: 0;
     transform: scale(0.96);
   }
   to {
-    opacity: 1;
     transform: scale(1);
+  }
+}
+@keyframes drop-in {
+  from {
+    transform: translateY(-100%);
+  }
+  to {
+    transform: translateY(0);
   }
 }
 

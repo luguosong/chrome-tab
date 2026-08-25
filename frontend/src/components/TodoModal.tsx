@@ -53,14 +53,14 @@ export default function TodoModal({ onClose }: { onClose: () => void }) {
       aria-modal="true"
       aria-label="待办"
     >
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
 
-      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6 max-h-[80vh] overflow-y-auto">
+      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6 max-h-[80vh] overflow-y-auto animate-pop-in">
         <button
           type="button"
           onClick={onClose}
           aria-label="关闭"
-          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center"
+          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 focus-visible:outline-2 focus-visible:outline-white/60 transition-colors flex items-center justify-center"
         >
           ×
         </button>
@@ -101,7 +101,7 @@ export default function TodoModal({ onClose }: { onClose: () => void }) {
                 type="button"
                 onClick={() => void refetch()}
                 disabled={isFetching}
-                className="border border-white/30 text-white/80 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent disabled:opacity-50"
+                className="min-h-8 px-3 py-1.5 rounded-full border border-white/30 text-white/80 text-xs hover:border-accent hover:text-accent disabled:opacity-50 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
               >
                 重试
               </button>

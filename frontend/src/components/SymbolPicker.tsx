@@ -45,6 +45,10 @@ export default function SymbolPicker({
           setOpen(true)
         }}
         onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          // Esc 只收下拉,不清输入(与遮罩点击同款关闭路径)
+          if (e.key === 'Escape') setOpen(false)
+        }}
         placeholder={placeholder}
         aria-label="符号"
         className="w-full px-3 py-2 rounded-lg bg-white/20 text-white placeholder-white/50 text-sm outline-none focus:ring-2 focus:ring-accent"
@@ -59,7 +63,11 @@ export default function SymbolPicker({
             onClick={() => setOpen(false)}
             className="fixed inset-0 z-30 cursor-default"
           />
-          <div className="absolute left-0 right-0 z-40 mt-1 glass-panel glass-panel-readable rounded-lg py-1 max-h-56 overflow-y-auto">
+          <div
+            role="listbox"
+            aria-label="候选列表"
+            className="absolute left-0 right-0 z-40 mt-1 glass-panel glass-panel-readable rounded-lg py-1 max-h-56 overflow-y-auto"
+          >
             {res.loading && <div className="px-3 py-1.5 text-xs text-white/50">搜索中…</div>}
             {!res.loading && res.candidates.length === 0 && (
               <div className="px-3 py-1.5 text-xs text-white/50">无匹配,可按原样代码提交</div>
@@ -68,12 +76,14 @@ export default function SymbolPicker({
               <button
                 key={`${c.symbol},${i}`}
                 type="button"
+                role="option"
+                aria-selected={false}
                 onClick={() => {
                   onPick(c)
                   setDebounced(c.symbol) // 选中即同步:防抖 350ms 后的同值 setDebounced 被 bail out,不再对已选代码空发一次搜索
                   setOpen(false)
                 }}
-                className="block w-full text-left px-3 py-1.5 text-sm text-white/90 hover:bg-white/30"
+                className="block w-full text-left px-3 py-2 text-sm text-white/90 hover:bg-white/30 active:bg-white/40 transition-colors"
               >
                 {c.name}
                 <span className="text-white/40 text-xs"> {c.symbol}</span>

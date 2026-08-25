@@ -79,7 +79,7 @@ export default function IconGrid({
             一旦图标乐观移入,本页变非空,改由 SortableContext 接管。 */}
         <PageDropArea pageId={page.id}>
           <div className="flex-1 min-h-0 flex items-center justify-center text-white/50 text-sm">
-            此页暂无图标
+            此页暂无图标 · 右键进入编辑模式,⚙ 里新增
           </div>
         </PageDropArea>
       </section>

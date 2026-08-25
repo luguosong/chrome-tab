@@ -11,6 +11,7 @@ import VideoIconBody from './VideoIcon'
 import LocationPicker from './LocationPicker'
 import SymbolPicker from './SymbolPicker'
 import Tile from './Tile'
+import ConfirmButton from './ConfirmButton'
 import type { Icon as IconModel } from '../lib/types'
 import { useEditMode } from '../context/EditModeContext'
 import { useGroupGesture } from '../context/GroupGestureContext'
@@ -146,8 +147,12 @@ export default function Icon({
       className={
         // 画格透明居中:玻璃块在图标层(Tile,全类型同款),文字在块外画格上
         // (iOS 主屏式:块=图标本体,文字=壁纸层)。不能加 overflow-hidden:编辑角标在卡外。
+        // focus-visible 焦点环挂在 interactive 分支:一处覆盖 nav <a> 与 modal 可点块全类型
+        // (键盘可达性;Tile 的 hover:scale-110 active:scale-95 在块层,此处不重复)。
         'relative flex flex-col items-center justify-center transition ' +
-        (interactive ? 'cursor-pointer' : 'cursor-default') +
+        (interactive
+          ? 'cursor-pointer focus-visible:outline-2 focus-visible:outline-white/60 focus-visible:outline-offset-2'
+          : 'cursor-default') +
         // 合并手势达标放大(dwell):目标非被拖项、无 dnd transform 冲突;transition 已有
         (dwellTarget === icon.id && !overlay ? ' scale-[1.15] z-10 ' : '') +
         (editing && !overlay ? ' editing-jiggle cursor-grab active:cursor-grabbing' : '') +
@@ -191,14 +196,15 @@ export default function Icon({
 
       {/* 分组解散失败提示(容量 409「先移出部分图标」等):组图标上方小气泡,短暂显示 */}
       {icon.type === 'group' && dissolve.isError && (
-        <span className="absolute -top-9 left-1/2 -translate-x-1/2 z-40 glass-panel rounded-full px-3 py-1 text-[11px] text-white/90 whitespace-nowrap shadow-lg pointer-events-none">
+        <span className="absolute -top-9 left-1/2 -translate-x-1/2 z-40 glass-panel rounded-full px-3 py-1 text-xs text-white/90 whitespace-nowrap shadow-lg pointer-events-none">
           {dissolve.error instanceof ApiError ? dissolve.error.message : '解散失败'}
         </span>
       )}
 
       {/* 编辑模式角标:编辑配置 ✎ + 删除 ×(spec user story 27/28;尺寸切换已随
-          ADR-0016 单档化移除)。× 点击 DELETE,乐观更新 + 失败回滚见 api/config.ts。
-          stopPropagation 避免冒泡到 Tag。overlay 幽灵不渲染角标(拖拽副本不带交互控件)。 */}
+          ADR-0016 单档化移除)。× 为破坏性操作,走 ConfirmButton 二次确认(首击武装
+          「确认?」再击执行);确认后 DELETE/dissolve,乐观更新 + 失败回滚见 api/config.ts。
+          overlay 幽灵不渲染角标(拖拽副本不带交互控件)。 */}
       {editing && !overlay && (
         <EditActions
           icon={icon}
@@ -261,7 +267,9 @@ function GroupBody({ icon, overlay }: { icon: IconModel; overlay: boolean }) {
 /**
  * 编辑模式角标集群(右上角):编辑配置 ✎ + 删除 ×。
  * (尺寸切换菜单已随 ADR-0016 单档化移除。)
- * 所有点击 stopPropagation,避免冒泡到图标 Tag(编辑态 Tag 本就无 onClick,纯防御)。
+ * 所有点击 stopPropagation,避免冒泡到图标 Tag——组图标的 Tag 在编辑态也有 onClick
+ * (开分组弹层),ConfirmButton 内部按钮不带 stopPropagation,故 click/contextmenu 的
+ * 阻止与既有 pointerdown 一样上提到本容器统一处理。
  * onPointerDown 也 stopPropagation(06 拖拽):否则在角标上长按会触发 PointerSensor
  * 启动拖拽而非点击角标;阻止指针事件冒泡到挂载 listeners 的 Tag。
  */
@@ -285,13 +293,18 @@ function EditActions({
   // 仅 editor 非空的类型(nav/stock/weather)出现编辑配置 ✎;changelog(editor=[])无配置可改。
   const editor = def?.editor ?? []
   const showEdit = editor.length > 0
+  // 删除/解散确认文案要带图标名(下方 ConfirmButton 的 aria-label)
+  const name = extractString(icon.data, 'name')
   return (
     <>
       <div
-        className="absolute -top-2 -right-2 z-20 flex gap-1"
+        className="absolute -top-2 -right-2 z-20 flex items-center gap-1"
         onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        onContextMenu={(e) => e.stopPropagation()}
       >
-        {/* 编辑配置 ✎:打开 popover(字段预填) */}
+        {/* 编辑配置 ✎:打开 popover(字段预填)。w-8 命中区(原 w-6 偏小),视觉仍轻
+            (glass-panel 底 + 11px 字号不变);active:bg-white/40 与 hover 同为提亮语汇 */}
         {showEdit && (
           <button
             type="button"
@@ -301,26 +314,21 @@ function EditActions({
               setEditOpen(!editOpen)
             }}
             onContextMenu={(e) => e.stopPropagation()}
-            className="glass-panel w-6 h-6 rounded-full text-[11px] leading-none text-white/90 flex items-center justify-center hover:bg-white/40 disabled:opacity-50"
+            className="glass-panel w-8 h-8 rounded-full text-[11px] leading-none text-white/90 flex items-center justify-center hover:bg-white/40 active:bg-white/40 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-white/60"
             title="编辑"
           >
             ✎
           </button>
         )}
-        {/* 删除 × */}
-        <button
-          type="button"
+        {/* 删除 ×:破坏性二次确认(ConfirmButton,首击武装「确认?」再击执行,自带
+            热区外扩与焦点环)。组图标删除即解散,文案区分;busy 禁用防确认后连击
+            重复触发请求(armed 状态点击后不自动解除,靠 busy 门控兜住) */}
+        <ConfirmButton
+          label={icon.type === 'group' ? `删除分组 ${name}` : `删除 ${name}`}
+          title={icon.type === 'group' ? '解散分组(子图标洒回本页)' : '删除图标(不可恢复)'}
+          onConfirm={onDelete}
           disabled={busy}
-          onClick={(e) => {
-            e.stopPropagation()
-            onDelete()
-          }}
-          onContextMenu={(e) => e.stopPropagation()}
-          className="w-6 h-6 rounded-full bg-accent text-white text-sm leading-none flex items-center justify-center hover:bg-accent/80 disabled:opacity-50"
-          title="删除"
-        >
-          ×
-        </button>
+        />
       </div>
 
       {/* 编辑配置 popover:仅 editor 非空的类型(nav/stock/weather)打开时渲染 */}
@@ -392,9 +400,19 @@ function EditForm({
         className="fixed inset-0 z-30 cursor-default"
       />
       <div
-        className="absolute top-5 right-0 z-40 glass-panel rounded-lg p-2 min-w-[200px] space-y-2"
+        // glass-panel-readable:面板叠在壁纸/其他玻璃层上仍保文字对比(与 SymbolPicker/
+        // LocationPicker 下拉对齐);min-w-[240px] 容纳统一输入族(px-3 py-2 text-sm 变宽)
+        className="absolute top-5 right-0 z-40 glass-panel glass-panel-readable rounded-lg p-2 min-w-[240px] space-y-2"
         onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          // Esc 关闭:面板本身不可聚焦,但输入框聚焦时键盘事件冒泡到面板即触发。
+          // stopPropagation 防 Esc 继续冒泡(编辑模式无拖拽进行时才有表单,不与 dnd-kit 冲突)
+          if (e.key === 'Escape') {
+            e.stopPropagation()
+            onCancel()
+          }
+        }}
       >
         {fields.map((f) =>
           f.name === 'symbol' ? (
@@ -430,10 +448,12 @@ function EditForm({
               onChange={(e) => setField(f.name, e.target.value)}
               placeholder={f.placeholder}
               aria-label={f.label}
-              className="w-full px-2.5 py-1.5 rounded-md bg-white/20 text-white placeholder-white/50 text-xs outline-none focus:ring-2 focus:ring-accent"
+              className="w-full px-3 py-2 rounded-lg bg-white/20 text-white placeholder-white/50 text-sm outline-none focus:ring-2 focus:ring-accent"
             />
           ),
         )}
+        {/* 胶囊按钮族:取消=次级(min-h-8 圆胶囊 + 焦点环),保存=主按钮语汇
+            (bg-accent/90 圆胶囊,对齐 AddDrawer;active:bg-accent/75 按压变暗反馈) */}
         <div className="flex gap-2 justify-end pt-0.5">
           <button
             type="button"
@@ -441,7 +461,7 @@ function EditForm({
               e.stopPropagation()
               onCancel()
             }}
-            className="px-2 py-1 rounded-md text-xs text-white/80 hover:bg-white/20"
+            className="px-3 py-1.5 min-h-8 rounded-full text-xs text-white/80 hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-white/60"
           >
             取消
           </button>
@@ -452,7 +472,7 @@ function EditForm({
               e.stopPropagation()
               onSave(buildIconData(fields, values))
             }}
-            className="px-2.5 py-1 rounded-md bg-accent/90 hover:bg-accent disabled:opacity-50 text-white text-xs"
+            className="px-3.5 py-1.5 min-h-8 rounded-full bg-accent/90 hover:bg-accent active:bg-accent/75 disabled:opacity-50 text-white text-xs focus-visible:outline-2 focus-visible:outline-white/60"
           >
             保存
           </button>

@@ -13,6 +13,7 @@ import {
   useVideoFeed,
 } from '../hooks/useVideoUpdates'
 import { timeAgo } from '../lib/timeAgo'
+import ConfirmButton from './ConfirmButton'
 
 /** 新视频红点窗口(与 VideoIconBody 同口径):发布 <24h,时间驱动满窗自隐。 */
 const NEW_WINDOW_S = 24 * 60 * 60
@@ -83,14 +84,14 @@ export default function VideoModal({ onClose }: { onClose: () => void }) {
       aria-modal="true"
       aria-label="视频更新"
     >
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
 
-      <div className="glass-panel glass-panel-readable relative w-full max-w-2xl rounded-3xl p-6 max-h-[80vh] overflow-y-auto">
+      <div className="glass-panel glass-panel-readable relative w-full max-w-2xl rounded-3xl p-6 max-h-[80vh] overflow-y-auto animate-pop-in">
         <button
           type="button"
           onClick={onClose}
           aria-label="关闭"
-          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center"
+          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 focus-visible:outline-2 focus-visible:outline-white/60 flex items-center justify-center"
         >
           ×
         </button>
@@ -103,7 +104,7 @@ export default function VideoModal({ onClose }: { onClose: () => void }) {
             disabled={feed.isFetching}
             aria-label="刷新"
             title="刷新"
-            className="w-6 h-6 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center text-sm disabled:opacity-50"
+            className="w-6 h-6 rounded-full bg-white/20 text-white/80 hover:bg-white/40 focus-visible:outline-2 focus-visible:outline-white/60 flex items-center justify-center text-sm disabled:opacity-50"
           >
             <span className={feed.isFetching ? 'animate-spin inline-block' : 'inline-block'}>↻</span>
           </button>
@@ -118,7 +119,7 @@ export default function VideoModal({ onClose }: { onClose: () => void }) {
               type="button"
               onClick={() => setTab(key)}
               className={
-                'pb-1.5 -mb-px text-sm border-b-2 whitespace-nowrap transition ' +
+                'pb-1.5 -mb-px text-sm border-b-2 whitespace-nowrap transition focus-visible:outline-2 focus-visible:outline-white/60 ' +
                 (tab === key
                   ? 'text-accent border-accent'
                   : 'text-white/60 border-transparent hover:text-white/85')
@@ -425,37 +426,5 @@ function BloggerRow({
         onConfirm={onDelete}
       />
     </li>
-  )
-}
-
-/** 破坏性操作二次确认(spec):首击武装变「确认?」(3s 自动解除),再击执行。 */
-function ConfirmButton({
-  label,
-  title,
-  onConfirm,
-}: {
-  label: string
-  title: string
-  onConfirm: () => void
-}) {
-  const [armed, setArmed] = useState(false)
-  useEffect(() => {
-    if (!armed) return
-    const t = setTimeout(() => setArmed(false), 3_000)
-    return () => clearTimeout(t)
-  }, [armed])
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={title}
-      onClick={() => (armed ? onConfirm() : setArmed(true))}
-      className={
-        'shrink-0 w-6 h-6 rounded-full text-xs ' +
-        (armed ? 'bg-red-400/40 text-red-200' : 'text-white/50 hover:bg-red-400/25 hover:text-red-300')
-      }
-    >
-      {armed ? '确认?' : '✕'}
-    </button>
   )
 }

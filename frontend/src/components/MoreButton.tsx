@@ -20,7 +20,7 @@ export default function MoreButton({
       type="button"
       onClick={onClick}
       title={title}
-      className="shrink-0 rounded-full bg-white/15 px-2 py-0.5 text-white/70 hover:bg-white/30 hover:text-accent transition-colors"
+      className="shrink-0 rounded-full bg-white/15 px-2.5 py-1 min-h-8 text-white/70 hover:bg-white/30 hover:text-accent active:bg-white/40 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
       style={{ fontSize }}
     >
       更多

@@ -67,19 +67,19 @@ export default function StockModal({
       aria-modal="true"
       aria-label={`${name} 行情详情`}
     >
-      {/* 遮罩:点击关闭 */}
+      {/* 遮罩:点击关闭(fade-in 入场,与族内 Modal 统一) */}
       <div
-        className="absolute inset-0 bg-black/50"
+        className="absolute inset-0 bg-black/50 animate-fade-in"
         onClick={onClose}
       />
 
-      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6">
+      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6 animate-pop-in">
         {/* 关闭按钮 */}
         <button
           type="button"
           onClick={onClose}
           aria-label="关闭"
-          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center"
+          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
         >
           ×
         </button>
@@ -98,7 +98,7 @@ export default function StockModal({
               <button
                 type="button"
                 onClick={refetchQuotes}
-                className="border border-white/30 text-white/80 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent"
+                className="rounded-full border border-white/30 px-3 py-1.5 min-h-8 text-xs text-white/80 hover:border-accent hover:text-accent active:bg-white/20 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
               >
                 刷新失败,重试
               </button>
@@ -135,7 +135,7 @@ export default function StockModal({
 
             {/* 公司档案:行业 + 主营 + 官网(静态,datacenter-web) */}
             {profile ? (
-              <div className="rounded-xl bg-white/5 p-3 space-y-1.5 text-sm">
+              <div className="rounded-xl bg-white/5 p-3 space-y-2 text-sm">
                 {profile.industry && (
                   <div className="text-white/80">{profile.industry}</div>
                 )}
@@ -204,7 +204,7 @@ function QuoteBody({ q }: { q: Quote }) {
 
 function StatCell({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between rounded-lg bg-white/10 px-3 py-1.5">
+    <div className="flex items-center justify-between rounded-lg bg-white/10 px-3 py-2">
       <span className="text-white/50">{label}</span>
       <span className="font-mono text-white/80">{value}</span>
     </div>

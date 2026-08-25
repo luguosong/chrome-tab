@@ -48,14 +48,15 @@ export default function WeatherModal({
       aria-modal="true"
       aria-label={`${name} 天气详情`}
     >
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
 
-      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6">
+      {/* max-h + 滚动:预警/逐日多时小屏溢出(族内既有模式) */}
+      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6 max-h-[80vh] overflow-y-auto animate-pop-in">
         <button
           type="button"
           onClick={onClose}
           aria-label="关闭"
-          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center"
+          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
         >
           ×
         </button>
@@ -77,7 +78,7 @@ export default function WeatherModal({
             <button
               type="button"
               onClick={refetchWeather}
-              className="border border-white/30 text-white/80 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent"
+              className="rounded-full border border-white/30 px-3 py-1.5 min-h-8 text-xs text-white/80 hover:border-accent hover:text-accent active:bg-white/20 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
             >
               刷新失败,重试
             </button>
@@ -104,7 +105,7 @@ export default function WeatherModal({
         {daily && daily.length > 0 && (
           <div className="mb-4">
             <SectionTitle>7 天预报</SectionTitle>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {daily.map((d, i) => (
                 <DayRow key={d.fxDate} d={d} label={dayLabel(d.fxDate, i)} />
               ))}
@@ -254,7 +255,7 @@ function SectionTitle({ children }: { children: ReactNode }) {
 
 function StatCell({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between rounded-lg bg-white/10 px-3 py-1.5">
+    <div className="flex items-center justify-between rounded-lg bg-white/10 px-3 py-2">
       <span className="text-white/50">{label}</span>
       <span className="font-mono text-white/80">{value}</span>
     </div>

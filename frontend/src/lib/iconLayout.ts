@@ -55,10 +55,12 @@ export const TILE_FONT_TIERS = {
 
 export type TileFontTier = keyof typeof TILE_FONT_TIERS
 
-/** 档位字号 CSS 值:min(px 档 × iconScale, cqw 档)。 */
+/** 档位字号 CSS 值:max(12px 可读下限, min(px 档 × iconScale, cqw 档))。
+ *  外层 max 防 iconScale 缩小档(<1.0 合法区间)把次行压到 12px 以下——
+ *  cqw 只钳上限救不了下限,labelSize 在后端有 10px 下限而此前本公式没有。 */
 export function tileFont(iconScale: number, tier: TileFontTier): string {
   const { px, cqw } = TILE_FONT_TIERS[tier]
-  return `min(${px * iconScale}px, ${cqw}cqw)`
+  return `max(12px, min(${px * iconScale}px, ${cqw}cqw))`
 }
 
 /**

@@ -44,14 +44,18 @@ describe('tileFont', () => {
     expect(TILE_FONT_TIERS.secondary).toEqual({ px: 12, cqw: 20 })
   })
 
-  it('默认档 scale=1 → min(基准px, 档位cqw)', () => {
-    expect(tileFont(1, 'primary')).toBe('min(14px, 24cqw)')
-    expect(tileFont(1, 'secondary')).toBe('min(12px, 20cqw)')
+  it('默认档 scale=1 → max(12px 下限, min(基准px, 档位cqw))', () => {
+    expect(tileFont(1, 'primary')).toBe('max(12px, min(14px, 24cqw))')
+    expect(tileFont(1, 'secondary')).toBe('max(12px, min(12px, 20cqw))')
   })
 
   it('iconScale 同比缩放 px 档(cqw 档不变——块宽约束与缩放无关)', () => {
-    expect(tileFont(1.5, 'primary')).toBe('min(21px, 24cqw)')
-    expect(tileFont(2, 'secondary')).toBe('min(24px, 20cqw)')
+    expect(tileFont(1.5, 'primary')).toBe('max(12px, min(21px, 24cqw))')
+    expect(tileFont(2, 'secondary')).toBe('max(12px, min(24px, 20cqw))')
+  })
+
+  it('可读下限:iconScale <1 的合法档位次行不跌破 12px', () => {
+    expect(tileFont(0.75, 'secondary')).toBe('max(12px, min(9px, 20cqw))')
   })
 })
 

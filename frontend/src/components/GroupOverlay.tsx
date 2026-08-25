@@ -4,6 +4,7 @@ import { SortableContext, rectSortingStrategy, useSortable } from '@dnd-kit/sort
 import { CSS } from '@dnd-kit/utilities'
 import { useConfig, useDeleteIcon, useUpdateIconData } from '../api/config'
 import { useEditMode } from '../context/EditModeContext'
+import ConfirmButton from './ConfirmButton'
 import { groupMembers, groupPageCount, groupPageSlice } from '../lib/groupReducer'
 import { extractString, navIconSrc } from '../lib/iconData'
 import type { Icon } from '../lib/types'
@@ -116,13 +117,14 @@ export default function GroupOverlay({
 
   return createPortal(
     <div className="fixed inset-0 z-40 flex items-center justify-center">
-      {/* 暗化背景:常态 pointer-events:none(票 08 硬约束);浓度与其余浮层遮罩统一 /50 */}
-      <div className="absolute inset-0 bg-black/50 pointer-events-none" />
+      {/* 暗化背景:常态 pointer-events:none(票 08 硬约束);浓度与其余浮层遮罩统一 /50。
+          入场动画与其余 L1 弹层同语汇(fade-in/pop-in 纯 CSS,不碰 dnd 拖拽量测)。 */}
+      <div className="absolute inset-0 bg-black/50 pointer-events-none animate-fade-in" />
       <div
         ref={panelRef}
         role="dialog"
         aria-label={`分组 ${name}`}
-        className="relative glass-panel pointer-events-auto rounded-3xl p-5 w-[min(92vw,380px)] shadow-2xl"
+        className="relative glass-panel pointer-events-auto rounded-3xl p-5 w-[min(92vw,380px)] shadow-2xl animate-pop-in"
       >
         {/* 组名:点开行内改名(Enter/失焦提交,ESC 只取消改名——input 的
             stopPropagation 挡住下方 document keydown,不连带关弹层) */}
@@ -258,7 +260,7 @@ function MemberTile({ member, onClose }: { member: Icon; onClose: () => void }) 
         ref={setNodeRef}
         href={url}
         onClick={onClose}
-        className="flex flex-col items-center gap-1.5 rounded-2xl p-1.5 cursor-pointer hover:bg-white/10 active:scale-95 transition"
+        className="flex flex-col items-center gap-1.5 rounded-2xl p-1.5 cursor-pointer hover:bg-white/10 active:scale-95 transition focus-visible:outline-2 focus-visible:outline-white/60"
       >
         {body}
       </a>
@@ -275,23 +277,23 @@ function MemberTile({ member, onClose }: { member: Icon; onClose: () => void }) 
       style={style}
       {...attributes}
       {...listeners}
-      className="relative flex flex-col items-center gap-1.5 rounded-2xl p-1.5 editing-jiggle cursor-grab active:cursor-grabbing select-none"
+      className="relative flex flex-col items-center gap-1.5 rounded-2xl p-1.5 editing-jiggle cursor-grab active:cursor-grabbing select-none focus-visible:outline-2 focus-visible:outline-white/60"
     >
       {body}
-      {/* 删除 ×:onPointerDown stopPropagation 防误启拖拽(同网格 EditActions 角标) */}
-      <button
-        type="button"
-        disabled={del.isPending}
+      {/* 删除:ConfirmButton 二次确认(首击武装「确认?」再击执行),替换原 bg-accent
+          实色角标——红系武装态自表意,误触即删由此兜住。外层 span 持有
+          onPointerDown stopPropagation 防误启拖拽(同网格 EditActions 角标;共享组件
+          不收事件 props,守卫上提一层)。 */}
+      <span
+        className="absolute -top-1.5 -right-1.5 z-10"
         onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => {
-          e.stopPropagation()
-          del.mutate(member.id)
-        }}
-        className="absolute -top-1.5 -right-1.5 z-10 w-6 h-6 rounded-full bg-accent text-white text-sm leading-none flex items-center justify-center hover:bg-accent/80 disabled:opacity-50"
-        title="删除"
       >
-        ×
-      </button>
+        <ConfirmButton
+          label={name ? `删除 ${name}` : '删除图标'}
+          title="删除"
+          onConfirm={() => del.mutate(member.id)}
+        />
+      </span>
     </div>
   )
 }

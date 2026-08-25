@@ -10,6 +10,7 @@ import {
 import { ApiError } from '../api/client'
 import { useEditMode } from '../context/EditModeContext'
 import { useCarousel } from './Carousel'
+import ConfirmButton from './ConfirmButton'
 import { LensBox } from './LensBox'
 import { moveItem } from '../lib/arrayUtil'
 
@@ -61,7 +62,10 @@ export default function PageTabs() {
     const toIdx = pages.findIndex((p) => p.id === toId)
     if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return
     const ordered = moveItem(pages, fromIdx, toIdx)
-    reorderPages.mutate(ordered.map((p, i) => ({ id: p.id, sortOrder: i })))
+    // 重排失败(乐观已回滚)也要走底部错误药丸,与删页同族——否则拖了个寂寞无任何反馈
+    reorderPages.mutate(ordered.map((p, i) => ({ id: p.id, sortOrder: i })), {
+      onError: (e) => setError(e instanceof ApiError ? e.message : '重排失败'),
+    })
     // 让当前查看的页跟随重排:active 原指 pages[active],找到它在新序中的位置并切过去,
     // 避免重排后内容跳到别的页。
     const activeId = pages[active]?.id
@@ -99,7 +103,11 @@ export default function PageTabs() {
   }
   function commitRename() {
     const name = draft.trim()
-    if (renamingId !== null && name) renamePage.mutate({ id: renamingId, name })
+    // 重命名/新建失败补 onError:输入框已随提交卸载,失败只剩静默,须经错误药丸可见
+    if (renamingId !== null && name)
+      renamePage.mutate({ id: renamingId, name }, {
+        onError: (e) => setError(e instanceof ApiError ? e.message : '重命名失败'),
+      })
     setRenamingId(null)
     setDraft('')
   }
@@ -110,7 +118,10 @@ export default function PageTabs() {
 
   function commitCreate() {
     const name = newName.trim()
-    if (name) createPage.mutate(name)
+    if (name)
+      createPage.mutate(name, {
+        onError: (e) => setError(e instanceof ApiError ? e.message : '新建页失败'),
+      })
     setCreating(false)
     setNewName('')
   }
@@ -143,6 +154,16 @@ export default function PageTabs() {
           return (
             <div
               key={p.id}
+              role="tab"
+              aria-selected={isActive}
+              // roving tabindex:仅当前页进 tab 序;div+onClick 因内嵌删除按钮不能改 button,
+              // 语义化保守到 role/aria + 键盘激活
+              tabIndex={isActive ? 0 : -1}
+              onKeyDown={(e) => {
+                // 焦点在内部控件(删页确认)上时键事件归属其自身,不触发翻页
+                if (e.target !== e.currentTarget) return
+                if (e.key === 'Enter' || e.key === ' ') goTo(i)
+              }}
               draggable={editing && !isRenaming}
               onDragStart={editing ? (e) => onDragStart(e, p.id) : undefined}
               onDragOver={editing ? (e) => onDragOver(e, p.id) : undefined}
@@ -152,8 +173,10 @@ export default function PageTabs() {
               onClick={() => goTo(i)}
               title={editing ? `${p.name} · 双击重命名 · 拖拽排序` : p.name}
               className={
-                'group flex items-center gap-1 px-3 py-1 rounded-full text-[13px] whitespace-nowrap ' +
-                'transition select-none ' +
+                'group flex items-center gap-1 px-3 py-2 rounded-full text-[13px] whitespace-nowrap ' +
+                'transition select-none focus-visible:outline-2 focus-visible:outline-white/60 ' +
+                // 选中拇指的实心白是 prototype/liquid-glass 定稿裁决:L2 镜头轨上的选中态
+                // 刻意区别于 .glass-segment-thumb 的 L1 轨道滑块(玻璃页签上再叠玻璃会糊)
                 (isActive
                   ? 'bg-white/75 text-zinc-900 font-medium shadow-sm '
                   : 'text-white/80 hover:text-white ') +
@@ -174,26 +197,26 @@ export default function PageTabs() {
                   }}
                   onClick={(e) => e.stopPropagation()}
                   onContextMenu={(e) => e.stopPropagation()}
-                  className="bg-transparent outline-none w-24 text-white placeholder-white/50 border-b border-white/50"
+                  className="bg-transparent outline-none w-24 text-white placeholder-white/50 border-b border-white/50 focus:border-white/80"
                 />
               ) : (
                 <span className="max-w-[10rem] truncate">{p.name}</span>
               )}
 
               {editing && !isRenaming && (
-                <button
-                  type="button"
-                  aria-label={`删除页 ${p.name}`}
-                  title="删除空页(非空页会被拒绝)"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    removePage(p)
-                  }}
+                // 删页改二次确认(首击武装「确认?」再击执行);编辑模式下常显——
+                // 原 group-hover 显形在触屏上无处 hover。span 隔离冒泡:点击/右键不
+                // 触发外层 goTo 切页与页面级右键退出编辑。
+                <span
+                  onClick={(e) => e.stopPropagation()}
                   onContextMenu={(e) => e.stopPropagation()}
-                  className="opacity-0 group-hover:opacity-100 -mr-1 ml-0.5 w-4 h-4 rounded-full bg-white/25 hover:bg-white/50 text-white text-[11px] leading-none flex items-center justify-center"
                 >
-                  ×
-                </button>
+                  <ConfirmButton
+                    label={`删除页 ${p.name}`}
+                    title="删除空页(非空页会被拒绝)"
+                    onConfirm={() => removePage(p)}
+                  />
+                </span>
               )}
             </div>
           )
@@ -213,7 +236,7 @@ export default function PageTabs() {
                 else if (e.key === 'Escape') cancelCreate()
               }}
               onContextMenu={(e) => e.stopPropagation()}
-              className="px-3 py-1.5 rounded-full text-sm bg-white/20 outline-none w-28 text-white placeholder-white/60 border border-white/40"
+              className="px-3 py-1.5 rounded-full text-sm bg-white/20 outline-none focus-visible:border-white/80 w-28 text-white placeholder-white/60 border border-white/40"
             />
           ) : (
             <button
@@ -224,7 +247,7 @@ export default function PageTabs() {
               }}
               onContextMenu={(e) => e.stopPropagation()}
               title="新建页"
-              className="shrink-0 px-3 py-1 rounded-full text-[13px] text-white/80 hover:text-white flex items-center justify-center"
+              className="shrink-0 px-3 py-2 rounded-full text-[13px] text-white/80 hover:text-white flex items-center justify-center focus-visible:outline-2 focus-visible:outline-white/60"
             >
               +
             </button>

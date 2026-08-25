@@ -20,7 +20,9 @@ export function LensBox({
   style,
   children,
 }: {
-  /** 盒子圆角(CSS 像素),贴图与滤镜半径须与之一致 */
+  /** 盒子圆角(CSS 像素),贴图与滤镜半径须与之一致——rounded-full 时 = 元素实测高的一半
+   *  (不能运行时实读:computed 值是字面 9999px 而非实际渲染半径),调用方按盒高推导
+   *  手填,如 SearchBox(约 44px 高)传 22、右上圆钮(40px)传 20 */
   radius: number
   className?: string
   style?: CSSProperties

@@ -298,6 +298,8 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
       const tag = (e.target as HTMLElement)?.tagName
       // 输入框内不拦截方向键
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      // Modal/抽屉打开时不翻背后的走马灯:焦点落在对话框内时方向键属于对话框
+      if ((e.target as HTMLElement)?.closest?.('[role="dialog"]')) return
       if (e.key === 'ArrowLeft') {
         goTo(active - 1)
         e.preventDefault()
@@ -310,11 +312,11 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
     return () => window.removeEventListener('keydown', onKey)
   }, [active, goTo])
 
-  // 翻页箭头:裸箭头悬浮壁纸,无壳;hover 圆形高光作反馈。
+  // 翻页箭头:裸箭头悬浮壁纸,无壳;hover 圆形高光作反馈,active:scale-95 几何压感。
   const arrowBtn =
     'absolute top-1/2 -translate-y-1/2 z-20 ' +
     'w-11 h-11 rounded-full flex items-center justify-center text-white/90 text-xl ' +
-    'hover:bg-white/40 dark:hover:bg-white/20 transition ' +
+    'hover:bg-white/40 dark:hover:bg-white/20 active:scale-95 transition ' +
     'focus:outline-none focus-visible:ring-2 focus-visible:ring-accent'
 
   return (
@@ -474,7 +476,7 @@ function EdgeDropZone({ side }: { side: 'left' | 'right' }) {
       ref={setNodeRef}
       aria-hidden
       className={
-        'absolute top-1/2 -translate-y-1/2 z-20 w-16 h-24 rounded-2xl glass-panel ' +
+        'absolute top-1/2 -translate-y-1/2 z-20 w-16 h-24 rounded-3xl glass-panel ' +
         'flex items-center justify-center overflow-hidden pointer-events-none ' +
         (side === 'left' ? 'left-3' : 'right-3')
       }

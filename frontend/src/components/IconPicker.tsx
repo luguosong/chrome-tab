@@ -49,7 +49,9 @@ export default function IconPicker({
               type="button"
               onClick={() => onChange(pickValue)}
               title={src === derived ? '自动(按网址)' : src}
-              className={`w-7 h-7 rounded-md bg-white/20 flex items-center justify-center transition ${
+              // w-8 热区 + rounded-lg(对齐图标层触控/圆角语汇);active:scale-95 与
+              // Tile 按压缩放一致;焦点环走全局 focus-visible 范式
+              className={`w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center transition active:scale-95 focus-visible:outline-2 focus-visible:outline-white/60 ${
                 selected ? 'ring-2 ring-accent' : 'hover:bg-white/30 opacity-80'
               }`}
             >
@@ -62,7 +64,7 @@ export default function IconPicker({
             </button>
           )
         })}
-        {isFetching && <span className="text-[11px] text-white/50">获取中…</span>}
+        {isFetching && <span className="text-xs text-white/50">获取中…</span>}
       </div>
       {/* 覆盖地址恒显当前值:命中候选也不清空输入框,避免用户手输的字「消失」 */}
       <input

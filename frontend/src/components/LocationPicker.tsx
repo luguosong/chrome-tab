@@ -44,6 +44,10 @@ export default function LocationPicker({
           setOpen(true)
         }}
         onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          // Esc 只收下拉,不清输入(与遮罩点击同款关闭路径)
+          if (e.key === 'Escape') setOpen(false)
+        }}
         placeholder={
           value
             ? `${value.name}${value.adm1 ? ' · ' + value.adm1 : ''}${value.adm2 ? ' ' + value.adm2 : ''}`
@@ -62,7 +66,11 @@ export default function LocationPicker({
             onClick={() => setOpen(false)}
             className="fixed inset-0 z-30 cursor-default"
           />
-          <div className="absolute left-0 right-0 z-40 mt-1 glass-panel glass-panel-readable rounded-lg py-1 max-h-56 overflow-y-auto">
+          <div
+            role="listbox"
+            aria-label="候选列表"
+            className="absolute left-0 right-0 z-40 mt-1 glass-panel glass-panel-readable rounded-lg py-1 max-h-56 overflow-y-auto"
+          >
             {res.isLoading && <div className="px-3 py-1.5 text-xs text-white/50">搜索中…</div>}
             {!res.isLoading && (res.data?.length ?? 0) === 0 && (
               <div className="px-3 py-1.5 text-xs text-white/50">无匹配城市</div>
@@ -73,12 +81,14 @@ export default function LocationPicker({
                 <button
                   key={`${c.lat},${c.lon},${i}`}
                   type="button"
+                  role="option"
+                  aria-selected={false}
                   onClick={() => {
                     onChange(c)
                     setQ('')
                     setOpen(false)
                   }}
-                  className="block w-full text-left px-3 py-1.5 text-sm text-white/90 hover:bg-white/30"
+                  className="block w-full text-left px-3 py-2 text-sm text-white/90 hover:bg-white/30 active:bg-white/40 transition-colors"
                 >
                   {c.name}
                   {sub && <span className="text-white/40 text-xs"> {sub}</span>}

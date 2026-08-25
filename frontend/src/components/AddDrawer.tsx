@@ -35,7 +35,7 @@ export function AddPane({
   return (
     <>
       {pageId === undefined && (
-        <div className="text-sm text-white/60">无可用页面。</div>
+        <div className="text-sm text-white/60">无可用页面 · 先在底部页签条新建页,再回来添加</div>
       )}
       <TypeSection title="基础" defs={base} pageId={pageId} existingTypeIds={existingTypeIds} />
       <TypeSection title="扩展" defs={ext} pageId={pageId} existingTypeIds={existingTypeIds} />
@@ -143,12 +143,12 @@ function TypeCard({
   // 格数徽标取真实画格跨度(ADR-0021:缺省 1×1)——加块前告知占地
   const span = def.size ?? { w: 1, h: 1 }
   return (
-    <form onSubmit={submit} className="glass-soft rounded-2xl p-4 space-y-2.5">
+    <form onSubmit={submit} className="glass-soft rounded-2xl p-4 space-y-3">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-white/95">{def.label}</span>
         <span
           aria-label={`占 ${span.w}×${span.h} 格`}
-          className="rounded-full bg-white/10 px-1.5 py-px font-mono text-[10px] tabular-nums text-white/50"
+          className="rounded-full bg-white/10 px-2 py-0.5 font-mono text-[11px] tabular-nums text-white/60"
         >
           {span.w}×{span.h}
         </span>
@@ -215,7 +215,8 @@ function TypeCard({
       <button
         type="submit"
         disabled={create.isPending || noPage || locMissing}
-        className="w-full rounded-full bg-accent/90 py-1.5 text-sm font-medium text-white transition hover:bg-accent disabled:opacity-50"
+        className="w-full rounded-full bg-accent/90 py-1.5 text-sm font-medium text-white transition hover:bg-accent
+          active:bg-accent/75 focus-visible:outline-2 focus-visible:outline-white/60 disabled:opacity-50"
       >
         {create.isPending ? '添加中…' : locMissing ? '请选择城市' : `添加${def.label}`}
       </button>

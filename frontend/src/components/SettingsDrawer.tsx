@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { LAYOUT_LIMITS } from '../lib/layoutSettings'
 import type { LayoutSettings } from '../lib/types'
 import { BackupRestore } from './BackupRestore'
@@ -105,7 +105,7 @@ export function SettingsPane({
           onChange={(e) =>
             applyNow('searchEngine', e.target.value as LayoutSettings['searchEngine'])
           }
-          className="rounded-full bg-white/10 px-3 py-1.5 text-xs text-white/90 cursor-pointer focus-visible:outline-2 focus-visible:outline-white/60"
+          className="rounded-full bg-white/10 px-3 py-2 text-xs text-white/90 cursor-pointer focus-visible:outline-2 focus-visible:outline-white/60"
         >
           <option value="google">Google</option>
           <option value="bing">Bing</option>
@@ -163,7 +163,7 @@ export function SettingsPane({
         />
       </Row>
 
-      <p className="mt-4 text-[11px] text-white/50 leading-relaxed">
+      <p className="mt-4 text-xs text-white/60 leading-relaxed">
         设置随账号保存,其它设备登录即同步。
       </p>
 
@@ -181,17 +181,20 @@ function Section({ children }: { children: string }) {
   )
 }
 
-/** 行骨架:标签在左、控件在右,与 Slider 的标签行同一节奏。 */
-function Row({ label, children }: { label: string; children: ReactNode }) {
+/** 行骨架:标签在左、控件在右,与 Slider 的标签行同一节奏。
+ *  labelFor:传入时文本渲染为 label 并关联控件(点文字也能操作,Toggle 用)。 */
+function Row({ label, labelFor, children }: { label: string; labelFor?: string; children: ReactNode }) {
   return (
     <div className="mb-5 flex items-center justify-between text-xs text-white/80">
-      <span>{label}</span>
+      {labelFor ? <label htmlFor={labelFor}>{label}</label> : <span>{label}</span>}
       {children}
     </div>
   )
 }
 
-/** iOS 胶囊开关:与主屏隐喻同源;sr-only input 保留键盘/读屏可达,焦点环经 peer 作用于轨道。 */
+/** iOS 胶囊开关:与主屏隐喻同源;sr-only input 保留键盘/读屏可达,焦点环经 peer 作用于轨道。
+ *  轨道 24×40 对齐 iOS 实际开关尺寸(命中 ≥24px),滑块等比放大、行程 16px 不变;
+ *  文本经 htmlFor 并入开关,点文字也能切。 */
 function Toggle({
   label,
   checked,
@@ -201,18 +204,20 @@ function Toggle({
   checked: boolean
   onChange: (v: boolean) => void
 }) {
+  const id = useId()
   return (
-    <Row label={label}>
-      <label className="relative inline-flex cursor-pointer">
+    <Row label={label} labelFor={id}>
+      <label htmlFor={id} className="relative inline-flex cursor-pointer">
         <input
+          id={id}
           type="checkbox"
           className="peer sr-only"
           checked={checked}
           onChange={(e) => onChange(e.target.checked)}
         />
-        <span className="block h-5 w-9 rounded-full bg-white/20 transition-colors
+        <span className="block h-6 w-10 rounded-full bg-white/20 transition-colors
           peer-checked:bg-accent peer-focus-visible:outline-2 peer-focus-visible:outline-white/60 peer-focus-visible:outline-offset-2" />
-        <span className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform
+        <span className="absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform
           peer-checked:translate-x-4" />
       </label>
     </Row>

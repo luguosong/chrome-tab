@@ -72,7 +72,7 @@ export default function ChangelogModal({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center"
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
       aria-label={`${sourceLabel} 更新日志`}
@@ -93,7 +93,7 @@ export default function ChangelogModal({
             type="button"
             onClick={onClose}
             aria-label="关闭"
-            className="ml-3 shrink-0 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center transition-colors"
+            className="ml-3 shrink-0 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
           >
             ×
           </button>
@@ -107,7 +107,7 @@ export default function ChangelogModal({
               <button
                 type="button"
                 onClick={() => void refetch()}
-                className="border border-white/30 text-white/80 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent"
+                className="rounded-full border border-white/30 px-3 py-1.5 min-h-8 text-xs text-white/80 hover:border-accent hover:text-accent active:bg-white/20 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
               >
                 重试
               </button>
@@ -166,7 +166,7 @@ export default function ChangelogModal({
                           />
                           {date && <span className="font-mono text-[11px] text-white/40">{date}</span>}
                           {isLatest && (
-                            <span className="rounded-full bg-accent/20 px-2 py-0.5 text-[10px] font-medium leading-none text-accent">
+                            <span className="rounded-full bg-accent/20 px-2 py-0.5 text-[11px] font-medium leading-none text-accent">
                               最新
                             </span>
                           )}
@@ -176,7 +176,7 @@ export default function ChangelogModal({
                               target="_blank"
                               rel="noreferrer"
                               title="GitHub Releases(新标签页打开)"
-                              className="rounded-full border border-white/25 px-2 py-0.5 text-[10px] leading-none text-white/60 hover:border-accent hover:text-accent transition-colors"
+                              className="rounded-full border border-white/25 px-2.5 py-1 text-[11px] leading-none text-white/60 hover:border-accent hover:text-accent transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
                             >
                               GitHub ↗
                             </a>
@@ -187,7 +187,7 @@ export default function ChangelogModal({
                               disabled={translateMut.isPending}
                               onClick={() => translateMut.mutate([v.title])}
                               title={translateMut.isPending ? pendingHint : '机器翻译此版本(译后持久化)'}
-                              className="rounded-full border border-white/25 px-2 py-0.5 text-[10px] leading-none text-white/60 hover:border-accent hover:text-accent disabled:opacity-50 transition-colors"
+                              className="rounded-full border border-white/25 px-2.5 py-1 text-[11px] leading-none text-white/60 hover:border-accent hover:text-accent disabled:opacity-50 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
                             >
                               {translateMut.isPending ? pendingLabel : '翻译'}
                             </button>
