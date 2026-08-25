@@ -235,6 +235,52 @@ code {
   background-color: rgba(255, 255, 255, 0.25);
 }
 
+/* 「待办详情」备注的 markdown 排版(react-markdown 输出无类裸元素,一个类统管;
+   面板已有 glass-panel-readable 垫底,颜色走 white 透明阶、链接走 accent)。
+   滚动条挂 .modal-scroll(容器类由调用方带上)。 */
+.md-note { font-size: 13px; line-height: 1.65; color: rgba(255, 255, 255, 0.85); }
+.md-note > :first-child { margin-top: 0; }
+.md-note > :last-child { margin-bottom: 0; }
+.md-note h1, .md-note h2, .md-note h3, .md-note h4 {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  margin: 1em 0 0.4em;
+}
+.md-note h1 { font-size: 1.25em; }
+.md-note h2 { font-size: 1.15em; }
+.md-note h3, .md-note h4 { font-size: 1.05em; }
+.md-note p, .md-note ul, .md-note ol, .md-note blockquote, .md-note pre, .md-note table { margin: 0.6em 0; }
+.md-note ul { padding-left: 1.4em; list-style: disc; }
+.md-note ol { padding-left: 1.4em; list-style: decimal; }
+.md-note li { margin: 0.25em 0; }
+.md-note li > ul, .md-note li > ol { margin: 0.25em 0; }
+.md-note a { color: var(--color-accent); }
+.md-note a:hover { text-decoration: underline; }
+.md-note code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  padding: 0.15em 0.35em;
+}
+.md-note pre {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 8px;
+  padding: 0.75em 0.9em;
+  overflow-x: auto;
+}
+.md-note pre code { background: none; padding: 0; font-size: 0.85em; }
+.md-note blockquote {
+  border-left: 2px solid rgba(255, 255, 255, 0.3);
+  padding-left: 0.8em;
+  color: rgba(255, 255, 255, 0.65);
+}
+.md-note hr { border: none; border-top: 1px solid rgba(255, 255, 255, 0.15); }
+.md-note img { max-width: 100%; border-radius: 8px; }
+.md-note table { border-collapse: collapse; }
+.md-note th, .md-note td { border: 1px solid rgba(255, 255, 255, 0.15); padding: 4px 8px; }
+.md-note th { color: rgba(255, 255, 255, 0.95); }
+
 /* 编辑模式：磁贴轻微抖动，提示当前可增删；reduced-motion 下不动 */
 @media (prefers-reduced-motion: no-preference) {
   .editing-jiggle {

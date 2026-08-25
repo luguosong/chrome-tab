@@ -35,6 +35,8 @@ export interface TodoTaskDto {
   priority: number
   /** 到期时间(ISO),week/today 口径下必有;null 兜底排尾。 */
   dueDate: string | null
+  /** 备注(markdown,「待办详情」只读渲染)。上游字段名 content(非 note,线上实测);缺失/空 = 无备注。 */
+  content: string
 }
 
 /** 三视图 bundle:tile 主显 inbox,Modal 按 tab 分取;week 含 today(7 天全量)。 */
@@ -66,6 +68,7 @@ export function parseTodoTasks(resp: unknown, view: 'due' | 'inbox' = 'due'): To
       title,
       priority: typeof m['priority'] === 'number' ? m['priority'] : 0,
       dueDate: str(m, 'dueDate'),
+      content: str(m, 'content') ?? '',
     })
   }
   const due = (t: TodoTaskDto) => t.dueDate ?? '9999'

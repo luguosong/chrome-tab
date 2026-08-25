@@ -10,6 +10,8 @@ export type TodoTask = {
   priority: number
   /** 到期时间(ISO,滴答原串带偏移);today/week 口径下必有,inbox 常为 null。 */
   dueDate: string | null
+  /** 备注(markdown,「待办详情」只读渲染)。上游字段名 content(非 note);空串 = 无备注。 */
+  content: string
 }
 
 /** 三视图 bundle(后端分拣好的唯一样):tile 主显 inbox,Modal 按 tab 分取;week 含 today。 */
@@ -50,4 +52,9 @@ export function isOverdue(dueDate: string | null, now = new Date()): boolean {
   if (!dueDate) return false
   const ms = new Date(dueDate).getTime()
   return Number.isFinite(ms) && dayKeyPlus8(ms) < dayKeyPlus8(now.getTime())
+}
+
+/** 高优先级色点的类映射(≥5 红、≥3 amber、低/无不显;列表行与「待办详情」共用,改配色只动此一处)。 */
+export function priorityDotClass(priority: number): string {
+  return priority >= 5 ? 'bg-red-400' : priority >= 3 ? 'bg-amber-300' : ''
 }

@@ -53,6 +53,15 @@ describe('parseTodoTasks(纯解析)', () => {
     expect(() => parseTodoTasks({})).toThrow('缺任务数组')
     expect(parseTodoTasks([])).toEqual([])
   })
+  it('备注透传:content 有则原样、缺则空串(上游字段名 content,非 note——线上实测 filter/create 均带)', () => {
+    const withNote = [
+      ...INBOX_TASKS,
+      { id: 'i3', projectId: 'inbox1020103842', title: '带备注', priority: 0, content: '**加粗**笔记' },
+    ]
+    const parsed = parseTodoTasks(withNote, 'inbox')
+    expect(parsed.find((t) => t.id === 'i3')?.content).toBe('**加粗**笔记')
+    expect(parsed.find((t) => t.id === 'i1')?.content).toBe('')
+  })
 })
 
 describe('splitToday(分拣,毫秒比较)', () => {
