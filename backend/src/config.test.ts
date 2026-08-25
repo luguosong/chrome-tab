@@ -118,6 +118,7 @@ describe('PUT /api/layout-settings', () => {
       'not-array',
       [{ id: 'a', name: 'x', date: '1990-08-15', calendar: 'solar' }], // 缺 repeat
       [{ id: 'a', name: 'x', date: '1990-8-15', calendar: 'solar', repeat: 'annual' }], // date 形状
+      [{ id: 'a', name: 'x', date: '2026-13-45', calendar: 'solar', repeat: 'annual' }], // 月/日越界
       [{ id: 'a', name: 'x', date: '1990-08-15', calendar: 'julian', repeat: 'annual' }],
       [{ id: '', name: 'x', date: '1990-08-15', calendar: 'solar', repeat: 'annual' }], // 空 id
       [{ id: 'a', name: 'x'.repeat(33), date: '1990-08-15', calendar: 'solar', repeat: 'annual' }], // 名超长

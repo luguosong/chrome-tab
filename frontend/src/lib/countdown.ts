@@ -1,4 +1,4 @@
-import { Lunar } from 'lunar-typescript'
+import { Lunar, type Solar } from 'lunar-typescript'
 import type { ImportantDate } from 'chrome-tab-shared'
 
 /**
@@ -23,13 +23,16 @@ export type CountdownItem = {
 
 type HolidayDef = { key: string; name: string; dateInYear: (gy: number) => Date | null }
 
+/** Solar(lunar-typescript 历表对象)→ 本地 Date(两处换算共用)。 */
+const solarToDate = (s: Solar) => new Date(s.getYear(), s.getMonth() - 1, s.getDay())
+
 /** 农历月日 → 指定公历年内的公历日期。农历年跨公历年(腊月/正月),须试相邻两个
  *  农历年取落在 gy 者;该农历年无此月日(库抛错)则次候选,全无 → null。 */
 function lunarDateInGregorianYear(lm: number, ld: number, gy: number): Date | null {
   for (const ly of [gy - 1, gy]) {
     try {
       const s = Lunar.fromYmd(ly, lm, ld).getSolar()
-      if (s.getYear() === gy) return new Date(gy, s.getMonth() - 1, s.getDay())
+      if (s.getYear() === gy) return solarToDate(s)
     } catch {
       /* 月日非法(如闰月年结构差异),换下一个候选农历年 */
     }
@@ -120,6 +123,7 @@ function nextUserDate(d: ImportantDate, today: Date): Date | null {
   const [, m, day] = d.date.split('-').map(Number)
   const year = Number(d.date.slice(0, 4))
   if (d.repeat === 'annual') {
+    // ponytail: 公历 2-29 annual 在非闰年由 JS 进位为 3-1(历法继任日惯例),不特判
     return d.calendar === 'lunar'
       ? nextAnnual((y) => lunarDateInGregorianYear(m, day, y), today)
       : nextAnnual((y) => new Date(y, m - 1, day), today)
@@ -127,10 +131,7 @@ function nextUserDate(d: ImportantDate, today: Date): Date | null {
   try {
     const date =
       d.calendar === 'lunar'
-        ? (() => {
-            const s = Lunar.fromYmd(year, m, day).getSolar()
-            return new Date(s.getYear(), s.getMonth() - 1, s.getDay())
-          })()
+        ? (() => solarToDate(Lunar.fromYmd(year, m, day).getSolar()))()
         : new Date(year, m - 1, day)
     return date.getTime() >= today.getTime() ? date : null
   } catch {

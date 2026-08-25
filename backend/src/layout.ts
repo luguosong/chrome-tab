@@ -160,7 +160,9 @@ function parseStoredDates(raw: string | null): ImportantDate[] {
   }
 }
 
-/** importantDates 可空字段:缺省 [];逐条结构校验(id/name 非空限长、date 形状、枚举),违例 400。 */
+/** importantDates 可空字段:缺省 [](缺字段=清空,寄放字段随整份 LWW,ADR-0006/0026;
+ *  旧客户端整份回写覆盖是 LWW 语义本身,跨端防丢靠本地镜像与和解);逐条结构校验
+ *  (id/name 非空限长、date 形状与月日界限、枚举),违例 400。 */
 function optDates(b: Record<string, unknown>): ImportantDate[] {
   const v = b.importantDates
   if (v === undefined || v === null) return []
@@ -175,6 +177,11 @@ function optDates(b: Record<string, unknown>): ImportantDate[] {
       throw new BadRequest('importantDates.name: 非空字符串且 ≤32 字符')
     if (typeof d.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(d.date))
       throw new BadRequest('importantDates.date: 须为 YYYY-MM-DD')
+    // 月日界限:历法无关存储(农历日历本就无「公历真实日期」可言),只挡 13-45 类
+    // 越界值;公历 2-30 等细粒度假日期由前端 Date 循环展示兜住,不追真历表
+    const [, mm, dd] = d.date.split('-').map(Number)
+    if (mm < 1 || mm > 12 || dd < 1 || dd > 31)
+      throw new BadRequest('importantDates.date: 月/日越界')
     if (d.calendar !== 'solar' && d.calendar !== 'lunar')
       throw new BadRequest('importantDates.calendar: 须为 solar 或 lunar')
     if (d.repeat !== 'annual' && d.repeat !== 'once')

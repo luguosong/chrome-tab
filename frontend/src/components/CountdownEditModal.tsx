@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ImportantDate } from 'chrome-tab-shared'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import { useUpdateLayoutSettings } from '../api/config'
@@ -72,6 +72,15 @@ export default function CountdownEditModal({ onClose }: { onClose: () => void })
   const save = useUpdateLayoutSettings()
   const [draft, setDraft] = useState<Draft | null>(null)
   const [err, setErr] = useState<string | null>(null)
+
+  // Esc 关闭(姊妹 Modal 共有基线;表单态同样关——未保存即弃,无半提交状态)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   async function commit(next: ImportantDate[]) {
     setErr(null)
@@ -158,7 +167,7 @@ export default function CountdownEditModal({ onClose }: { onClose: () => void })
           </>
         ) : (
           <>
-            <h2 className="text-base font-medium mb-3">{draft.id ? '编辑日子' : '添加日子'}</h2>
+            <h2 className="text-base font-medium mb-3">{draft.id ? '编辑重要日子' : '添加重要日子'}</h2>
             <div className="space-y-3">
               <input
                 autoFocus

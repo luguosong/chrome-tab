@@ -11,6 +11,7 @@
 - [x] 后端:`layout_settings` 加 `important_dates` 列(DDL + ALTER 补列 + Kysely 类型)、`layout.ts` 白名单校验(条数/字段)、readLayout/updateLayout wire 读写;后端测试。
 - [x] 前端接线:`layoutSettings.ts` 默认值 + withDefaults;镜像/备份整份 blob 透传新字段,零改动。
 - [x] Clock hover 弹层倒计时分区(空窗保留一行「编辑」入口,否则首条无处可加)+ 编辑 Modal(列表 CRUD、历法切换表单、ConfirmButton 删除、useUpdateLayoutSettings 保存)。
+  - code-review 补修:Modal 补 Esc 关闭(姊妹 Modal 基线)、标题措辞统一「重要日子」;`optDates` 补月/日越界校验(挡 13-45 类);`countdown.ts` Solar→Date 提取共用;2-29 annual 进位 3-1 与「PUT 缺字段=清空(整份 LWW)」两处取舍以注释标记;CONTEXT 词条与 spec.md 空窗语义同步为「列表隐藏、保留编辑入口」。
 - [x] 领域词条已在 CONTEXT.md(「倒计时」「节假日」「重要日子」);ADR-0026 落盘。
 - [x] 全量验证:tsc 零错、前后端 vitest 全绿。
 
