@@ -6,7 +6,7 @@ import Tile, { TilePrimary, TileSecondary } from './Tile'
 /**
  * 天气图标的专属网格渲染(见 ADR-0009;3×1 跨格,首个非 3×2 跨格尺寸,CONTEXT.md「天气」):
  * 块内 = 小时序列横排 4 格(hourlyWindow 过滤缓存滞留条目,当前小时天然居首)——首格
- * 「现在」高亮(当前小时格即实况职责),其余格 HH:mm 直取 fxTime(同 Modal 口径,不做
+ * 「现在」时间标签字色提亮区分(当前小时格即实况职责),其余格 HH:mm 直取 fxTime(同 Modal 口径,不做
  * 时区换算);每格 = 时间 + 状况图标(反色适配玻璃底)+ 温度。hourly 缺失/空窗 → 降级
  * 实况摘要(图标 + 温度);实况也无 → ···。城市名行(多实例互区分的判据,取数失败也
  * 照常显示)= 这是什么;完整 24h/7d/空气/预警归详情 Modal(点块打开,detailEntry 缺省
@@ -22,30 +22,27 @@ export default function WeatherIconBody({ icon, overlay = false }: { icon: Icon;
   const hours = hourlyWindow(bundle?.hourly, new Date())
 
   return (
-    // padPx=8:块内容与玻璃边缘留呼吸——首格高亮不顶边(否则直角伸出跨格块的固定圆角
-    // 弧线之外,观感「左侧多一块背景」);fill 模式 padding 直接生效,不参与钳制。
+    // padPx=8:块内容(图标/文字)与玻璃边缘留呼吸;fill 模式 padding 直接生效,不参与钳制。
     <Tile label={loc?.name || '天气'} overlay={overlay} fill padPx={8}>
       {hours.length ? (
         <div className="flex w-full h-full items-stretch gap-[3%]">
           {hours.map((h, i) => (
-            <div
-              key={h.fxTime}
-              className={
-                'flex-1 min-w-0 flex flex-col items-center justify-center gap-[4%] ' +
-                // 高亮块是宽扁小卡:固定圆角,不用百分比(同 TileFrame fill 的椭圆化教训)
-                (i === 0 ? 'bg-white/15 rounded-lg' : '')
-              }
-            >
-              <TileSecondary className="text-white/60">
+            <div key={h.fxTime} className="flex-1 min-w-0 flex flex-col items-center justify-center gap-[4%]">
+              {/* 文字行 shrink-0 + 图标 flex-1 弹性:格高不足时按「图标缩、文字刚性」分配——
+                  否则 column flex 默认 shrink 会把文字行压到远小于字号的高度(线上
+                  iconScale=1 时温度 14px 被压到 6px 不可读,2026-08-24)。 */}
+              {/* 首格无背景衬底,「现在」靠时间标签字色提亮区分(实 vs 虚)——
+                  当前小时即实况职责,不能与未来格完全同质。 */}
+              <TileSecondary className={'shrink-0 ' + (i === 0 ? 'text-white/90' : 'text-white/60')}>
                 {i === 0 ? '现在' : hourHM(h.fxTime)}
               </TileSecondary>
               <img
                 src={qweatherIconUrl(h.icon)}
                 alt={h.text}
-                className="w-1/2 aspect-square object-contain"
+                className="flex-1 min-h-0 w-full object-contain"
                 style={{ filter: 'invert(1)' }}
               />
-              <TilePrimary className="font-mono text-white/90">{h.temp}°</TilePrimary>
+              <TilePrimary className="shrink-0 font-mono text-white/90">{h.temp}°</TilePrimary>
             </div>
           ))}
         </div>
