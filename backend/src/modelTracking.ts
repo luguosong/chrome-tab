@@ -19,6 +19,7 @@ import type { AuthEnv } from './auth'
 import { ZHIPU_BASELINE } from './zhipuBaseline'
 import { ANTHROPIC_BASELINE } from './anthropicBaseline'
 import { XAI_BASELINE } from './xaiBaseline'
+import { KIMI_BASELINE } from './kimiBaseline'
 import { OPENAI_BASELINE, OPENAI_CHANGELOG_PAGE_URL, openaiChangelogAnchor } from './openaiBaseline'
 import { DEEPSEEK_BASELINE, DEEPSEEK_UPDATES_URL, matchDeepSeekEvent, parseDeepSeekUpdates } from './deepseekBaseline'
 
@@ -30,8 +31,8 @@ import { DEEPSEEK_BASELINE, DEEPSEEK_UPDATES_URL, matchDeepSeekEvent, parseDeepS
  * 代码内人工核验基线**,部署即幂等 upsert 刷新;**模型动态来自各厂家主发布源确定性
  * 解析**(智谱新品发布 Markdown 的 `<Update label description>` 块、Anthropic
  * release notes 的 `### 日期` 段内条目、xAI 发布流的 `## 月份`/`### 条目` 段——仅月
- * 份粒度、事件锚定当月 1 日
- * DeepSeek API Change Log 的 HTML `Date:` 段内 h3 小节、OpenAI API changelog
+ * 份粒度、事件锚定当月 1 日、月之暗面资讯/Blog 的文章卡片(无 RSS,按文章 URL
+ * 去重)、DeepSeek API Change Log 的 HTML `Date:` 段内 h3 小节、OpenAI API changelog
  * 的 `## 月份`/`### 日` 段内类型行(`Model:` 字段即结构化归属);按模型+类型+日期+信源去重);解析器
  * **不认识**的更新块(基线外型号,含智谱平台托管的第三方模型、Anthropic 仅限受邀
  * 项目的 Mythos 系列)只作待核验线索跳过——待基线人工核验后纳入,这是「跟踪厂家」
@@ -110,13 +111,14 @@ export interface BaselineModel {
   events?: Array<Omit<ModelEvent, 'id'>>
 }
 
-export { ZHIPU_BASELINE, ANTHROPIC_BASELINE, XAI_BASELINE, OPENAI_BASELINE, DEEPSEEK_BASELINE }
+export { ZHIPU_BASELINE, ANTHROPIC_BASELINE, XAI_BASELINE, KIMI_BASELINE, OPENAI_BASELINE, DEEPSEEK_BASELINE }
 
 /** 全部厂家基线(init 幂等 upsert 的单一遍历源;新厂家票 = 基线文件 + 追加于此)。 */
 const ALL_BASELINES: BaselineModel[] = [
   ...ZHIPU_BASELINE,
   ...ANTHROPIC_BASELINE,
   ...XAI_BASELINE,
+  ...KIMI_BASELINE,
   ...OPENAI_BASELINE,
   ...DEEPSEEK_BASELINE,
 ]
@@ -274,6 +276,72 @@ export function matchXaiEvent(e: XaiReleaseEntry): Array<{ officialId: string; e
     })
   }
   return out
+}
+
+// ---- 月之暗面资讯/Blog 解析(研究 §3:商业模型用资讯、研究/开放权重用 Blog,两页
+//  均无文档化 RSS——按文章 URL 去重,研究 §6.6;页面为同构 Next.js 卡片列表)----
+
+/** 月之暗面资讯/Blog 一篇文章卡片(解析后的统一形态)。 */
+export interface KimiArticle {
+  /** 绝对 URL(相对链接归一到 www.kimi.com;研究口径:按文章 URL 去重)。 */
+  url: string
+  /** 官方文章标题(卡片锚 aria-label,即 card-title 原文)。 */
+  title: string
+  /** YYYY-MM-DD(卡片日期文本,页面统一 ISO 格式)。 */
+  date: string
+}
+
+/**
+ * 资讯/Blog 页 HTML → 文章卡片数组。覆盖整卡的锚点(`<a href aria-label
+ * class="absolute inset-0…">`)到下一锚点之间为一个卡片窗口:标题取锚点
+ * aria-label,日期取 card-title **之后**的首个 ISO 日期文本——不能取窗口内首个
+ * 日期,卡片头图 URL 常含与发布日不同的上传日期(实测 08-11 上传的头图配 07-27
+ * 文章)。无日期卡跳过;同 URL 卡(头图卡与列表卡重复)只留首个;锚点缺失
+ * (上游改版)自然产零卡 → pollOne 上游改版口径。
+ */
+export function parseKimiArticles(html: string): KimiArticle[] {
+  const out: KimiArticle[] = []
+  const seen = new Set<string>()
+  const anchors = [
+    ...html.matchAll(/<a href="([^"]+)" aria-label="([^"]+)" class="absolute inset-0[^"]*"/g),
+  ]
+  for (let i = 0; i < anchors.length; i++) {
+    const [, href, label] = anchors[i]!
+    const end = anchors[i + 1]?.index
+    const window = html.slice(anchors[i]!.index! + anchors[i]![0].length, end)
+    const titlePos = window.indexOf('card-title')
+    if (titlePos < 0) continue
+    const date = /20\d{2}-\d{2}-\d{2}/.exec(window.slice(titlePos))?.[0]
+    if (date === undefined) continue
+    const url = href!.startsWith('/') ? `https://www.kimi.com${href}` : href!
+    if (seen.has(url)) continue
+    seen.add(url)
+    out.push({ url, title: label!, date })
+  }
+  return out
+}
+
+/**
+ * 资讯/Blog 文章 → (基线模型 officialId, 事件)。归属只用标题词边界(文章标题即
+ * 官方标题、自证归属,同 xAI 口径——正文链接常指向 GitHub/外部仓,不能作 slug
+ * 证据)。**最长 alias 优先**:「Kimi K2 Thinking」标题同时命中「Kimi K2」与
+ * 「Kimi K2 Thinking」,取更长(更具体)的归属。kind 恒 'updated',与基线事件同
+ * (模型,日期,信源) 的文章由 poll 跳过——基线事件的信源即官方文章 URL。
+ */
+export function matchKimiEvent(a: KimiArticle): { officialId: string; event: Omit<ModelEvent, 'id'> } | null {
+  let best: { officialId: string; alias: string } | null = null
+  for (const b of KIMI_BASELINE) {
+    for (const alias of b.matchAliases) {
+      if (aliasIn(alias, a.title) && (best === null || alias.length > best.alias.length)) {
+        best = { officialId: b.officialId, alias }
+      }
+    }
+  }
+  if (best === null) return null
+  return {
+    officialId: best.officialId,
+    event: { kind: 'updated', occurredOn: a.date, title: a.title, sourceUrl: a.url },
+  }
 }
 
 /**
@@ -461,6 +529,10 @@ export const ZHIPU_RELEASES_URL = 'https://docs.bigmodel.cn/cn/update/new-releas
 export const ANTHROPIC_RELEASES_URL = 'https://platform.claude.com/docs/en/release-notes/overview.md'
 /** xAI 发布流(主发布源,研究 §3;公共缓存约 1 小时,轮询节奏 6h 不短于缓存)。 */
 export const XAI_RELEASES_URL = 'https://docs.x.ai/developers/release-notes.md'
+/** 月之暗面资讯(商业模型发布,研究 §3;无文档化 RSS,按文章 URL 去重)。 */
+export const KIMI_NEWS_URL = 'https://www.kimi.com/news'
+/** 月之暗面 Blog(研究/开放权重发布,研究 §3;同上按文章 URL 去重)。 */
+export const KIMI_BLOG_URL = 'https://www.kimi.com/en/blog/'
 
 const nowIso = () => new Date().toISOString()
 
@@ -593,6 +665,7 @@ export class ModelTrackingService {
     void this.pollZhipu().catch((e) => console.error('模型追踪(智谱)取数失败:', e))
     void this.pollAnthropic().catch((e) => console.error('模型追踪(Anthropic)取数失败:', e))
     void this.pollXai().catch((e) => console.error('模型追踪(xAI)取数失败:', e))
+    void this.pollMoonshot().catch((e) => console.error('模型追踪(月之暗面)取数失败:', e))
     void this.pollOpenAI().catch((e) => console.error('模型追踪(OpenAI)取数失败:', e))
     void this.pollDeepSeek().catch((e) => console.error('模型追踪(DeepSeek)取数失败:', e))
   }
@@ -708,6 +781,30 @@ export class ModelTrackingService {
       const entries = parseOpenAIChangelog(md)
       return entries.length === 0 ? null : matchOpenAIEvents(entries)
     })
+  }
+
+  /**
+   * 月之暗面一轮:资讯 + Blog 两页独立取数(研究 §3)。两页都尝试——单页失败上抛首个
+   * 错误,另一页照常入库(单页失败不清空该页既有动态);两页各自的「零卡片 = 上游
+   * 改版」口径由 pollOne 统一处理。**任一页失败即标陈旧**:pollOne 按页标记,后一页
+   * 的成功会覆盖前一页的失败标记,故循环后统一补压终态(失败优先),再上抛。
+   */
+  async pollMoonshot(): Promise<void> {
+    const errs: unknown[] = []
+    for (const url of [KIMI_NEWS_URL, KIMI_BLOG_URL]) {
+      try {
+        await this.pollOne('moonshot', url, (html) => {
+          const articles = parseKimiArticles(html)
+          return articles.length === 0 ? null : articles.map(matchKimiEvent).filter(nonNull)
+        })
+      } catch (e) {
+        errs.push(e)
+      }
+    }
+    if (errs.length > 0) {
+      await this.markSource('moonshot', false).catch(() => {})
+      throw errs[0]
+    }
   }
 
   private async markSource(provider: ModelProviderId, ok: boolean): Promise<void> {

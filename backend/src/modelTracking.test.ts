@@ -7,6 +7,9 @@ import { openDb, type Db } from './db'
 import {
   ANTHROPIC_BASELINE,
   ANTHROPIC_RELEASES_URL,
+  KIMI_BASELINE,
+  KIMI_BLOG_URL,
+  KIMI_NEWS_URL,
   ModelTrackingService,
   OPENAI_BASELINE,
   OPENAI_CHANGELOG_URL,
@@ -15,12 +18,14 @@ import {
   ZHIPU_BASELINE,
   ZHIPU_RELEASES_URL,
   matchAnthropicEvent,
+  matchKimiEvent,
   matchOpenAIEvents,
   matchXaiEvent,
   matchZhipuEvent,
   normalizeAnthropicDate,
   normalizeZhipuDate,
   parseAnthropicReleases,
+  parseKimiArticles,
   parseOpenAIChangelog,
   parseXaiReleaseNotes,
   parseZhipuReleases,
@@ -228,6 +233,8 @@ function makeDeps(md: string | Record<string, string>): ModelTrackingDeps {
           [ANTHROPIC_RELEASES_URL]: ANTHROPIC_MD,
           [XAI_RELEASES_URL]: XAI_MD,
           [OPENAI_CHANGELOG_URL]: OPENAI_MD,
+          [KIMI_NEWS_URL]: KIMI_NEWS_HTML,
+          [KIMI_BLOG_URL]: KIMI_BLOG_HTML,
           [DEEPSEEK_UPDATES_URL]: DEEPSEEK_HTML,
         }
       : md
@@ -258,7 +265,7 @@ async function byId(svc: ModelTrackingService, officialId: string) {
 
 /** 各厂家基线总行数(init 入档的期望值;含并行会话已接线进 ALL_BASELINES 的厂家)。 */
 const TOTAL_BASELINE =
-  ZHIPU_BASELINE.length + ANTHROPIC_BASELINE.length + XAI_BASELINE.length + OPENAI_BASELINE.length + DEEPSEEK_BASELINE.length
+  ZHIPU_BASELINE.length + ANTHROPIC_BASELINE.length + XAI_BASELINE.length + KIMI_BASELINE.length + OPENAI_BASELINE.length + DEEPSEEK_BASELINE.length
 
 describe('模型追踪:图标类型接线(单例/占格)', () => {
   it('MODEL 进单例枚举与跨格表(3×2=6 格,对齐前端注册表)', () => {
@@ -379,7 +386,8 @@ describe('模型追踪:基线自身(issues/02 八类全量)', () => {
     const a = await svc.archive()
     const retired = a.models.filter((m) => m.stage === 'retired')
     const expected = [
-      ...ZHIPU_BASELINE, ...ANTHROPIC_BASELINE, ...XAI_BASELINE,       ...OPENAI_BASELINE, ...DEEPSEEK_BASELINE,
+      ...ZHIPU_BASELINE, ...ANTHROPIC_BASELINE, ...XAI_BASELINE, ...KIMI_BASELINE,
+      ...OPENAI_BASELINE, ...DEEPSEEK_BASELINE,
     ]
       .filter((b) => b.stage === 'retired')
       .map((b) => b.officialId)
@@ -589,7 +597,8 @@ describe('模型追踪:路由', () => {
     await svc.pollAnthropic()
     await svc.pollXai()
     await svc.pollOpenAI()
-    await svc.pollDeepSeek() // 五源显式就位(sources 数确定,不靠 init 内未等待轮询的时序)
+    await svc.pollMoonshot()
+    await svc.pollDeepSeek() // 六源显式就位(sources 数确定,不靠 init 内未等待轮询的时序)
     const app = createApp({ db, modelTracking: svc })
     const anon = await app.request('/api/model-tracking/archive')
     expect(anon.status).toBe(401)
@@ -603,7 +612,7 @@ describe('模型追踪:路由', () => {
     expect(res.status).toBe(200)
     const json = (await res.json()) as { models: unknown[]; sources: unknown[] }
     expect(json.models).toHaveLength(TOTAL_BASELINE)
-    expect(json.sources).toHaveLength(5)
+    expect(json.sources).toHaveLength(6)
   })
 })
 
@@ -897,6 +906,228 @@ describe('模型追踪:xAI 基线信源一致性(评审修正)', () => {
         }
       }
     }
+  })
+})
+
+/**
+ * 月之暗面资讯/Blog 快照节选(2026-08-25 实抓结构口径:覆盖整卡的 aria-label 锚点 +
+ * card-title + 其后日期;头图 URL 常含与发布日不同的上传日期——解析必须取 card-title
+ * 之后的日期;混有非模型文章(大使计划/Work 上新/PerceptionBench/Kimi-VL)与无日期卡)。
+ */
+const card = (href: string, title: string, date: string | null, imgDate = '2026-08-11') => `
+<div class="menu-card group relative flex flex-col">
+  <a href="${href}" aria-label="${title}" class="absolute inset-0 z-[1] rounded-xl"></a>
+  <div class="card-media w-full overflow-hidden rounded-lg aspect-video"><img alt="${title}" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/${imgDate}/cover"></div>
+  <div class="flex flex-col card-body gap-2.5 px-4">
+    <h4 class="card-title text-xl font-semibold">${title}</h4>
+    ${date === null ? '' : `<p class="card-date text-base">${date}</p>`}
+  </div>
+</div>`
+
+const KIMI_NEWS_HTML = `<!-- Kimi 资讯(2026-08-25 实抓节选)-->
+${card('/news/kimi-ambassador-program', 'Kimi 全球大使计划现已开启', '2026-07-28')}
+${card('/news/kimi-k3-open-source', 'Kimi K3 开放日:模型权重、技术报告和关键 Infra 技术同步开放', '2026-07-27')}
+${card('/news/kimi-k3', 'Kimi K3:智能的新前沿', '2026-07-17')}
+${card('/news/kimi-work-update', 'Kimi Work 上新:目标模式、插件中心和 6 月限时福利', '2026-06-18')}
+`
+
+const KIMI_BLOG_HTML = `<!-- Kimi Blog 索引(2026-08-25 实抓节选;首卡为头图卡,与列表卡同 URL 重复)-->
+${card('/en/blog/kimi-k3', 'Kimi K3', '2026-07-16')}
+${card('/en/blog/kimi-k3', 'Kimi K3', '2026-07-16')}
+${card('/en/blog/perception-bench', 'PerceptionBench', '2026-07-16')}
+${card('/en/blog/kimi-k2-6', 'Kimi K2.6', '2026-04-20')}
+${card('/en/blog/kimi-k2-5', 'Kimi K2.5', '2026-01-27')}
+${card('/en/blog/kimi-k2-thinking', 'Kimi K2 Thinking', '2025-11-06')}
+${card('https://huggingface.co/MoonshotAI/Kimi-K2-Instruct-0905', 'Kimi-K2-Instruct-0905', '2025-09-05')}
+${card('/en/blog/kimi-k2', 'Kimi K2', '2025-07-11')}
+${card('https://github.com/MoonshotAI/Kimi-Audio', 'Kimi-Audio', '2025-04-26')}
+${card('https://github.com/MoonshotAI/Kimi-VL', 'Kimi-VL', '2025-04-10')}
+${card('/en/blog/kimi-k4-teaser', 'Kimi K4 预告', null)}
+`
+
+describe('模型追踪:月之暗面资讯/Blog 解析(纯函数,issues/06)', () => {
+  it('卡片提取:aria-label 标题 + card-title 之后的日期;相对链接归一到 www.kimi.com', () => {
+    const news = parseKimiArticles(KIMI_NEWS_HTML)
+    expect(news).toHaveLength(4)
+    expect(news[2]).toEqual({
+      url: 'https://www.kimi.com/news/kimi-k3',
+      title: 'Kimi K3:智能的新前沿',
+      date: '2026-07-17',
+    })
+    const blog = parseKimiArticles(KIMI_BLOG_HTML)
+    // 头图卡与列表卡同 URL 去重;无日期卡(K4 预告)跳过
+    expect(blog).toHaveLength(9)
+    expect(blog.filter((a) => a.url === 'https://www.kimi.com/en/blog/kimi-k3')).toHaveLength(1)
+    expect(blog.some((a) => a.title.includes('K4'))).toBe(false)
+    // 外链(研究卡片直链 GitHub/HF)保持绝对 URL 原样
+    expect(blog.at(-1)!.url).toBe('https://github.com/MoonshotAI/Kimi-VL')
+  })
+
+  it('日期取 card-title 之后的首个 ISO 日期:头图 URL 里的上传日期(2026-08-11)不误作发布日', () => {
+    const news = parseKimiArticles(KIMI_NEWS_HTML)
+    // 07-27 文章配 08-11 头图(实抓口径)——若取窗口内首个日期会错记 2026-08-11
+    expect(news.find((a) => a.url.endsWith('kimi-k3-open-source'))!.date).toBe('2026-07-27')
+  })
+
+  it('上游改版:无卡片锚点 → 空数组(pollOne 零条目口径)', () => {
+    expect(parseKimiArticles('<html>上游改版了</html>')).toEqual([])
+  })
+
+  it('标题归属:非模型文章(大使计划/Work 上新/PerceptionBench/Kimi-VL)不产事件', () => {
+    const news = parseKimiArticles(KIMI_NEWS_HTML)
+    expect(matchKimiEvent(news.find((a) => a.title.includes('大使计划'))!)).toBeNull()
+    expect(matchKimiEvent(news.find((a) => a.title.includes('Work 上新'))!)).toBeNull()
+    const blog = parseKimiArticles(KIMI_BLOG_HTML)
+    expect(matchKimiEvent(blog.find((a) => a.title === 'PerceptionBench')!)).toBeNull()
+    expect(matchKimiEvent(blog.find((a) => a.title === 'Kimi-VL')!)).toBeNull()
+    // 「Kimi K3 开放日」是 K3 的权重开放公告——归属 K3 本身(基线 weights_available 占同键)
+    expect(matchKimiEvent(news.find((a) => a.url.endsWith('kimi-k3-open-source'))!)!.officialId).toBe('kimi-k3')
+  })
+
+  it('最长 alias 优先:「Kimi K2 Thinking」标题不误归属「Kimi K2」', () => {
+    const hit = matchKimiEvent({ url: 'https://www.kimi.com/en/blog/kimi-k2-thinking', title: 'Kimi K2 Thinking', date: '2025-11-06' })
+    expect(hit!.officialId).toBe('kimi-k2-thinking')
+  })
+
+  it('词边界:「Kimi K2」不认领「Kimi K2.5」的标题', () => {
+    expect(matchKimiEvent({ url: 'https://www.kimi.com/news/x', title: 'Kimi K2.5 视觉能力升级', date: '2026-02-02' })!.officialId).toBe('kimi-k2.5')
+    expect(matchKimiEvent({ url: 'https://www.kimi.com/news/y', title: 'Kimi K3.5 发布预告', date: '2026-09-09' })).toBeNull()
+  })
+})
+
+describe('模型追踪:月之暗面基线自身(issues/06)', () => {
+  it('商业/API 与开放权重归属:K3/K2.7 Code/K2.6/K2.5 双渠道;Kimi-Audio 仅开放权重,不反向标成 API 可用', () => {
+    const byId = new Map(KIMI_BASELINE.map((b) => [b.officialId, b]))
+    expect(byId.get('kimi-k3')!.availability).toEqual(['api', 'open_weights'])
+    expect(byId.get('kimi-k2.7-code')!.availability).toEqual(['api', 'open_weights'])
+    expect(byId.get('kimi-k2.7-code-highspeed')!.availability).toEqual(['api']) // 高速服务档无独立权重
+    expect(byId.get('kimi-audio')!.availability).toEqual(['open_weights']) // 研究红线:不在商业 API
+    expect(new Set(KIMI_BASELINE.map((b) => b.officialId)).size).toBe(KIMI_BASELINE.length)
+    for (const b of KIMI_BASELINE) expect(b.provider).toBe('moonshot')
+  })
+
+  it('预告/非模型排除:Infra 组件(MoonEP 等)、研究仓(Kimi-VL/Kimi-Dev/Kimi-Linear/Moonlight)、移动别名(kimi-latest)不在基线', () => {
+    const ids = new Set(KIMI_BASELINE.map((b) => b.officialId))
+    for (const excluded of ['moonep', 'flashkda', 'agentenv', 'kimi-vl', 'kimi-dev', 'kimi-linear', 'moonlight', 'kimi-latest']) {
+      expect([...ids].some((id) => id.includes(excluded))).toBe(false)
+    }
+  })
+
+  it('快照归并:0905 是 kimi-k2 家族行的动态而非独立模型;moonshot-v1 vision 变体独立成行(种类不同)', () => {
+    const k2 = KIMI_BASELINE.find((b) => b.officialId === 'kimi-k2')!
+    expect(k2.events!.map((e) => e.kind).sort()).toEqual(['retired', 'updated', 'weights_available'])
+    expect(KIMI_BASELINE.find((b) => b.officialId === 'moonshot-v1')!.kind).toBe('text')
+    expect(KIMI_BASELINE.find((b) => b.officialId === 'moonshot-v1-vision')!.kind).toBe('multimodal_understanding')
+  })
+
+  it('训练参数量结构化:K2 为 1T/32B(MoE 分记),K3 总量 2.8万亿、激活未披露为 null', () => {
+    expect(KIMI_BASELINE.find((b) => b.officialId === 'kimi-k2')!.trainingParams).toEqual({ total: '1T', active: '32B' })
+    expect(KIMI_BASELINE.find((b) => b.officialId === 'kimi-k3')!.trainingParams).toEqual({ total: '2.8万亿', active: null })
+  })
+
+  it('退役保留与沉底:kimi-k2 系列与 kimi-thinking-preview 均 stage=retired 且排在可用模型之后', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, makeDeps(''))
+    const a = await svc.archive()
+    const retired = a.models.filter((m) => m.provider === 'moonshot' && m.stage === 'retired').map((m) => m.officialId).sort()
+    expect(retired).toEqual(['kimi-k2', 'kimi-k2-thinking', 'kimi-thinking-preview'])
+    const firstRetired = a.models.findIndex((m) => m.stage === 'retired')
+    expect(a.models.slice(firstRetired).every((m) => m.stage === 'retired')).toBe(true)
+  })
+
+  it('基线事件信源 = 官方文章 URL(与轮询解析的卡片 URL 同键,同公告不产重复动态)', () => {
+    const urls = new Set([
+      'https://www.kimi.com/news/kimi-k3',
+      'https://www.kimi.com/news/kimi-k3-open-source',
+      'https://www.kimi.com/en/blog/kimi-k2-6',
+      'https://www.kimi.com/en/blog/kimi-k2-5',
+      'https://www.kimi.com/en/blog/kimi-k2-thinking',
+      'https://www.kimi.com/en/blog/kimi-k2',
+      'https://huggingface.co/MoonshotAI/Kimi-K2-Instruct-0905',
+      'https://huggingface.co/MoonshotAI/Kimi-K2.7-Code',
+      'https://github.com/MoonshotAI/Kimi-Audio',
+    ])
+    for (const b of KIMI_BASELINE) {
+      for (const ev of b.events ?? []) {
+        if (ev.kind === 'retired') continue // 下线口径出自模型列表页,不与文章卡对键
+        expect(urls.has(ev.sourceUrl)).toBe(true)
+      }
+    }
+  })
+})
+
+describe('模型追踪:月之暗面档案服务(轮询/去重/陈旧,issues/06)', () => {
+  const kimiDeps = (news: string | Error = KIMI_NEWS_HTML, blog: string | Error = KIMI_BLOG_HTML): ModelTrackingDeps => ({
+    fetchText: async (url) => {
+      if (url === KIMI_NEWS_URL) return news instanceof Error ? Promise.reject(news) : news
+      if (url === KIMI_BLOG_URL) return blog instanceof Error ? Promise.reject(blog) : blog
+      throw new Error('HTTP 404')
+    },
+  })
+
+  it('pollMoonshot:基线已核验的公告不产重复动态;基线未覆盖的新文章(技术博客)自动入库 updated', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, kimiDeps())
+    await svc.pollMoonshot()
+    await svc.pollMoonshot() // 两轮幂等
+    const k3 = await byId(svc, 'kimi-k3')
+    // 资讯发布(07-17 基线占键)+ 开放日(07-27 基线占键)+ 技术博客(07-16 自动解析)
+    expect(k3!.events.map((e) => [e.kind, e.occurredOn]).sort()).toEqual([
+      ['api_available', '2026-07-17'],
+      ['updated', '2026-07-16'],
+      ['weights_available', '2026-07-27'],
+    ])
+    // 博客上的 K2.5/K2.6/K2-Thinking/K2/0905/Kimi-Audio 卡片全部被基线事件占键:
+    // 事件数 = 基线条数(自动解析一条未加)
+    for (const [id, n] of [
+      ['kimi-k2.5', 1],
+      ['kimi-k2.6', 1],
+      ['kimi-k2-thinking', 2],
+      ['kimi-k2', 3],
+      ['kimi-audio', 1],
+    ] as const) {
+      expect((await byId(svc, id))!.events).toHaveLength(n)
+    }
+    const a = await svc.archive()
+    expect(a.sources.find((s) => s.provider === 'moonshot')).toMatchObject({ stale: false, lastSuccessAt: expect.any(String) })
+  })
+
+  it('单页失败标陈旧并上抛,另一页动态照常入库;恢复后陈旧清除', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, kimiDeps())
+    await svc.pollMoonshot()
+    const halfFailing = new ModelTrackingService(db, kimiDeps(new Error('HTTP 503'), KIMI_BLOG_HTML))
+    await expect(halfFailing.pollMoonshot()).rejects.toThrow('HTTP 503')
+    let a = await halfFailing.archive()
+    expect(a.sources.find((s) => s.provider === 'moonshot')!.stale).toBe(true)
+    expect((await byId(halfFailing, 'kimi-k3'))!.events.length).toBeGreaterThan(0) // 档案与已入动态保留
+    const ok = new ModelTrackingService(db, kimiDeps())
+    await ok.pollMoonshot()
+    a = await ok.archive()
+    expect(a.sources.find((s) => s.provider === 'moonshot')!.stale).toBe(false)
+  })
+
+  it('上游改版:200 但零卡片 → 抛错标陈旧,既有档案保留', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, kimiDeps())
+    await svc.pollMoonshot()
+    const drifty = new ModelTrackingService(db, kimiDeps('<html>上游改版了</html>', '<html>上游改版了</html>'))
+    await expect(drifty.pollMoonshot()).rejects.toThrow('疑似上游改版')
+    const a = await drifty.archive()
+    expect(a.sources.find((s) => s.provider === 'moonshot')!.stale).toBe(true)
+    expect(a.models.filter((m) => m.provider === 'moonshot')).toHaveLength(KIMI_BASELINE.length)
+  })
+
+  it('月之暗面信源失败不牵连其他厂家(厂家隔离)', async () => {
+    const { db } = openDb(':memory:')
+    // 不经 init(其内未等待的并行轮询会与本测试的显式失败轮询竞争写 sources 行)
+    const svc = new ModelTrackingService(db, makeDeps(ZHIPU_MD))
+    await svc.pollZhipu() // 智谱源就位
+    const failing = new ModelTrackingService(db, kimiDeps(new Error('HTTP 503'), new Error('HTTP 503')))
+    await expect(failing.pollMoonshot()).rejects.toThrow('HTTP 503')
+    const a = await failing.archive()
+    expect(a.sources.find((s) => s.provider === 'moonshot')!.stale).toBe(true)
+    expect(a.sources.find((s) => s.provider === 'zhipu')!.stale).toBe(false)
   })
 })
 

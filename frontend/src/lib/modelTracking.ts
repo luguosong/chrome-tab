@@ -58,6 +58,7 @@ export const PROVIDER_LABELS: Record<ModelProviderId, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic',
   xai: 'xAI',
+  moonshot: '月之暗面',
   deepseek: 'DeepSeek',
 }
 
