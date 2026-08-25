@@ -50,9 +50,15 @@ export async function fetchConfigOnce(): Promise<Config> {
 }
 
 /**
- * 布局设置写:PUT /api/layout-settings body={gridWidth,gridGap,iconScale}。
- * 成功后 invalidate 聚合查询拉回权威值(跨设备共享语义)。实时预览由调用方乐观写
- * ['config'] 缓存实现(见 SettingsDrawer),本 hook 仅负责持久化。
+ * 布局设置写:PUT /api/layout-settings,body 为整份「布局草稿」(14 字段)。
+ * 成功后 invalidate 聚合查询拉回权威值(跨设备共享语义)。实时预览由
+ * useLayoutDraft 乐观写 ['config'] 缓存实现,本 hook 仅负责持久化。
+ *
+ * 失败兜底 = onSettled 重拉服务端权威值 + useLayoutDraft 干净态 reseed,
+ * 幻影预览随之还原。**不**照搬 useDeleteIcon 的 onMutate 快照/onError 还原:
+ * 那边快照与乐观写同在 onMutate 内有序完成,这边乐观写发生在 apply(松手
+ * 之前),onMutate 抓到的已是草稿值,还原等于还原幻影。选项级回调在组件
+ * 卸载后仍执行——抽屉 close() 即 commit 即卸载,失败路径必须活过卸载。
  */
 export function useUpdateLayoutSettings() {
   const qc = useQueryClient()
@@ -62,7 +68,12 @@ export function useUpdateLayoutSettings() {
         method: 'PUT',
         body: JSON.stringify(vars),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['config'] }),
+    onError: (err) => {
+      console.error('布局设置保存失败,重拉后将还原为服务端值', err)
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['config'] })
+    },
   })
 }
 

@@ -1,19 +1,18 @@
-import { useEffect, useRef, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { useUpdateLayoutSettings } from '../api/config'
-import type { Config, IconTypeId, LayoutSettings } from '../lib/types'
+import { useEffect, useState } from 'react'
+import type { IconTypeId, LayoutSettings } from '../lib/types'
+import { useLayoutDraft } from '../hooks/useLayoutDraft'
 import { AddPane } from './AddDrawer'
 import { SettingsPane } from './SettingsDrawer'
 import { AccountPane } from './AccountPane'
 
 /**
- * 控制抽屉(见 CONTEXT.md「新增抽屉」/「布局设置」):右上角 ⚙ 唤起的统一侧抽屉,
+ * 控制抽屉(见 CONTEXT.md「新增抽屉」/「布局草稿」):右上角 ⚙ 唤起的统一侧抽屉,
  * tab 切换「新增 / 布局 / 账号」三块内容(原 AddDrawer + SettingsDrawer 合并,壳唯一;
  * 账号 pane 承接原顶栏的用户信息与登出)。
  *
  * tab 用原生 hidden 切换:各 pane 保持挂载,新增表单半填内容 / 布局草稿切 tab 不丢,
- * 且 hidden 子树自动移出焦点链。布局 draft/commit 上收到壳:关闭(Esc/遮罩/×)前
- * flush 落库(松手 commit 之外的兜底),dirty 守卫避免无谓 PUT。
+ * 且 hidden 子树自动移出焦点链。布局草稿由 useLayoutDraft 持有:关闭(Esc/遮罩/×)前
+ * flush 落库是松手 commit 之外的兜底,脏门控避免无谓 PUT(协议见 lib/layoutDraft.ts)。
  *
  * 容器与原 AddDrawer 同构:fixed 右侧、滑入、玻璃面板、sticky 顶栏(tab 栏 + 关闭)。
  */
@@ -32,33 +31,10 @@ export default function ControlDrawer({
   layout: LayoutSettings
   onClose: () => void
 }) {
-  const qc = useQueryClient()
-  const updateLayout = useUpdateLayoutSettings()
   const [tab, setTab] = useState<Tab>('add')
 
-  // 布局草稿(原 SettingsDrawer 逻辑上移):slider 受控源;apply 乐观写缓存实时预览。
-  const [draft, setDraft] = useState<LayoutSettings>(layout)
-  const draftRef = useRef(draft)
-  draftRef.current = draft
-  const dirtyRef = useRef(false)
-
-  function apply<K extends keyof LayoutSettings>(key: K, value: LayoutSettings[K]) {
-    const next = { ...draftRef.current, [key]: value }
-    dirtyRef.current = true
-    // ref 同步回写:开关/下拉「改即提交」在 setDraft 的重渲染前就调 commit,
-    // 若只靠渲染期回写,commit 会发出旧 draft,回拉后本次改动被静默回滚
-    draftRef.current = next
-    setDraft(next)
-    qc.setQueryData<Config>(['config'], (prev) =>
-      prev ? { ...prev, layoutSettings: next } : prev,
-    )
-  }
-
-  function commit() {
-    if (!dirtyRef.current) return
-    dirtyRef.current = false
-    updateLayout.mutate(draftRef.current)
-  }
+  // 布局草稿:slider 受控源,apply 乐观写缓存实时预览,commit 松手/关闭落库。
+  const { draft, apply, commit } = useLayoutDraft(layout)
 
   function close() {
     commit()
