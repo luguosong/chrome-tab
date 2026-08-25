@@ -137,6 +137,9 @@ CREATE TABLE IF NOT EXISTS model_archive (
     availability TEXT NOT NULL,
     summary      TEXT,
     sources      TEXT NOT NULL,
+    pricing      TEXT,
+    limits       TEXT,
+    training_params TEXT,
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL,
     UNIQUE (provider, official_id)
@@ -161,9 +164,26 @@ CREATE TABLE IF NOT EXISTS model_fetch_status (
 );
 `
 
-/** openDb 打开连接后即执行;幂等(IF NOT EXISTS)。 */
+/** openDb 打开连接后即执行;幂等(IF NOT EXISTS + 增量加列)。 */
 export function migrate(sqlite: SqliteConnection) {
   sqlite.exec(SCHEMA_SQL)
+  addMissingColumns(sqlite, 'model_archive', {
+    pricing: 'TEXT',
+    limits: 'TEXT',
+    training_params: 'TEXT',
+  })
+}
+
+/**
+ * 增量加列(issues/02):CREATE IF NOT EXISTS 不改既有表,issues/01 时期的旧库靠
+ * ALTER 补列。全 NULL 可加列(无默认值/非空),SQLite 免表重建;空库首启走 DDL 本身,
+ * 此处天然 no-op。
+ */
+function addMissingColumns(sqlite: SqliteConnection, table: string, defs: Record<string, string>) {
+  const have = new Set((sqlite.pragma(`table_info(${table})`) as { name: string }[]).map((c) => c.name))
+  for (const [col, ddl] of Object.entries(defs)) {
+    if (!have.has(col)) sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`)
+  }
 }
 
 // ---- Kysely 表类型(列名/可空性对齐上面的 DDL;票 04+ 的 CRUD 地基)----
@@ -282,6 +302,12 @@ export interface ModelArchiveTable {
   summary: string | null
   /** JSON 数组文本([{title,url}])。 */
   sources: string
+  /** JSON 文本(ModelPricing;null = 官方未核验到现价)。 */
+  pricing: string | null
+  /** JSON 数组文本(ModelLimit[];null = 未披露)。 */
+  limits: string | null
+  /** 官方披露的训练参数量原文;null = 未披露。 */
+  training_params: string | null
   created_at: string
   updated_at: string
 }

@@ -2,6 +2,8 @@ import type {
   AvailabilityMode,
   ModelEventKind,
   ModelKind,
+  ModelLimit,
+  ModelPricing,
   ModelProviderId,
   ReleaseStage,
 } from 'chrome-tab-shared'
@@ -75,4 +77,24 @@ export function isFreshModelEvent(occurredOn: string, nowMs = Date.now()): boole
 export function modelEventIso(occurredOn: string): string | null {
   const ms = modelEventAnchorMs(occurredOn)
   return ms === null ? null : new Date(ms).toISOString()
+}
+
+/**
+ * 限额条目 → 单行摘要「上下文窗口 1M · 最大输出 128K」(作用域原文括注);null/空 →
+ * null(调用方显示「未知」——官方未披露,issues/02 缺省口径)。
+ */
+export function formatModelLimits(limits: ModelLimit[] | null): string | null {
+  if (!limits || limits.length === 0) return null
+  return limits
+    .map((l) => (l.scope ? `${l.label} ${l.text}(${l.scope})` : `${l.label} ${l.text}`))
+    .join(' · ')
+}
+
+/** 价格的展示形态:地区/平台作用域 + 逐条原文行(作用域括注);null/空 → null(显示「官方未披露」)。 */
+export function formatModelPricing(pricing: ModelPricing | null): { region: string; lines: string[] } | null {
+  if (!pricing || pricing.entries.length === 0) return null
+  return {
+    region: pricing.region,
+    lines: pricing.entries.map((e) => (e.scope ? `${e.text}(${e.scope})` : e.text)),
+  }
 }

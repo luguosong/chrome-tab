@@ -5,11 +5,13 @@ import {
   MODEL_KIND_LABELS,
   PROVIDER_LABELS,
   STAGE_LABELS,
+  formatModelLimits,
+  formatModelPricing,
   isFreshModelEvent,
   modelEventAnchorMs,
 } from './modelTracking'
 
-/** 前端渲染最小检查(issues/01):展示语汇映射 + 24h 红点窗口的日期锚定。 */
+/** 前端渲染最小检查(issues/01:展示语汇 + 24h 红点;issues/02:详情缺省值)。 */
 
 describe('模型追踪:展示语汇', () => {
   it('八类模型种类标签齐备(与 CONTEXT.md 枚举一字不差)', () => {
@@ -54,5 +56,39 @@ describe('模型追踪:24h 红点窗口', () => {
     const anchor = modelEventAnchorMs('2026-08-19')!
     expect(isFreshModelEvent('2026-08-19', anchor + 23 * 3600 * 1000)).toBe(true)
     expect(isFreshModelEvent('2026-08-19', anchor + 25 * 3600 * 1000)).toBe(false)
+  })
+})
+
+describe('模型追踪:详情缺省值(issues/02)', () => {
+  it('限额单行摘要:标签+原文值,作用域括注;null → null(显示「未知」)', () => {
+    expect(
+      formatModelLimits([
+        { label: '上下文窗口', text: '1M', scope: null },
+        { label: '最大输出', text: '128K', scope: null },
+      ]),
+    ).toBe('上下文窗口 1M · 最大输出 128K')
+    expect(
+      formatModelLimits([{ label: '上下文窗口', text: '8K(预计 20 轮)', scope: '音频通话' }]),
+    ).toBe('上下文窗口 8K(预计 20 轮)(音频通话)')
+    expect(formatModelLimits(null)).toBeNull()
+    expect(formatModelLimits([])).toBeNull()
+  })
+
+  it('价格展示:地区作用域 + 逐条原文(作用域括注);null → null(显示「官方未披露」)', () => {
+    expect(
+      formatModelPricing({
+        region: '中国大陆开放平台(bigmodel.cn)',
+        effectiveFrom: null,
+        entries: [
+          { text: '输入 8 元/百万 tokens', scope: null },
+          { text: '输入 6 元/百万 tokens', scope: '输入长度 [0, 32)' },
+        ],
+      }),
+    ).toEqual({
+      region: '中国大陆开放平台(bigmodel.cn)',
+      lines: ['输入 8 元/百万 tokens', '输入 6 元/百万 tokens(输入长度 [0, 32))'],
+    })
+    expect(formatModelPricing(null)).toBeNull()
+    expect(formatModelPricing({ region: 'x', effectiveFrom: null, entries: [] })).toBeNull()
   })
 })

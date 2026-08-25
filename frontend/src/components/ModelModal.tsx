@@ -8,6 +8,8 @@ import {
   MODEL_KIND_LABELS,
   PROVIDER_LABELS,
   STAGE_LABELS,
+  formatModelLimits,
+  formatModelPricing,
   isFreshModelEvent,
   modelEventIso,
 } from '../lib/modelTracking'
@@ -192,6 +194,33 @@ function ModelList({
                 {m.summary && (
                   <p className="text-[13px] text-white/65 leading-relaxed">{m.summary}</p>
                 )}
+                {/* 详情资料行(issues/02):限额/训练参数量/价格,未披露的维度显示「未知」/「官方未披露」 */}
+                <div className="space-y-0.5 text-[11px] text-white/50">
+                  <div>
+                    <span className="text-white/40">限额</span>{' '}
+                    {formatModelLimits(m.limits) ?? '未知(官方未披露)'}
+                  </div>
+                  <div>
+                    <span className="text-white/40">训练参数</span>{' '}
+                    {m.trainingParams ?? '未知(官方未披露)'}
+                  </div>
+                  {(() => {
+                    const pricing = formatModelPricing(m.pricing)
+                    return (
+                      <div>
+                        <span className="text-white/40">价格</span>{' '}
+                        {pricing ? (
+                          <>
+                            <span className="text-white/40">({pricing.region})</span>{' '}
+                            {pricing.lines.join('；')}
+                          </>
+                        ) : (
+                          '官方未披露'
+                        )}
+                      </div>
+                    )
+                  })()}
+                </div>
                 <div className="text-[11px] text-white/50 flex items-center gap-2 flex-wrap">
                   <span className="text-white/40">信源</span>
                   {m.sources.map((s) => (

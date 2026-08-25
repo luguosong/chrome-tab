@@ -6,6 +6,8 @@ import type {
   ModelEvent,
   ModelEventKind,
   ModelKind,
+  ModelLimit,
+  ModelPricing,
   ModelProviderId,
   ReleaseStage,
   TrackedModel,
@@ -13,6 +15,7 @@ import type {
 import { fetchText } from './common'
 import type { Db } from './db'
 import type { AuthEnv } from './auth'
+import { ZHIPU_BASELINE } from './zhipuBaseline'
 
 /**
  * 模型追踪(CONTEXT.md「模型追踪/跟踪模型/模型档案」;ADR-0025):全局单例图标的
@@ -78,47 +81,48 @@ export interface BaselineModel {
   availability: AvailabilityMode[]
   summary: string | null
   sources: Array<{ title: string; url: string }>
+  /** 官方定价;未核验到现价 → null。 */
+  pricing: ModelPricing | null
+  /** 官方限额(上下文/最大输出/输入大小等);未披露 → null。 */
+  limits: ModelLimit[] | null
+  /** 官方披露的训练参数量原文;未披露 → null。 */
+  trainingParams: string | null
   /**
    * 发布页块的归属判定(双条件,防上游张冠李戴——实测 GLM-Image 块误链 glm-4.7 文档页):
-   * 描述含 alias 之一 **且** 块内链接路径含 slug 之一。链接缺失(无法核验归属)→ 跳过。
+   * 描述含 alias 之一(词边界匹配,「GLM-4.7」不认领「GLM-4.7-Flash」的块)**且** 块内
+   * 链接路径含 slug 之一(路径尾边界,「…/glm-4」不认领「…/glm-4-long」)。链接缺失 → 跳过。
    */
   matchAliases: string[]
   matchSlugs: string[]
+  /** 人工核验的历史动态(官方发布页/弃用表口径);幂等入库,同键自动解析 'updated' 事件被其取代。 */
+  events?: Array<Omit<ModelEvent, 'id'>>
+}
+
+export { ZHIPU_BASELINE }
+
+/** alias 词边界命中:前后不得是 [A-Za-z0-9_.-](「GLM-4.7」≠「GLM-4.7-FlashX」;中文不算边界内字符)。 */
+function aliasIn(alias: string, description: string): boolean {
+  const re = new RegExp(`(?<![\\w.-])${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.-])`)
+  return re.test(description)
+}
+
+/** slug 路径命中且尾部带边界(「…/glm-4」不认领「…/glm-4-long」)。 */
+function slugIn(slug: string, docUrl: string): boolean {
+  const re = new RegExp(`${slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`)
+  return re.test(docUrl)
 }
 
 /**
- * 智谱基线(issues/01 首片:一个文本模型;全类型补齐见 issues/02)。
- * 资料核验(2026-08-25,研究 research/sources.md §3/§4):模型广场列 GLM-5.3 为文本
- * 旗舰;开放方式 = API(模型文档页)+ 开放权重(z.ai 官方博客,「开源模型 SOTA」)。
- */
-export const ZHIPU_BASELINE: BaselineModel[] = [
-  {
-    provider: 'zhipu',
-    officialId: 'glm-5.3',
-    name: 'GLM-5.3',
-    kind: 'text',
-    stage: 'ga',
-    availability: ['api', 'open_weights'],
-    summary: '智谱新一代旗舰模型:编程与长程任务能力增强,白盒安全审查能力涌现',
-    sources: [
-      { title: 'GLM-5.3 模型文档', url: 'https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3' },
-      { title: 'GLM-5.3 发布文章(z.ai)', url: 'https://z.ai/blog/glm-5.3' },
-    ],
-    matchAliases: ['GLM-5.3'],
-    matchSlugs: ['/guide/models/text/glm-5.3'],
-  },
-]
-
-/**
  * 更新块 → (基线模型 officialId, 事件)。仅双条件匹配的块产事件,kind 恒 'updated'
- * (自动解析不猜语义化事件类型;api_available 等留给人工核验基线,issues/02 口径)。
+ * (自动解析不猜语义化事件类型;api_available 等语义类型只出自人工核验基线 events)。
+ * 与基线事件同 (模型,日期,信源) 的块由 pollZhipu 跳过,不产重复动态。
  */
 export function matchZhipuEvent(u: ZhipuUpdate): { officialId: string; event: Omit<ModelEvent, 'id'> } | null {
   const docUrl = u.docUrl
   if (docUrl === null) return null // 无链接无法核验归属 → 待核验线索,不生成动态
   for (const b of ZHIPU_BASELINE) {
-    const aliasHit = b.matchAliases.some((a) => u.description.includes(a))
-    const slugHit = b.matchSlugs.some((s) => docUrl.includes(s))
+    const aliasHit = b.matchAliases.some((a) => aliasIn(a, u.description))
+    const slugHit = b.matchSlugs.some((s) => slugIn(s, docUrl))
     if (aliasHit && slugHit) {
       const event: Omit<ModelEvent, 'id'> = {
         kind: 'updated',
@@ -150,12 +154,14 @@ export class ModelTrackingService {
   ) {}
 
   /**
-   * 启动初始化:基线幂等 upsert(profile 字段以代码为准刷新)+ 首轮取数(不阻塞
+   * 启动初始化:基线幂等 upsert(profile 字段以代码为准刷新,含定价/限额/参数量)+
+   * 基线事件入库(同键既有的自动解析 'updated' 事件被人工核验语义取代——同一公告
+   * 不留两条动态;issues/01 时期入库的旧 'updated' 行由此清理)+ 首轮取数(不阻塞
    * 启动,失败照陈旧口径降级——基线数据已在库,tile 即有内容)。
    */
   async init(): Promise<void> {
     for (const b of ZHIPU_BASELINE) {
-      await this.db
+      const { id: modelId } = await this.db
         .insertInto('model_archive')
         .values({
           provider: b.provider,
@@ -166,6 +172,9 @@ export class ModelTrackingService {
           availability: JSON.stringify(b.availability),
           summary: b.summary,
           sources: JSON.stringify(b.sources),
+          pricing: b.pricing === null ? null : JSON.stringify(b.pricing),
+          limits: b.limits === null ? null : JSON.stringify(b.limits),
+          training_params: b.trainingParams,
           created_at: nowIso(),
           updated_at: nowIso(),
         })
@@ -177,10 +186,40 @@ export class ModelTrackingService {
             availability: JSON.stringify(b.availability),
             summary: b.summary,
             sources: JSON.stringify(b.sources),
+            pricing: b.pricing === null ? null : JSON.stringify(b.pricing),
+            limits: b.limits === null ? null : JSON.stringify(b.limits),
+            training_params: b.trainingParams,
             updated_at: nowIso(),
           }),
         )
-        .execute()
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      for (const ev of b.events ?? []) {
+        // 同 (模型,日期,信源) 的自动解析 'updated' 事件 → 删(被本条语义化事件取代)
+        await this.db
+          .deleteFrom('model_events')
+          .where('model_id', '=', modelId)
+          .where('kind', '=', 'updated')
+          .where('occurred_on', '=', ev.occurredOn)
+          .where('source_url', '=', ev.sourceUrl)
+          .execute()
+        await this.db
+          .insertInto('model_events')
+          .values({
+            model_id: modelId,
+            kind: ev.kind,
+            occurred_on: ev.occurredOn,
+            title: ev.title,
+            source_url: ev.sourceUrl,
+            created_at: nowIso(),
+          })
+          .onConflict((oc) =>
+            oc
+              .columns(['model_id', 'kind', 'occurred_on', 'source_url'])
+              .doNothing(),
+          )
+          .execute()
+      }
     }
     this.pollQuietly()
   }
@@ -223,6 +262,9 @@ export class ModelTrackingService {
         availability: JSON.parse(r.availability) as AvailabilityMode[],
         summary: r.summary ?? null,
         sources: JSON.parse(r.sources) as TrackedModel['sources'],
+        pricing: r.pricing === null ? null : (JSON.parse(r.pricing) as TrackedModel['pricing']),
+        limits: r.limits === null ? null : (JSON.parse(r.limits) as TrackedModel['limits']),
+        trainingParams: r.training_params ?? null,
         events: byModel.get(r.id) ?? [],
       })),
       sources: sources.map((s) => ({
@@ -240,9 +282,11 @@ export class ModelTrackingService {
 
   /**
    * 智谱一轮:发布页 → 匹配基线 → 事件幂等入库(去重键 = UNIQUE(model_id,kind,
-   * occurred_on,source_url),研究 §6.6)→ 信源标记成功。失败口径覆盖两类:fetch 抛错,
-   * 与「取到 200 但一个结构化块都解析不出」——后者即上游改版(确定性解析的主要失效面),
-   * 同样标记陈旧、保留库内最后成功结果,不静默清零。
+   * occurred_on,source_url),研究 §6.6)→ 信源标记成功。已有**任意类型**事件占住同
+   * (模型,日期,信源) 的公告跳过——人工核验基线事件(api_available 等)在库时,自动
+   * 解析不再为同一公告补 'updated' 重复行。失败口径覆盖两类:fetch 抛错,与「取到 200
+   * 但一个结构化块都解析不出」——后者即上游改版(确定性解析的主要失效面),同样标记
+   * 陈旧、保留库内最后成功结果,不静默清零。
    */
   async pollZhipu(): Promise<void> {
     try {
@@ -255,11 +299,18 @@ export class ModelTrackingService {
         .where('provider', '=', 'zhipu')
         .execute()
       const idOf = new Map(archive.map((r) => [r.official_id, r.id]))
+      // 已入库公告键(模型+日期+信源,类型无关)——基线事件已覆盖的不再自动入库
+      const existing = await this.db
+        .selectFrom('model_events')
+        .select(['model_id', 'occurred_on', 'source_url'])
+        .execute()
+      const seen = new Set(existing.map((e) => `${e.model_id}|${e.occurred_on}|${e.source_url}`))
       for (const u of updates) {
         const hit = matchZhipuEvent(u)
         if (!hit) continue
         const modelId = idOf.get(hit.officialId)
         if (modelId === undefined) continue
+        if (seen.has(`${modelId}|${hit.event.occurredOn}|${hit.event.sourceUrl}`)) continue
         await this.db
           .insertInto('model_events')
           .values({

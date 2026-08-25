@@ -50,7 +50,7 @@ export type VideoBlogger = {
  * 模型追踪 wire 契约(CONTEXT.md「模型追踪/跟踪模型/模型档案」等;全局持久档案,
  * ADR-0025)。occurredOn 为 YYYY-MM-DD——信源只有日期粒度(智谱发布页 Update label),
  * 24h 红点窗口按北京时间零点锚定在前端推导(见 frontend lib/modelTracking.ts)。
- * 首片(issues/01)只跟踪智谱文本模型;ModelProviderId 随后续厂家票扩。
+ * issues/01 贯通智谱文本首片;issues/02 补齐智谱八类全量档案;ModelProviderId 随后续厂家票扩。
  */
 export type ModelProviderId = 'zhipu'
 
@@ -90,6 +90,26 @@ export type ModelEvent = {
   sourceUrl: string
 }
 
+/** 官方价格条目(issues/02):text 保留官方原文(币种/数值/单位一并,如「输入 8 元/百万 tokens」「免费」);scope 为官方标注的作用域原文(如「输入长度 [0, 32)」),无 → null。 */
+export type ModelPriceEntry = {
+  text: string
+  scope: string | null
+}
+
+/** 模型定价(issues/02):开放平台现价。region 为平台/地区作用域;effectiveFrom 为官方生效日,价格页未标注 → null(展示现价)。 */
+export type ModelPricing = {
+  region: string
+  effectiveFrom: string | null
+  entries: ModelPriceEntry[]
+}
+
+/** 官方限额条目(上下文/最大输出/输入大小等):text 保留官方原文值;scope 为作用域原文(如「音频通话」),无 → null。 */
+export type ModelLimit = {
+  label: string
+  text: string
+  scope: string | null
+}
+
 export type TrackedModel = {
   id: number
   provider: ModelProviderId
@@ -102,6 +122,12 @@ export type TrackedModel = {
   summary: string | null
   /** 基本资料的原始信源(模型文档页等)。 */
   sources: Array<{ title: string; url: string }>
+  /** 官方定价;官方渠道未核验到现价 → null(前端显示「官方未披露」)。 */
+  pricing: ModelPricing | null
+  /** 上下文与其他官方限额;未披露 → null。 */
+  limits: ModelLimit[] | null
+  /** 官方披露的训练参数量原文(如「744B(激活 40B)」);未披露 → null(显示「未知」)。 */
+  trainingParams: string | null
   events: ModelEvent[]
 }
 

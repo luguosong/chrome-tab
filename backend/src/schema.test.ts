@@ -1,4 +1,5 @@
-import type { Database } from 'better-sqlite3'
+import Database from 'better-sqlite3'
+import type { Database as DatabaseType } from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 import { openDb } from './db'
 import { migrate } from './schema'
@@ -109,6 +110,9 @@ const MODEL_ARCHIVE: Col[] = [
   ['availability', 'TEXT', 1, null, 0],
   ['summary', 'TEXT', 0, null, 0],
   ['sources', 'TEXT', 1, null, 0],
+  ['pricing', 'TEXT', 0, null, 0],
+  ['limits', 'TEXT', 0, null, 0],
+  ['training_params', 'TEXT', 0, null, 0],
   ['created_at', 'TEXT', 1, null, 0],
   ['updated_at', 'TEXT', 1, null, 0],
 ]
@@ -133,12 +137,12 @@ function fresh() {
   return openDb(':memory:').sqlite
 }
 
-function cols(sqlite: Database, table: string): Col[] {
+function cols(sqlite: DatabaseType, table: string): Col[] {
   const rows = sqlite.pragma(`table_info(${table})`) as Record<string, unknown>[]
   return rows.map((c) => [c.name, c.type, c.notnull, c.dflt_value, c.pk] as Col)
 }
 
-function tableCount(sqlite: Database): number {
+function tableCount(sqlite: DatabaseType): number {
   return (sqlite.prepare("SELECT count(*) c FROM sqlite_master WHERE type='table'").get() as { c: number }).c
 }
 
@@ -179,7 +183,7 @@ describe('schema:14 张表结构(research/03 骨架 + sessions + 视频更新三
 
 describe('schema:外键实际生效', () => {
   // grouped:icons 100 为组、101 为组内成员(parent_id 引用)
-  function seed(sqlite: Database) {
+  function seed(sqlite: DatabaseType) {
     sqlite.exec(`
       INSERT INTO users (id, username, password, created_at) VALUES (1, 'u', 'p', '2026-01-01 00:00:00');
       INSERT INTO pages (id, user_id, name, sort_order, created_at) VALUES (10, 1, 'p1', 0, '2026-01-01 00:00:00');
@@ -243,5 +247,34 @@ describe('schema:建表幂等', () => {
       migrate(sqlite)
     }).not.toThrow()
     expect(tableCount(sqlite)).toBe(14)
+  })
+
+  it('增量加列:issues/01 时期的旧库(无 pricing/limits/training_params)migrate 后补齐且数据保留', () => {
+    // 裸连接复刻 issues/01 形状的 model_archive(11 列),再跑 migrate(fresh() 已自带建表,不能用)
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    sqlite.exec(`
+      CREATE TABLE model_archive (
+          id INTEGER PRIMARY KEY,
+          provider TEXT NOT NULL,
+          official_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          stage TEXT NOT NULL,
+          availability TEXT NOT NULL,
+          summary TEXT,
+          sources TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (provider, official_id)
+      );
+      INSERT INTO model_archive (provider, official_id, name, kind, stage, availability, sources, created_at, updated_at)
+        VALUES ('zhipu', 'glm-5.3', 'GLM-5.3', 'text', 'ga', '["api"]', '[]', '2026-08-19T00:00:00Z', '2026-08-19T00:00:00Z');
+    `)
+    migrate(sqlite)
+    // ALTER 追加列在表尾(顺序与新建库 DDL 不同),按列名集合比对
+    expect(cols(sqlite, 'model_archive').map((c) => c[0]).sort()).toEqual(MODEL_ARCHIVE.map((c) => c[0]).sort())
+    const row = sqlite.prepare('SELECT pricing, limits, training_params FROM model_archive').get() as Record<string, unknown>
+    expect(row).toEqual({ pricing: null, limits: null, training_params: null })
   })
 })
