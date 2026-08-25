@@ -25,6 +25,23 @@ export interface DayAlmanac {
   fullYi: string[]
   /** 完整忌列表(title 用) */
   fullJi: string[]
+  /** 十二时辰吉凶(子起亥终);天神名与吉凶由日干支推定 */
+  hours: HourLuck[]
+  /** 今日太阳星座简称(如「处女」),Solar.getXingZuo 按公历日推定 */
+  xingZuo: string
+}
+
+/** 单个时辰的吉凶:天神十二神,黄道六神(青龙/明堂/金匮/天德/玉堂/司命)为吉,
+ *  黑道六神(天刑/朱雀/白虎/天牢/玄武/勾陈)为凶;title 详注天神与黄黑道。 */
+export interface HourLuck {
+  /** 时辰地支单字(子/丑/寅/…) */
+  zhi: string
+  /** 吉凶二值 */
+  luck: '吉' | '凶'
+  /** 天神名,如「青龙」「白虎」 */
+  tianShen: string
+  /** 黄道/黑道 */
+  dao: '黄道' | '黑道'
 }
 
 /** 一天的农历+宜忌,时钟数据源(纯函数,按 date 直测)。
@@ -38,6 +55,16 @@ export function getAlmanac(date: Date): DayAlmanac {
     ...list.filter((x) => !COMMON.has(x)),
   ].slice(0, 3)
   const term = lunar.getJieQi()
+  // getTimes() 返回 13 项(子时两现:早子时 0-1 点用当日干支,末尾晚子时 23-24 点
+  // 干支已进位)——取前 12 项,与本组件农历/宜忌/生肖的「今日干支」口径一致,
+  // 23 点与 0 点的用户看到同一张表。
+  const hours = lunar.getTimes().slice(0, 12).map((t) => ({
+    zhi: t.getZhi(),
+    luck: t.getTianShenLuck() as '吉' | '凶',
+    tianShen: t.getTianShen(),
+    dao: t.getTianShenType() === '黑道' ? ('黑道' as const) : ('黄道' as const),
+  }))
+  const xingZuo = Solar.fromDate(date).getXingZuo()
   return {
     lunarText: `${lunar.getYearInGanZhi()}年${lunar.getMonthInChinese()}月${lunar.getDayInChinese()}`,
     lunarYear: lunar.getYear(),
@@ -47,5 +74,7 @@ export function getAlmanac(date: Date): DayAlmanac {
     ji: pick(fullJi),
     fullYi,
     fullJi,
+    hours,
+    xingZuo,
   }
 }

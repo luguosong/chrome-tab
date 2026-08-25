@@ -504,19 +504,17 @@ function Dashboard() {
         className="relative z-10 flex-1 min-h-0 flex flex-col page-panel overflow-hidden"
         style={{ backgroundColor: `rgba(${PAGE_PANEL_RGB},${layout.panelFog / 100})` }}
       >
-        {/* 顶部常驻(issue 11):时钟(iOS 锁屏式大字裸排)居左 + 右上胶囊 L2 折射壳,
-            下接搜索框 —— 顶行布局按原型 prototype/liquid-glass @3f10ddf 定稿。
-            pt-8:与编辑模式提示条(顶部 ~32px)不叠。时钟隐藏(clockVisible)时行内只剩
-            右上胶囊,justify 切 end 保持其靠右原位。 */}
-        <div className="px-4 pt-8 pb-4">
-          <div
-            className={
-              layout.clockVisible
-                ? 'flex items-start justify-between gap-4'
-                : 'flex items-start justify-end gap-4'
-            }
-          >
-            {layout.clockVisible && <Clock />}
+        {/* 顶部常驻(issue 11):右上胶囊 L2 折射壳 + 下接搜索框,布局按原型
+            prototype/liquid-glass @3f10ddf 定稿。pt-8:与编辑模式提示条(顶部 ~32px)
+            不叠。时钟 absolute 出流居左(left-4/top-8 复刻原 px-4/pt-8 起点):高度
+            不再推挤中轴搜索框,两者独立;clockVisible 只控挂载,justify 恒 end。 */}
+        <div className="relative px-4 pt-8 pb-4">
+          {layout.clockVisible && (
+            <div className="absolute left-4 top-8 z-10">
+              <Clock />
+            </div>
+          )}
+          <div className="flex items-start justify-end gap-4">
             {/* 右上控件:极简为单个 ⚙ 圆钮(L2 折射壳退化为 40px 正圆);
                 用户信息与登出移入控制抽屉「账号」tab */}
             <LensBox radius={20} className="shrink-0 rounded-full p-1">

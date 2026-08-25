@@ -21,4 +21,25 @@ describe('getAlmanac', () => {
     expect(a.lunarText).toBe('丙午年七月十一')
     expect(a.term).toBe('处暑')
   })
+
+  it('时辰吉凶:十二时辰子起亥终,吉凶二值且天神黄黑道匹配', () => {
+    const a = getAlmanac(new Date(2026, 7, 24))
+    expect(a.hours.map((h) => h.zhi).join('')).toBe('子丑寅卯辰巳午未申酉戌亥')
+    for (const h of a.hours) {
+      expect(['吉', '凶']).toContain(h.luck)
+      expect(h.dao).toBe(h.luck === '吉' ? '黄道' : '黑道')
+    }
+    // 对拍基准:2026-08-24(庚午日)子时金匮(黄道吉)、寅时白虎(黑道凶),
+    // 已与全民万年历当日时辰表核对(子金匮/丑天德一致)
+    expect(a.hours[0]).toMatchObject({ zhi: '子', luck: '吉', tianShen: '金匮' })
+    expect(a.hours[2]).toMatchObject({ zhi: '寅', luck: '凶', tianShen: '白虎' })
+  })
+
+  it('星座:公历边界日正确(狮子/处女分界、摩羯跨年)', () => {
+    // 边界对拍已与 Solar.getXingZuo 实测核对
+    expect(getAlmanac(new Date(2026, 7, 22)).xingZuo).toBe('狮子')
+    expect(getAlmanac(new Date(2026, 7, 23)).xingZuo).toBe('处女')
+    expect(getAlmanac(new Date(2026, 11, 22)).xingZuo).toBe('摩羯')
+    expect(getAlmanac(new Date(2027, 0, 20)).xingZuo).toBe('水瓶')
+  })
 })
