@@ -507,6 +507,54 @@ function requireDataField(body: Record<string, unknown>): void {
   if (v !== undefined && v !== null && (typeof v !== 'object' || Array.isArray(v))) {
     throw new BadRequest('data: 必须是对象')
   }
+  validateIconData(v as Record<string, unknown> | null | undefined)
+}
+
+/** 所有图标写入口共用:data: 图标覆盖只能是前端产出的受限 WebP。 */
+export function validateIconData(data: Record<string, unknown> | null | undefined): void {
+  if (data && typeof data.icon === 'string') {
+    const icon = data.icon.trim()
+    if (icon.startsWith('data:') && !icon.startsWith('data:image/webp;base64,')) {
+      throw new BadRequest('图标覆盖: 本地图片必须是 WebP')
+    }
+    if (icon.startsWith('data:image/webp;base64,')) {
+      const encoded = icon.slice('data:image/webp;base64,'.length)
+      if (!encoded || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
+        throw new BadRequest('图标覆盖: 图片数据无效')
+      }
+      const bytes = Buffer.from(encoded, 'base64')
+      if (bytes.byteLength > 128 * 1024) throw new BadRequest('图标覆盖: 图片不能超过 128 KiB')
+      if (!isWebp(bytes)) throw new BadRequest('图标覆盖: 图片内容不是 WebP')
+    }
+  }
+}
+
+/** 校验 RIFF 长度、分块边界及静态 WebP 的 VP8/VP8L 图像分块。 */
+function isWebp(bytes: Buffer): boolean {
+  if (
+    bytes.length < 20 ||
+    bytes.toString('ascii', 0, 4) !== 'RIFF' ||
+    bytes.readUInt32LE(4) !== bytes.length - 8 ||
+    bytes.toString('ascii', 8, 12) !== 'WEBP'
+  ) return false
+  let offset = 12
+  let hasImage = false
+  while (offset < bytes.length) {
+    if (offset + 8 > bytes.length) return false
+    const kind = bytes.toString('ascii', offset, offset + 4)
+    const size = bytes.readUInt32LE(offset + 4)
+    const start = offset + 8
+    const end = start + size
+    const next = end + (size & 1)
+    if (next > bytes.length) return false
+    if (kind === 'VP8 ' && size >= 10) {
+      hasImage = bytes[start + 3] === 0x9d && bytes[start + 4] === 0x01 && bytes[start + 5] === 0x2a
+    } else if (kind === 'VP8L' && size >= 6) {
+      hasImage = bytes[start] === 0x2f && (bytes[start + 4]! & 0xe0) === 0
+    }
+    offset = next
+  }
+  return hasImage
 }
 
 const dataToJson = (v: unknown) => (v === undefined || v === null ? null : JSON.stringify(v))

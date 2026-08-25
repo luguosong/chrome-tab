@@ -6,6 +6,7 @@ import { expectError, setupApp } from './testUtils'
 
 let req: Awaited<ReturnType<typeof setupApp>>['req']
 let cookie: string
+const LOCAL_WEBP_ICON = 'data:image/webp;base64,UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AA/v89'
 
 beforeAll(async () => {
   const s = await setupApp()
@@ -121,7 +122,7 @@ describe('PUT /api/config(全量替换)', () => {
       { id: 9002, name: '乙', sortOrder: 1 },
     ],
     icons: [
-      { id: 9101, pageId: 9001, parentId: null, type: 'NAV', sortOrder: 0, data: { name: 'A', url: 'https://a' } },
+      { id: 9101, pageId: 9001, parentId: null, type: 'NAV', sortOrder: 0, data: { name: 'A', url: 'https://a', icon: LOCAL_WEBP_ICON } },
       { id: 9102, pageId: 9001, parentId: null, type: 'NAV', sortOrder: 1, data: { name: 'B', url: 'https://b' } },
       { id: 9103, pageId: 9001, parentId: null, type: 'GROUP', sortOrder: 2, data: { name: '新建分组' } },
       { id: 9104, pageId: 9001, parentId: 9103, type: 'NAV', sortOrder: 0, data: { name: 'C', url: 'https://c' } },
@@ -134,13 +135,14 @@ describe('PUT /api/config(全量替换)', () => {
     expect(res.status).toBe(200)
     const json = (await res.json()) as {
       pages: Array<{ id: number; name: string; sortOrder: number }>
-      icons: Array<{ id: number; pageId: number; parentId: number | null; type: string; sortOrder: number }>
+      icons: Array<{ id: number; pageId: number; parentId: number | null; type: string; sortOrder: number; data: Record<string, unknown> | null }>
       updatedAt: string | null
     }
     // id 全量重分配:blob 内 9001/9101 等临时 id 不复现
     expect(json.pages.map((p) => p.id)).not.toContain(9001)
     expect(json.icons.map((i) => i.id)).not.toContain(9101)
     expect(json.pages.map((p) => p.name)).toEqual(['甲', '乙'])
+    expect(json.icons.find((i) => i.type === 'NAV')?.data?.icon).toBe(LOCAL_WEBP_ICON)
     // parentId 经映射重定向到新组行 id
     const group = json.icons.find((i) => i.type === 'GROUP')!
     const member = json.icons.find((i) => i.type === 'NAV' && i.parentId !== null)!
@@ -169,6 +171,17 @@ describe('PUT /api/config(全量替换)', () => {
     const json = (await res.json()) as { layoutSettings: { gridWidth: number; labelSize: number } }
     expect(json.layoutSettings.gridWidth).toBe(1536)
     expect(json.layoutSettings.labelSize).toBe(12) // 嵌套 layout 缺省补默认
+  })
+
+  it('全量配置恢复同样拒绝非 WebP 的本地图标覆盖', async () => {
+    const body = blob()
+    const data = body.icons[0]!.data as Record<string, unknown>
+    data.icon = 'data:image/png;base64,iVBORw0KGgo='
+    await expectError(
+      await req('PUT', '/api/config', { body, cookie }),
+      400,
+      '图标覆盖: 本地图片必须是 WebP',
+    )
   })
 
   it('结构 400:pages 缺失/空、icons 缺失、name 空超长、type 非法、缺 id/sortOrder', async () => {

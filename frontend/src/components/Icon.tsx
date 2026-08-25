@@ -379,6 +379,7 @@ function EditForm({
       ]),
     ),
   )
+  const [iconProcessing, setIconProcessing] = useState(false)
   // nav:改网址后重新抓站点信息(图标候选随新网址刷新;名称已有值不覆盖——名称是
   // 用户的标签,与「图标覆盖」同为显式意图优先)。共享 hook,与新增抽屉一致。
   useSiteInfoAutofill(icon.type === 'nav', String(values['url'] ?? ''), setValues)
@@ -439,6 +440,7 @@ function EditForm({
               url={String(values['url'] ?? '')}
               value={String(values['icon'] ?? '')}
               onChange={(v) => setField('icon', v)}
+              onProcessingChange={setIconProcessing}
               placeholder={f.placeholder}
             />
           ) : (
@@ -467,14 +469,14 @@ function EditForm({
           </button>
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || iconProcessing}
             onClick={(e) => {
               e.stopPropagation()
               onSave(buildIconData(fields, values))
             }}
             className="px-3.5 py-1.5 min-h-8 rounded-full bg-accent/90 hover:bg-accent active:bg-accent/75 disabled:opacity-50 text-white text-xs focus-visible:outline-2 focus-visible:outline-white/60"
           >
-            保存
+            {iconProcessing ? '处理中…' : '保存'}
           </button>
         </div>
       </div>

@@ -9,6 +9,7 @@ import { expectError, insertPage, setupApp } from './testUtils'
 let req: Awaited<ReturnType<typeof setupApp>>['req']
 let cookie: string
 let db: Db
+const LOCAL_WEBP_ICON = 'data:image/webp;base64,UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AA/v89'
 
 beforeAll(async () => {
   const s = await setupApp()
@@ -72,6 +73,83 @@ describe('契约顶部:未认证 401 空体', () => {
 })
 
 describe('POST /api/icons', () => {
+  it('网站链接拒绝伪装成上传结果的非 WebP data URL', async () => {
+    const res = await req('POST', '/api/icons', {
+      body: {
+        pageId: 1,
+        type: 'NAV',
+        data: { name: '本地图标', url: 'https://example.com', icon: ' \ndata:image/png;base64,iVBORw0KGgo=' },
+      },
+      cookie,
+    })
+    await expectError(res, 400, '图标覆盖: 本地图片必须是 WebP')
+  })
+
+  it('网站链接拒绝 Base64 非法的 WebP 图标覆盖', async () => {
+    const res = await req('POST', '/api/icons', {
+      body: {
+        pageId: 1,
+        type: 'NAV',
+        data: { name: '本地图标', url: 'https://example.com', icon: 'data:image/webp;base64,not-base64' },
+      },
+      cookie,
+    })
+    await expectError(res, 400, '图标覆盖: 图片数据无效')
+  })
+
+  it('网站链接拒绝内容并非 WebP 的 Base64 图标覆盖', async () => {
+    const res = await req('POST', '/api/icons', {
+      body: {
+        pageId: 1,
+        type: 'NAV',
+        data: { name: '本地图标', url: 'https://example.com', icon: 'data:image/webp;base64,aGVsbG8=' },
+      },
+      cookie,
+    })
+    await expectError(res, 400, '图标覆盖: 图片内容不是 WebP')
+  })
+
+  it('网站链接拒绝只有 RIFF/WEBP 魔数而没有图像分块的伪文件', async () => {
+    const res = await req('POST', '/api/icons', {
+      body: {
+        pageId: 1,
+        type: 'NAV',
+        data: { name: '本地图标', url: 'https://example.com', icon: 'data:image/webp;base64,UklGRgAAAABXRUJQ' },
+      },
+      cookie,
+    })
+    await expectError(res, 400, '图标覆盖: 图片内容不是 WebP')
+  })
+
+  it('网站链接拒绝超过 128 KiB 的 WebP 图标覆盖', async () => {
+    const bytes = Buffer.alloc(128 * 1024 + 1)
+    bytes.write('RIFF')
+    bytes.write('WEBP', 8)
+    const res = await req('POST', '/api/icons', {
+      body: {
+        pageId: 1,
+        type: 'NAV',
+        data: { name: '本地图标', url: 'https://example.com', icon: `data:image/webp;base64,${bytes.toString('base64')}` },
+      },
+      cookie,
+    })
+    await expectError(res, 400, '图标覆盖: 图片不能超过 128 KiB')
+  })
+
+  it('网站链接可保存浏览器归一化后的 WebP 图标覆盖', async () => {
+    const pageId = await insertPage(db, 1, '本地图标')
+    const res = await req('POST', '/api/icons', {
+      body: {
+        pageId,
+        type: 'NAV',
+        data: { name: '本地图标', url: 'https://example.com', icon: LOCAL_WEBP_ICON },
+      },
+      cookie,
+    })
+    expect(res.status).toBe(201)
+    await expect(res.json()).resolves.toMatchObject({ data: { icon: LOCAL_WEBP_ICON } })
+  })
+
   it('happy:201 IconResponse(大写枚举、data 对象透传、末尾追加 sortOrder=12)', async () => {
     const res = await req('POST', '/api/icons', {
       body: { pageId: 1, type: 'WEATHER', data: { location: { name: '北京', adm1: '北京', adm2: '北京', lat: 39.9, lon: 116.4 } } },
@@ -347,6 +425,11 @@ describe('PATCH /api/icons/{id}(修正白名单⑥:补参数校验)', () => {
 
   it('negative:畸形请求 400(data 非对象 / body 非对象 / 非 JSON)而非静默通过', async () => {
     await expectError(await req('PATCH', '/api/icons/1', { body: { data: 'str' }, cookie }), 400)
+    await expectError(
+      await req('PATCH', '/api/icons/1', { body: { data: { icon: 'data:image/png;base64,iVBORw0KGgo=' } }, cookie }),
+      400,
+      '图标覆盖: 本地图片必须是 WebP',
+    )
     await expectError(await req('PATCH', '/api/icons/1', { body: [1, 2], cookie }), 400)
     const bad = await req('PATCH', '/api/icons/1', { body: 'not-json', cookie })
     await expectError(bad, 400)

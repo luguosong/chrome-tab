@@ -131,7 +131,7 @@ export const NAV_DEF: IconTypeDefinition = {
   editor: [
     { name: 'url', label: '网址', placeholder: 'https://…' },
     { name: 'name', label: '名称', placeholder: '名称' },
-    { name: 'icon', label: '图标', placeholder: '自定义图片地址(可选)' },
+    { name: 'icon', label: '图标', placeholder: '图片地址(可选)' },
   ],
   summarize: () => null, // nav 无实时摘要
 }

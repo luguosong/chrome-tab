@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { AuthEnv } from './auth'
 import { BadRequest, ConflictError, touchVersion } from './common'
 import type { Db } from './db'
-import { CAPACITY_CELLS, ICON_TYPES, SINGLETON_TYPES, iconWire, spanOf } from './icons'
+import { CAPACITY_CELLS, ICON_TYPES, SINGLETON_TYPES, iconWire, spanOf, validateIconData } from './icons'
 import { readLayout, updateLayout } from './layout'
 import { pageWire } from './pages'
 
@@ -161,6 +161,7 @@ function parseReplaceRequest(body: Record<string, unknown>): {
       if (i.data !== undefined && i.data !== null && (typeof i.data !== 'object' || Array.isArray(i.data))) {
         throw new BadRequest(`icons[${idx}].data: 必须是对象`)
       }
+      validateIconData(i.data as Record<string, unknown> | null | undefined)
       return {
         id: i.id,
         pageId: i.pageId,
