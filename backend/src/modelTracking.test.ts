@@ -1006,6 +1006,13 @@ describe('模型追踪:月之暗面基线自身(issues/06)', () => {
     for (const b of KIMI_BASELINE) expect(b.provider).toBe('moonshot')
   })
 
+  it('退役模型渠道:API 随下线清空、开放权重保留(评审修正,同 GLM-Z1 availability=[] 先例)', () => {
+    const byId = new Map(KIMI_BASELINE.map((b) => [b.officialId, b]))
+    expect(byId.get('kimi-k2')!.availability).toEqual(['open_weights'])
+    expect(byId.get('kimi-k2-thinking')!.availability).toEqual(['open_weights'])
+    expect(byId.get('kimi-thinking-preview')!.availability).toEqual([]) // API 专属,下线即无渠道
+  })
+
   it('预告/非模型排除:Infra 组件(MoonEP 等)、研究仓(Kimi-VL/Kimi-Dev/Kimi-Linear/Moonlight)、移动别名(kimi-latest)不在基线', () => {
     const ids = new Set(KIMI_BASELINE.map((b) => b.officialId))
     for (const excluded of ['moonep', 'flashkda', 'agentenv', 'kimi-vl', 'kimi-dev', 'kimi-linear', 'moonlight', 'kimi-latest']) {
@@ -1044,7 +1051,6 @@ describe('模型追踪:月之暗面基线自身(issues/06)', () => {
       'https://www.kimi.com/en/blog/kimi-k2-thinking',
       'https://www.kimi.com/en/blog/kimi-k2',
       'https://huggingface.co/MoonshotAI/Kimi-K2-Instruct-0905',
-      'https://huggingface.co/MoonshotAI/Kimi-K2.7-Code',
       'https://github.com/MoonshotAI/Kimi-Audio',
     ])
     for (const b of KIMI_BASELINE) {

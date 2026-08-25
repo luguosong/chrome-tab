@@ -308,10 +308,10 @@ export function parseKimiArticles(html: string): KimiArticle[] {
   for (let i = 0; i < anchors.length; i++) {
     const [, href, label] = anchors[i]!
     const end = anchors[i + 1]?.index
-    const window = html.slice(anchors[i]!.index! + anchors[i]![0].length, end)
-    const titlePos = window.indexOf('card-title')
+    const cardWindow = html.slice(anchors[i]!.index! + anchors[i]![0].length, end)
+    const titlePos = cardWindow.indexOf('card-title')
     if (titlePos < 0) continue
-    const date = /20\d{2}-\d{2}-\d{2}/.exec(window.slice(titlePos))?.[0]
+    const date = /20\d{2}-\d{2}-\d{2}/.exec(cardWindow.slice(titlePos))?.[0]
     if (date === undefined) continue
     const url = href!.startsWith('/') ? `https://www.kimi.com${href}` : href!
     if (seen.has(url)) continue

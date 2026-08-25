@@ -10,9 +10,8 @@ import type { BaselineModel } from './modelTracking'
  * - 价格(人民币/百万 tokens,缓存命中/未命中分列):各模型定价页
  *   docs/pricing/chat-k3 · chat-k27-code · chat-k26 · chat-k25 · chat-v1
  * - 动态(发布/开放权重/下线日期):Kimi 资讯 www.kimi.com/news(产品发布)、
- *   Kimi Blog www.kimi.com/en/blog(研究/开放权重,索引卡片带官方日期)与
- *   HuggingFace MoonshotAI org 实仓 createdAt(K2.7 Code 无博客文章,权重发布日
- *   以官方仓库建立日为准;K3 仓库先建后发,权重日取资讯「开放日」口径)
+ *   Kimi Blog www.kimi.com/en/blog(研究/开放权重,索引卡片带官方日期);K3 仓库
+ *   先建后发,权重日取资讯「开放日」口径而非仓库创建日(研究 §3:仓库创建≠发布)
  * - 开放权重:HuggingFace 官方 org moonshotai 实仓核验(K3/K2.7-Code/K2.6/K2.5/
  *   K2/K2-Thinking/Kimi-Audio 均有 safetensors 权重)
  * 归属与排除(研究 §2/§4/§5):商业目录模型全部纳入;Kimi-Audio 虽不在商业 API,
@@ -83,7 +82,7 @@ export const KIMI_BASELINE: BaselineModel[] = [
     provider: 'moonshot',
     officialId: 'kimi-k2.7-code',
     name: 'Kimi K2.7 Code',
-    kind: 'text',
+    kind: 'text', // 研究 §2 文本列(视觉输入是能力进 summary,同 GPT-5.6 先例;K2.6 因研究矩阵明确列于多模态理解列)
     stage: 'ga',
     availability: ['api', 'open_weights'],
     summary: 'Kimi 的 Coding 模型:长上下文中更可靠遵循指令,支持文本/图片/视频输入,256K 上下文',
@@ -92,10 +91,8 @@ export const KIMI_BASELINE: BaselineModel[] = [
     limits: ctx('262,144 tokens'),
     trainingParams: null,
     matchAliases: ['Kimi K2.7 Code', 'Kimi K2.7-Code'],
-    events: [
-      // 无资讯/Blog 发布文章,权重发布日以官方 HF 仓库建立日为准(权重 64 分片实仓核验)
-      { kind: 'weights_available', occurredOn: '2026-06-11', title: 'Kimi K2.7 Code 开放权重发布', sourceUrl: 'https://huggingface.co/MoonshotAI/Kimi-K2.7-Code' },
-    ],
+    // 无带日期的官方发布文章(资讯/Blog 均无)——研究 §3「仓库创建不等于发布」,不借
+    // HF 仓库创建日臆造 weights_available 日期;open_weights 渠道本身是 HF 权重实核事实
   },
   {
     provider: 'moonshot',
@@ -152,7 +149,7 @@ export const KIMI_BASELINE: BaselineModel[] = [
     name: 'Kimi K2',
     kind: 'text',
     stage: 'retired',
-    availability: ['api', 'open_weights'],
+    availability: ['open_weights'], // API 渠道随下线清空(GLM-Z1 availability=[] 同口径);HF 权重仍可下载
     summary: '开源 Agentic 智能基座:1T 总参/32B 激活 MoE;0905 权重更新增强 Agentic Coding 并支持 256K 上下文;2026-05-25 下线',
     sources: [MODELS_PAGE, { title: 'Kimi K2 发布文章(Blog)', url: BLOG('kimi-k2') }, HF('Kimi-K2-Instruct')],
     pricing: null, // 已下线,平台不再刊价
@@ -171,7 +168,7 @@ export const KIMI_BASELINE: BaselineModel[] = [
     name: 'Kimi K2 Thinking',
     kind: 'text',
     stage: 'retired',
-    availability: ['api', 'open_weights'],
+    availability: ['open_weights'], // 同 kimi-k2:API 下线清空,权重仍可下载
     summary: '开源思考模型:以思考 Agent 形式逐步推理,支持工具调用中的交错思考;2026-05-25 下线',
     sources: [MODELS_PAGE, { title: 'Kimi K2 Thinking 发布文章(Blog)', url: BLOG('kimi-k2-thinking') }, HF('Kimi-K2-Thinking')],
     pricing: null,
@@ -189,7 +186,7 @@ export const KIMI_BASELINE: BaselineModel[] = [
     name: 'Kimi Thinking Preview',
     kind: 'text',
     stage: 'retired',
-    availability: ['api'],
+    availability: [], // API 专属模型,下线即无可访问渠道
     summary: '早期思考模型(预览);2025-11-11 下线,思考能力由 K2 系列接替',
     sources: [MODELS_PAGE],
     pricing: null,
