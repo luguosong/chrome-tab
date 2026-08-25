@@ -51,7 +51,7 @@ export default function WeatherModal({
       <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
 
       {/* max-h + 滚动:预警/逐日多时小屏溢出(族内既有模式) */}
-      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6 max-h-[80vh] overflow-y-auto animate-pop-in">
+      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6 max-h-[80vh] overflow-y-auto modal-scroll animate-pop-in">
         <button
           type="button"
           onClick={onClose}

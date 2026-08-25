@@ -203,6 +203,29 @@ code {
   background-color: rgba(255, 255, 255, 0.25);
 }
 
+/* 详情 Modal 滚动条(四 Modal 面板本体 + ChangelogModal 内列表):tile-scroll
+   雾胶囊同一语汇(track 透明 / 8px 命中 + 透明 border 内缩 4px 视觉 / 明暗
+   双值),唯一差异是提亮通道——tile 小、thumb 难精确命中故挂容器 hover;
+   Modal 面板大,容器 hover 恒真会让「hover 加深」退化成常亮,改挂 thumb 自身。 */
+.modal-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.modal-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-clip: padding-box;
+  background-color: rgba(255, 255, 255, 0.12);
+}
+.modal-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.28);
+}
+.dark .modal-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+.dark .modal-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
 /* 编辑模式：磁贴轻微抖动，提示当前可增删；reduced-motion 下不动 */
 @media (prefers-reduced-motion: no-preference) {
   .editing-jiggle {

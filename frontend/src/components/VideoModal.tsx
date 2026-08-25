@@ -86,7 +86,7 @@ export default function VideoModal({ onClose }: { onClose: () => void }) {
     >
       <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
 
-      <div className="glass-panel glass-panel-readable relative w-full max-w-2xl rounded-3xl p-6 max-h-[80vh] overflow-y-auto animate-pop-in">
+      <div className="glass-panel glass-panel-readable relative w-full max-w-2xl rounded-3xl p-6 max-h-[80vh] overflow-y-auto modal-scroll animate-pop-in">
         <button
           type="button"
           onClick={onClose}
