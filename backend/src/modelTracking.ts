@@ -858,8 +858,8 @@ export class ModelTrackingService {
    * 节奏 ×6 路 ≈ 24 请求/日,远低于限额;结果落库即缓存,满足 API 缓存要求)。任一路
    * 失败 → 整轮按评测源失败处理:保留最后成功快照、只标评测陈旧,不影响任何厂家档案。
    * 未配置 Key 时整体 no-op(不取数、不写状态)。分数漂移只更新快照行(不产动态);
-   * 唯产动态的口径 = 模型首次获得评测行(kind 'evaluated';Benchmark 方法/版本变化
-   * 免费 API 不暴露、不可检测,为已知上限)。
+   * 唯产动态的口径 = 运行期模型首次获得评测行(kind 'evaluated',首配接入整轮静默;
+   * Benchmark 方法/版本变化免费 API 不暴露、不可检测,为已知上限)。
    */
   async pollEvaluations(): Promise<void> {
     if (this.aaApiKey === '') return
@@ -881,7 +881,7 @@ export class ModelTrackingService {
     }
   }
 
-  /** 快照整表替换(单事务:删旧插新 + 首入评测动态),幂等。 */
+  /** 快照整表替换(单事务:删旧插新 + 运行期首入评测动态;首配接入静默),幂等。 */
   private async replaceEvaluationSnapshot(rows: AaEvalRow[]): Promise<void> {
     const archive = await this.db
       .selectFrom('model_archive')
@@ -910,6 +910,11 @@ export class ModelTrackingService {
       .where('evaluator', '=', AA_EVALUATOR)
       .execute()
     const existingIds = new Set(existing.map((r) => r.model_id))
+    // 首配接入(替换前快照表无任何 AA 行而本轮有行):映射内模型早已被 AA 收录,
+    // 真实「首次进入评测」日期不可考——occurred_on 只会得到取数日的伪日期(issues/08
+    // 部署回灌教训:83 模型同日伪动态集体顶掉真实时间线)。接入是系统事件而非模型
+    // 动态,整轮静默;此后运行期新出现的模型才以发现日为 occurred_on 产动态。
+    const eventModelIds = existingIds.size === 0 && inserts.length > 0 ? [] : newModelIds
     const firstUrlOf = new Map(
       rows.flatMap((r) => {
         const modelId = idOf.get(`${r.provider}|${r.officialId}`)
@@ -921,7 +926,7 @@ export class ModelTrackingService {
       if (inserts.length > 0) {
         await trx.insertInto('model_evaluations').values(inserts).execute()
       }
-      for (const modelId of newModelIds) {
+      for (const modelId of eventModelIds) {
         if (existingIds.has(modelId)) continue
         await trx
           .insertInto('model_events')

@@ -4,7 +4,8 @@ import { asRec, str, type Rec } from './common'
 /**
  * Artificial Analysis 评测接入(issues/08,CONTEXT.md「评测结果」;研究 evaluations.md):
  * 免费 API(x-api-key,1000 请求/日,Key 只在服务端、结果缓存落库)。分数是**可更新快照**
- * ——每轮成功取数整表替换,漂移不产生动态,仅「首次进入评测」产一条 evaluated 动态
+ * ——每轮成功取数整表替换,漂移不产生动态,仅运行期「首次进入评测」产一条 evaluated
+ * 动态(首配接入静默:真实首入日不可考,见 modelTracking.replaceEvaluationSnapshot)
  * (Benchmark 方法/版本变化免费 API 不暴露,不可检测——已知上限,注释即档)。
  * 归属只认映射表内 slug 精确相等(不猜):映射以 2026-08-25 站点 sitemap 的公开模型页
  * slug 人工核验;AA 文档推荐 UUID 但需 Key 才能取得,slug 失败模式安全(漂移即该模型

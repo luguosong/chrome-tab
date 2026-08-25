@@ -148,7 +148,7 @@ describe('评测:解析与映射(纯函数)', () => {
 })
 
 describe('评测:轮询与快照(服务集成,零真网)', () => {
-  it('配置 Key:评测行入档、信封 configured=true、首入产 evaluated 动态', async () => {
+  it('配置 Key:评测行入档、信封 configured=true;首配接入不产 evaluated 动态(真实首入日不可考)', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, aaDeps(fullPages()))
     await svc.pollEvaluations()
@@ -161,10 +161,33 @@ describe('评测:轮询与快照(服务集成,零真网)', () => {
     expect(evalsOf(glm47, 'mmlu_pro')!.url).toBe(aaModelUrl('glm-4-7'))
     expect(evalsOf(glm47, 'mmlu_pro')!.evaluator).toBe('Artificial Analysis')
     expect(evalsOf(a.models.find((m) => m.officialId === 'gpt-image-2')!, 'text_to_image_elo')!.score).toBe(1250)
-    // 首入评测动态(可回链模型页)
+    // 首配接入(Key 首次生效、快照表从空到满)是系统事件而非模型动态:不产 evaluated
     const kinds = (m: { events: ModelEvent[] }) => m.events.filter((e) => e.kind === 'evaluated')
-    expect(kinds(glm47).map((e) => e.title)).toEqual(['进入 Artificial Analysis 评测'])
-    expect(kinds(glm47)[0]!.sourceUrl).toBe(aaModelUrl('glm-4-7'))
+    expect(kinds(glm47)).toHaveLength(0)
+    expect(kinds(a.models.find((m) => m.officialId === 'gpt-image-2')!)).toHaveLength(0)
+  })
+
+  it('运行期 AA 新收录:仅新模型产 evaluated 动态(occurred_on=发现日),老模型不产', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, aaDeps(fullPages()))
+    await svc.pollEvaluations() // 首配:静默
+    const pages2 = fullPages()
+    pages2[AA_LLM_URL] = JSON.stringify({
+      status: 200,
+      data: [
+        ...JSON.parse(AA_LLM_JSON).data,
+        { id: 'u4', name: 'GLM-4.6', slug: 'glm-4-6', model_creator: { id: 'c1', name: 'Zhipu', slug: 'zhipu' }, evaluations: { mmlu_pro: 0.75 } },
+      ],
+    })
+    const svc2 = new ModelTrackingService(db, aaDeps(pages2), 'test-key') // 免 init:不触发厂家轮询
+    await svc2.pollEvaluations()
+    const a = await svc.archive()
+    const kinds = (m: { events: ModelEvent[] }) => m.events.filter((e) => e.kind === 'evaluated')
+    const glm46 = a.models.find((m) => m.officialId === 'glm-4.6')!
+    expect(kinds(glm46).map((e) => e.title)).toEqual(['进入 Artificial Analysis 评测'])
+    expect(kinds(glm46)[0]!.occurredOn).toBe(beijingToday())
+    expect(kinds(glm46)[0]!.sourceUrl).toBe(aaModelUrl('glm-4-6'))
+    expect(kinds(a.models.find((m) => m.officialId === 'glm-4.7')!)).toHaveLength(0)
   })
 
   it('分数漂移:快照行更新,不产生新动态;快照日期随轮刷新', async () => {
@@ -178,7 +201,7 @@ describe('评测:轮询与快照(服务集成,零真网)', () => {
     const a = await svc.archive()
     const glm47 = a.models.find((m) => m.officialId === 'glm-4.7')!
     expect(evalsOf(glm47, 'mmlu_pro')!.score).toBe(0.801)
-    expect(glm47.events.filter((e) => e.kind === 'evaluated')).toHaveLength(1)
+    expect(glm47.events.filter((e) => e.kind === 'evaluated')).toHaveLength(0) // 首配静默 + 漂移不产动态
     expect(sqlite.prepare('SELECT COUNT(*) c FROM model_evaluations').get()).toMatchObject({ c: 3 })
   })
 
