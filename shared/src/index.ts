@@ -96,18 +96,26 @@ export type ModelPriceEntry = {
   scope: string | null
 }
 
-/** 模型定价(issues/02):开放平台现价。region 为平台/地区作用域;effectiveFrom 为官方生效日,价格页未标注 → null(展示现价)。 */
+/** 模型定价(issues/02):开放平台现价。region 为平台/地区作用域;effectiveFrom 为官方生效日,价格页未标注 → null(展示现价)。智谱现价全部为单一平台口径故 region 在模型级——多地区厂家接入时升为条目级字段。 */
 export type ModelPricing = {
   region: string
   effectiveFrom: string | null
   entries: ModelPriceEntry[]
 }
 
-/** 官方限额条目(上下文/最大输出/输入大小等):text 保留官方原文值;scope 为作用域原文(如「音频通话」),无 → null。 */
+/** 官方限额条目(上下文/最大输出/输入大小等):text 保留官方原文值;scope 为官方作用域原文(如「音频通话」「输入长度 [0, 32)」),无 → null。厂家限额标注套餐/地区时同样经 scope 原文保留(智谱现额未按套餐/地区区分,scope 留空即无此维度)。 */
 export type ModelLimit = {
   label: string
   text: string
   scope: string | null
+}
+
+/** 官方披露的训练参数量(CONTEXT.md「训练参数量」:MoE 总/激活分别记录,不混为一值;未披露 → null 显示「未知」)。 */
+export type ModelTrainingParams = {
+  /** 总参数量官方原文(如「744B」)。 */
+  total: string
+  /** MoE 激活参数量官方原文(如「40B」);非 MoE 或官方未单独披露 → null。 */
+  active: string | null
 }
 
 export type TrackedModel = {
@@ -126,8 +134,7 @@ export type TrackedModel = {
   pricing: ModelPricing | null
   /** 上下文与其他官方限额;未披露 → null。 */
   limits: ModelLimit[] | null
-  /** 官方披露的训练参数量原文(如「744B(激活 40B)」);未披露 → null(显示「未知」)。 */
-  trainingParams: string | null
+  trainingParams: ModelTrainingParams | null
   events: ModelEvent[]
 }
 

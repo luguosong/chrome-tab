@@ -26,6 +26,9 @@ const HF = (repo: string) => ({ title: `开放权重(HuggingFace zai-org/${repo}
 const price = (entries: ModelPricing['entries']): ModelPricing => ({ region: CN, effectiveFrom: null, entries })
 const perM = (input: string, output: string, scope: string | null = null) =>
   price([{ text: `输入 ${input} 元/百万 tokens`, scope }, { text: `输出 ${output} 元/百万 tokens`, scope }])
+/** 按官方输入/输出长度档分档的百万 tokens 价(每档 = [作用域原文, 输入价, 输出价])。 */
+const perMTiers = (...tiers: Array<[string, string, string]>): ModelPricing =>
+  price(tiers.flatMap(([scope, input, output]) => perM(input, output, scope).entries))
 /** 「上下文/最大输出」限额对(目录口径)。 */
 const ctx = (context: string, maxOut: string): ModelLimit[] => [
   { label: '上下文窗口', text: context, scope: null },
@@ -91,12 +94,10 @@ export const ZHIPU_BASELINE: BaselineModel[] = [
       PRICING_PAGE,
       HF('GLM-5.1'),
     ],
-    pricing: price([
-      { text: '输入 6 元/百万 tokens', scope: '输入长度 [0, 32)' },
-      { text: '输出 24 元/百万 tokens', scope: '输入长度 [0, 32)' },
-      { text: '输入 8 元/百万 tokens', scope: '输入长度 [32+)' },
-      { text: '输出 28 元/百万 tokens', scope: '输入长度 [32+)' },
-    ]),
+    pricing: perMTiers(
+      ['输入长度 [0, 32)', '6', '24'],
+      ['输入长度 [32+)', '8', '28'],
+    ),
     limits: ctx('200K', '128K'),
     trainingParams: null,
     matchAliases: ['GLM-5.1'],
@@ -118,14 +119,12 @@ export const ZHIPU_BASELINE: BaselineModel[] = [
       PRICING_PAGE,
       HF('GLM-5'),
     ],
-    pricing: price([
-      { text: '输入 4 元/百万 tokens', scope: '输入长度 [0, 32)' },
-      { text: '输出 18 元/百万 tokens', scope: '输入长度 [0, 32)' },
-      { text: '输入 6 元/百万 tokens', scope: '输入长度 [32+)' },
-      { text: '输出 22 元/百万 tokens', scope: '输入长度 [32+)' },
-    ]),
+    pricing: perMTiers(
+      ['输入长度 [0, 32)', '4', '18'],
+      ['输入长度 [32+)', '6', '22'],
+    ),
     limits: ctx('200K', '128K'),
-    trainingParams: '744B(激活 40B)', // 模型文档「参数规模扩展:从 355B(激活 32B)扩展至 744B(激活 40B)」
+    trainingParams: { total: '744B', active: '40B' }, // 模型文档「参数规模扩展:从 355B(激活 32B)扩展至 744B(激活 40B)」
     matchAliases: ['GLM-5'],
     matchSlugs: ['/guide/models/text/glm-5'],
     events: [
@@ -144,12 +143,10 @@ export const ZHIPU_BASELINE: BaselineModel[] = [
       { title: 'GLM-5-Turbo 模型文档', url: DOC('/cn/guide/models/text/glm-5-turbo') },
       PRICING_PAGE,
     ],
-    pricing: price([
-      { text: '输入 5 元/百万 tokens', scope: '输入长度 [0, 32)' },
-      { text: '输出 22 元/百万 tokens', scope: '输入长度 [0, 32)' },
-      { text: '输入 7 元/百万 tokens', scope: '输入长度 [32+)' },
-      { text: '输出 26 元/百万 tokens', scope: '输入长度 [32+)' },
-    ]),
+    pricing: perMTiers(
+      ['输入长度 [0, 32)', '5', '22'],
+      ['输入长度 [32+)', '7', '26'],
+    ),
     limits: ctx('200K', '128K'),
     trainingParams: null,
     matchAliases: ['GLM-5-Turbo'],
@@ -171,14 +168,11 @@ export const ZHIPU_BASELINE: BaselineModel[] = [
       PRICING_PAGE,
       HF('GLM-4.7'),
     ],
-    pricing: price([
-      { text: '输入 2 元/百万 tokens', scope: '输入长度 [0, 32) · 输出长度 [0, 0.2)' },
-      { text: '输出 8 元/百万 tokens', scope: '输入长度 [0, 32) · 输出长度 [0, 0.2)' },
-      { text: '输入 3 元/百万 tokens', scope: '输入长度 [0, 32) · 输出长度 [0.2+)' },
-      { text: '输出 14 元/百万 tokens', scope: '输入长度 [0, 32) · 输出长度 [0.2+)' },
-      { text: '输入 4 元/百万 tokens', scope: '输入长度 [32, 200)' },
-      { text: '输出 16 元/百万 tokens', scope: '输入长度 [32, 200)' },
-    ]),
+    pricing: perMTiers(
+      ['输入长度 [0, 32) · 输出长度 [0, 0.2)', '2', '8'],
+      ['输入长度 [0, 32) · 输出长度 [0.2+)', '3', '14'],
+      ['输入长度 [32, 200)', '4', '16'],
+    ),
     limits: ctx('200K', '128K'),
     trainingParams: null,
     matchAliases: ['GLM-4.7'],
@@ -239,14 +233,11 @@ export const ZHIPU_BASELINE: BaselineModel[] = [
       PRICING_PAGE,
       HF('GLM-4.5-Air'),
     ],
-    pricing: price([
-      { text: '输入 0.8 元/百万 tokens', scope: '输入长度 [0, 32) · 输出长度 [0, 0.2)' },
-      { text: '输出 2 元/百万 tokens', scope: '输入长度 [0, 32) · 输出长度 [0, 0.2)' },
-      { text: '输入 0.8 元/百万 tokens', scope: '输入长度 [0, 32) · 输出长度 [0.2+)' },
-      { text: '输出 6 元/百万 tokens', scope: '输入长度 [0, 32) · 输出长度 [0.2+)' },
-      { text: '输入 1.2 元/百万 tokens', scope: '输入长度 [32, 128)' },
-      { text: '输出 8 元/百万 tokens', scope: '输入长度 [32, 128)' },
-    ]),
+    pricing: perMTiers(
+      ['输入长度 [0, 32) · 输出长度 [0, 0.2)', '0.8', '2'],
+      ['输入长度 [0, 32) · 输出长度 [0.2+)', '0.8', '6'],
+      ['输入长度 [32, 128)', '1.2', '8'],
+    ),
     limits: ctx('128K', '96K'),
     trainingParams: null,
     matchAliases: ['GLM-4.5-Air'],
@@ -355,7 +346,7 @@ export const ZHIPU_BASELINE: BaselineModel[] = [
     matchAliases: ['GLM-4-Flash', 'GLM-4-Flash-250414'],
     matchSlugs: ['/guide/models/text/glm-4'],
     events: [
-      { kind: 'api_available', occurredOn: '2025-04-14', title: 'GLM-4-Flash-250414(免费版)上线', sourceUrl: RELEASES_PAGE.url },
+      { kind: 'api_available', occurredOn: '2025-04-14', title: 'GLM-4-Flash-250414(免费版)上线', sourceUrl: DOC('/cn/guide/models/free/glm-4-flash-250414') },
     ],
   },
   {
@@ -416,12 +407,10 @@ export const ZHIPU_BASELINE: BaselineModel[] = [
       { title: 'GLM-5V-Turbo 模型文档', url: DOC('/cn/guide/models/vlm/glm-5v-turbo') },
       PRICING_PAGE,
     ],
-    pricing: price([
-      { text: '输入 5 元/百万 tokens', scope: '输入长度 [0, 32)' },
-      { text: '输出 22 元/百万 tokens', scope: '输入长度 [0, 32)' },
-      { text: '输入 7 元/百万 tokens', scope: '输入长度 [32+)' },
-      { text: '输出 26 元/百万 tokens', scope: '输入长度 [32+)' },
-    ]),
+    pricing: perMTiers(
+      ['输入长度 [0, 32)', '5', '22'],
+      ['输入长度 [32+)', '7', '26'],
+    ),
     limits: ctx('200K', '128K'),
     trainingParams: null, // 官方仅称「更小参数量下实现更优性能」,具体规模未披露
     matchAliases: ['GLM-5V-Turbo'],
@@ -443,14 +432,12 @@ export const ZHIPU_BASELINE: BaselineModel[] = [
       PRICING_PAGE,
       HF('GLM-4.6V'),
     ],
-    pricing: price([
-      { text: '输入 1 元/百万 tokens', scope: '输入长度 [0, 32)' },
-      { text: '输出 3 元/百万 tokens', scope: '输入长度 [0, 32)' },
-      { text: '输入 2 元/百万 tokens', scope: '输入长度 [32, 128)' },
-      { text: '输出 6 元/百万 tokens', scope: '输入长度 [32, 128)' },
-    ]),
+    pricing: perMTiers(
+      ['输入长度 [0, 32)', '1', '3'],
+      ['输入长度 [32, 128)', '2', '6'],
+    ),
     limits: ctx('128K', '32K'),
-    trainingParams: '106B(激活 12B)',
+    trainingParams: { total: '106B', active: '12B' },
     matchAliases: ['GLM-4.6V'],
     matchSlugs: ['/guide/models/vlm/glm-4.6v'],
     events: [
@@ -469,12 +456,10 @@ export const ZHIPU_BASELINE: BaselineModel[] = [
       { title: 'GLM-4.6V 系列文档', url: DOC('/cn/guide/models/vlm/glm-4.6v') },
       PRICING_PAGE,
     ],
-    pricing: price([
-      { text: '输入 0.15 元/百万 tokens', scope: '输入长度 [0, 32)' },
-      { text: '输出 1.5 元/百万 tokens', scope: '输入长度 [0, 32)' },
-      { text: '输入 0.3 元/百万 tokens', scope: '输入长度 [32, 128)' },
-      { text: '输出 3 元/百万 tokens', scope: '输入长度 [32, 128)' },
-    ]),
+    pricing: perMTiers(
+      ['输入长度 [0, 32)', '0.15', '1.5'],
+      ['输入长度 [32, 128)', '0.3', '3'],
+    ),
     limits: null,
     trainingParams: null,
     matchAliases: ['GLM-4.6V-FlashX'],
@@ -496,7 +481,7 @@ export const ZHIPU_BASELINE: BaselineModel[] = [
     limits: [
       { label: '输入', text: '单图 ≤ 10 MB;PDF ≤ 50 MB;最大支持 100 页', scope: null },
     ],
-    trainingParams: '0.9B',
+    trainingParams: { total: '0.9B', active: null },
     matchAliases: ['GLM-OCR'],
     matchSlugs: ['/guide/models/vlm/glm-ocr'],
     events: [
@@ -554,7 +539,7 @@ export const ZHIPU_BASELINE: BaselineModel[] = [
     ],
     pricing: price([{ text: '免费', scope: null }]),
     limits: ctx('128K', '32K'),
-    trainingParams: '9B',
+    trainingParams: { total: '9B', active: null },
     matchAliases: ['GLM-4.6V-Flash'],
     matchSlugs: ['/guide/models/free/glm-4.6v-flash'],
   },
@@ -890,7 +875,7 @@ export const ZHIPU_BASELINE: BaselineModel[] = [
     matchAliases: ['GLM-Z1'],
     matchSlugs: ['/guide/models/text/glm-z1'],
     events: [
-      { kind: 'api_available', occurredOn: '2025-04-14', title: 'GLM-Z1-AirX/Air/Flash 推理模型上线', sourceUrl: RELEASES_PAGE.url },
+      { kind: 'api_available', occurredOn: '2025-04-14', title: 'GLM-Z1-AirX/Air/Flash 推理模型上线', sourceUrl: DOC('/cn/guide/models/text/glm-z1') },
       { kind: 'retired', occurredOn: '2025-11-15', title: 'GLM-Z1 系列弃用生效', sourceUrl: OVERVIEW_PAGE.url },
     ],
   },

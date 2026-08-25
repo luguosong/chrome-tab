@@ -239,11 +239,23 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
     expect(m!.trainingParams).toBeNull()
   })
 
-  it('官方披露的训练参数量原样保留(GLM-5 744B / GLM-OCR 0.9B)', async () => {
+  it('官方披露的训练参数量结构化保留(MoE 总/激活分记,CONTEXT.md 口径)', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(''))
-    expect((await byId(svc, 'glm-5'))!.trainingParams).toBe('744B(激活 40B)')
-    expect((await byId(svc, 'glm-ocr'))!.trainingParams).toBe('0.9B')
+    expect((await byId(svc, 'glm-5'))!.trainingParams).toEqual({ total: '744B', active: '40B' })
+    expect((await byId(svc, 'glm-4.6v'))!.trainingParams).toEqual({ total: '106B', active: '12B' })
+    expect((await byId(svc, 'glm-ocr'))!.trainingParams).toEqual({ total: '0.9B', active: null })
+  })
+
+  it('历史去重(块链接路径):基线事件以块内文档链为信源时,同公告块不再产 updated', async () => {
+    // 场景:上游把 2025-04-14 合并块改写为 GLM-Z1 单模型块并链接其文档页——
+    // 基线 api_available 已占 (glm-z1, 2025-04-14, /text/glm-z1) 键,poll 跳过
+    const { db } = openDb(':memory:')
+    const md = `<Update label="2025-4-14" description="GLM-Z1 推理模型系列上线">\n[**GLM-Z1**](/cn/guide/models/text/glm-z1)\n</Update>`
+    const svc = await makeService(db, makeDeps(md))
+    await svc.pollZhipu()
+    const z1 = await byId(svc, 'glm-z1')
+    expect(z1!.events).toHaveLength(2) // 基线 api_available + retired,无 updated 混入
   })
 
   it('历史去重:基线已核验的公告,自动解析不再补「updated」重复行', async () => {

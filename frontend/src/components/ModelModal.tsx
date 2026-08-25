@@ -202,7 +202,11 @@ function ModelList({
                   </div>
                   <div>
                     <span className="text-white/40">训练参数</span>{' '}
-                    {m.trainingParams ?? '未知(官方未披露)'}
+                    {m.trainingParams
+                      ? m.trainingParams.active
+                        ? `${m.trainingParams.total}(激活 ${m.trainingParams.active})`
+                        : m.trainingParams.total
+                      : '未知(官方未披露)'}
                   </div>
                   {(() => {
                     const pricing = formatModelPricing(m.pricing)

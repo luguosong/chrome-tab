@@ -9,6 +9,7 @@ import type {
   ModelLimit,
   ModelPricing,
   ModelProviderId,
+  ModelTrainingParams,
   ReleaseStage,
   TrackedModel,
 } from 'chrome-tab-shared'
@@ -85,8 +86,8 @@ export interface BaselineModel {
   pricing: ModelPricing | null
   /** 官方限额(上下文/最大输出/输入大小等);未披露 → null。 */
   limits: ModelLimit[] | null
-  /** 官方披露的训练参数量原文;未披露 → null。 */
-  trainingParams: string | null
+  /** 官方披露的训练参数量(MoE 总/激活分别记录);未披露 → null。 */
+  trainingParams: ModelTrainingParams | null
   /**
    * 发布页块的归属判定(双条件,防上游张冠李戴——实测 GLM-Image 块误链 glm-4.7 文档页):
    * 描述含 alias 之一(词边界匹配,「GLM-4.7」不认领「GLM-4.7-Flash」的块)**且** 块内
@@ -106,11 +107,15 @@ function aliasIn(alias: string, description: string): boolean {
   return re.test(description)
 }
 
-/** slug 路径命中且尾部带边界(「…/glm-4」不认领「…/glm-4-long」)。 */
+/** slug 路径命中且尾部带边界(「…/glm-4」不认领「…/glm-4-long」「…/glm-4.x」)。 */
 function slugIn(slug: string, docUrl: string): boolean {
-  const re = new RegExp(`${slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`)
+  const re = new RegExp(`${slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.-])`)
   return re.test(docUrl)
 }
+
+/** 公告去重键(模型+日期+信源;init 取代删除与 poll 跳过共用,防两处拼串漂移)。 */
+const eventKey = (modelId: number, occurredOn: string, sourceUrl: string) =>
+  `${modelId}|${occurredOn}|${sourceUrl}`
 
 /**
  * 更新块 → (基线模型 officialId, 事件)。仅双条件匹配的块产事件,kind 恒 'updated'
@@ -161,36 +166,31 @@ export class ModelTrackingService {
    */
   async init(): Promise<void> {
     for (const b of ZHIPU_BASELINE) {
+      // profile 字段一处定义,insert 与 upsert 更新共用(新增字段只改这里)
+      const profile = {
+        name: b.name,
+        kind: b.kind,
+        stage: b.stage,
+        availability: JSON.stringify(b.availability),
+        summary: b.summary,
+        sources: JSON.stringify(b.sources),
+        pricing: b.pricing === null ? null : JSON.stringify(b.pricing),
+        limits: b.limits === null ? null : JSON.stringify(b.limits),
+        training_params: b.trainingParams === null ? null : JSON.stringify(b.trainingParams),
+      }
       const { id: modelId } = await this.db
         .insertInto('model_archive')
         .values({
           provider: b.provider,
           official_id: b.officialId,
-          name: b.name,
-          kind: b.kind,
-          stage: b.stage,
-          availability: JSON.stringify(b.availability),
-          summary: b.summary,
-          sources: JSON.stringify(b.sources),
-          pricing: b.pricing === null ? null : JSON.stringify(b.pricing),
-          limits: b.limits === null ? null : JSON.stringify(b.limits),
-          training_params: b.trainingParams,
+          ...profile,
           created_at: nowIso(),
           updated_at: nowIso(),
         })
         .onConflict((oc) =>
-          oc.columns(['provider', 'official_id']).doUpdateSet({
-            name: b.name,
-            kind: b.kind,
-            stage: b.stage,
-            availability: JSON.stringify(b.availability),
-            summary: b.summary,
-            sources: JSON.stringify(b.sources),
-            pricing: b.pricing === null ? null : JSON.stringify(b.pricing),
-            limits: b.limits === null ? null : JSON.stringify(b.limits),
-            training_params: b.trainingParams,
-            updated_at: nowIso(),
-          }),
+          oc
+            .columns(['provider', 'official_id'])
+            .doUpdateSet({ ...profile, updated_at: nowIso() }),
         )
         .returning('id')
         .executeTakeFirstOrThrow()
@@ -264,7 +264,7 @@ export class ModelTrackingService {
         sources: JSON.parse(r.sources) as TrackedModel['sources'],
         pricing: r.pricing === null ? null : (JSON.parse(r.pricing) as TrackedModel['pricing']),
         limits: r.limits === null ? null : (JSON.parse(r.limits) as TrackedModel['limits']),
-        trainingParams: r.training_params ?? null,
+        trainingParams: r.training_params === null ? null : (JSON.parse(r.training_params) as TrackedModel['trainingParams']),
         events: byModel.get(r.id) ?? [],
       })),
       sources: sources.map((s) => ({
@@ -304,13 +304,13 @@ export class ModelTrackingService {
         .selectFrom('model_events')
         .select(['model_id', 'occurred_on', 'source_url'])
         .execute()
-      const seen = new Set(existing.map((e) => `${e.model_id}|${e.occurred_on}|${e.source_url}`))
+      const seen = new Set(existing.map((e) => eventKey(e.model_id, e.occurred_on, e.source_url)))
       for (const u of updates) {
         const hit = matchZhipuEvent(u)
         if (!hit) continue
         const modelId = idOf.get(hit.officialId)
         if (modelId === undefined) continue
-        if (seen.has(`${modelId}|${hit.event.occurredOn}|${hit.event.sourceUrl}`)) continue
+        if (seen.has(eventKey(modelId, hit.event.occurredOn, hit.event.sourceUrl))) continue
         await this.db
           .insertInto('model_events')
           .values({
