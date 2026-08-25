@@ -83,16 +83,44 @@ export type WeatherBundle = {
 }
 
 /**
- * 和风天气状况图标,按 now.icon / alert.icon 直出。
- *
- * <p>历史用 {@code a.hecdn.net/img/common/icon/202106d/{code}.png}(浏览器直连官方 CDN),但该 CDN 在
- * 部分网络经代理/直连均不可达(TLS 握手失败 / 连接被拒)→ 图标裂图。改用 jsdelivr 上的官方开源图标包
- * {@code qweather-icons@1.8.0}(MIT,SVG,命名与 API code 一致),可达性好得多。</p>
- *
- * <p>彻底去外部依赖的做法是把这套 SVG 下到 {@code public/qweather-icons/} 自托管;若 jsdelivr 也不稳再这么做。</p>
+ * 和风 icon code → Meteocons 图标名。精确项覆盖昼夜与特殊现象;其余 3xx 归 rain、
+ * 4xx 归 snow、未知归 not-available(兜底逻辑在 {@link weatherIconUrl})。code 本身
+ * 带昼夜(100 晴 / 150 晴夜),映射天然区分昼夜,无需感知时间。
  */
-export const qweatherIconUrl = (code: string | null | undefined): string =>
-  code ? `https://cdn.jsdelivr.net/npm/qweather-icons@1.8.0/icons/${code}.svg` : ''
+const METEOCON: Record<string, string> = {
+  '100': 'clear-day', '150': 'clear-night',
+  '101': 'partly-cloudy-day', '151': 'partly-cloudy-night',
+  '102': 'partly-cloudy-day', '152': 'partly-cloudy-night',
+  '103': 'partly-cloudy-day', '153': 'partly-cloudy-night',
+  '104': 'cloudy',
+  '302': 'thunderstorms-day-rain', '303': 'thunderstorms-day-rain',
+  '304': 'hail',
+  '309': 'drizzle', '313': 'sleet',
+  '404': 'sleet', '405': 'sleet', '406': 'sleet', '456': 'sleet',
+  '500': 'mist', '501': 'fog', '509': 'fog', '510': 'fog',
+  '502': 'haze', '511': 'haze', '512': 'haze', '513': 'haze',
+  '503': 'dust', '504': 'dust', '507': 'dust-wind', '508': 'dust-wind',
+  '900': 'thermometer-warmer', '901': 'thermometer-colder',
+  '999': 'not-available',
+}
+
+/**
+ * 天气状况图标 URL,按 now.icon / h.icon / d.iconDay 经映射直出。三段演进:
+ * ①官方 CDN 彩色 PNG(a.hecdn.net)部分网络经代理/直连均不可达 → 裂图,弃;
+ * ②qweather-icons 单色线稿 + CSS invert(1) 反白(2026-08-25 前),但单色丢掉
+ * 「太阳黄/雨蓝/夜深蓝」的色相辨识,4 格小时序列 20px 级小图标纯形状辨识吃力;
+ * ③现用 Meteocons(basmilius/weather-icons@2.0.0,LGPL,fill 彩色版)——高明度配色
+ * 为深色天气 app 而设计,玻璃深底直用无滤镜;彩色 SVG 禁配 invert(会把亮黄反成紫)。
+ * 和风开源包(npm 与 qwd/Icons)从未有彩色版,官方彩色仅存于不可达的 a.hecdn.net,
+ * 彩色只能换体系并维护上面的映射。SVG 内嵌 45s 级 SMIL 微动画(光线缓旋),<img> 直引即活。
+ * 彻底去外部依赖的做法是把这套 SVG 下到 {@code public/meteocons/} 自托管;若 jsdelivr 也不稳再这么做。
+ */
+export function weatherIconUrl(code: string | null | undefined): string {
+  if (!code) return ''
+  const name =
+    METEOCON[code] ?? (code.startsWith('3') ? 'rain' : code.startsWith('4') ? 'snow' : 'not-available')
+  return `https://cdn.jsdelivr.net/gh/basmilius/weather-icons@2.0.0/production/fill/all/${name}.svg`
+}
 
 /** 经纬度 → /api/weather 的 location 参数与回查 key(发送与回查用同一串,确保命中)。 */
 export const locationKey = (loc: { lat: number; lon: number }): string => `${loc.lat},${loc.lon}`

@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import { useIconData } from '../context/IconDataContext'
-import { hourHM, locationKey, qweatherIconUrl, readWeatherLocation, type WeatherAir, type WeatherAlert, type WeatherDay, type WeatherHour, type WeatherNow } from '../lib/weather'
+import { hourHM, locationKey, weatherIconUrl, readWeatherLocation, type WeatherAir, type WeatherAlert, type WeatherDay, type WeatherHour, type WeatherNow } from '../lib/weather'
 import type { Icon } from '../lib/types'
 
 /**
@@ -142,9 +142,9 @@ function HourCell({ h }: { h: WeatherHour }) {
     <div className="flex flex-col items-center gap-1 shrink-0">
       <span className="text-xs text-white/60">{hourHM(h.fxTime)}</span>
       <img
-        src={qweatherIconUrl(h.icon)}
+        src={weatherIconUrl(h.icon)}
         alt={h.text}
-        style={{ width: 26, height: 26, filter: 'invert(1)' }}
+        style={{ width: 26, height: 26 }}
       />
       <span className="font-mono text-sm text-white/85">{h.temp}°</span>
     </div>
@@ -157,9 +157,9 @@ function DayRow({ d, label }: { d: WeatherDay; label: string }) {
     <div className="flex items-center gap-3 text-sm">
       <span className="w-12 shrink-0 text-white/70">{label}</span>
       <img
-        src={qweatherIconUrl(d.iconDay)}
+        src={weatherIconUrl(d.iconDay)}
         alt={d.textDay}
-        style={{ width: 22, height: 22, filter: 'invert(1)' }}
+        style={{ width: 22, height: 22 }}
       />
       <span className="flex-1 truncate text-white/70">{d.textDay}</span>
       <span className="font-mono text-white/85">
@@ -182,9 +182,9 @@ function NowBody({ now }: { now: WeatherNow }) {
     <div className="mb-4">
       <div className="flex items-center gap-3 mb-3">
         <img
-          src={qweatherIconUrl(now.icon)}
+          src={weatherIconUrl(now.icon)}
           alt={now.text}
-          style={{ width: 48, height: 48, filter: 'invert(1)' }}
+          style={{ width: 48, height: 48 }}
         />
         <span className="font-mono text-4xl text-white/90 leading-none">{now.temp}°</span>
         <span className="text-white/70 text-sm">{now.text}</span>

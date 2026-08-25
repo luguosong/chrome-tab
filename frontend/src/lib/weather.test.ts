@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hourlyWindow, type WeatherHour } from './weather'
+import { hourlyWindow, weatherIconUrl, type WeatherHour } from './weather'
 
 // hourlyWindow 是天气 3×1 图标小时序列的取窗口径(纯函数,注入 now 可直测,同 timeAgo 范式):
 // 后端 hourly 缓存 30min,过整点后短时间内首位仍是上一小时——按当前整点过滤滞留条目,
@@ -52,5 +52,23 @@ describe('hourlyWindow', () => {
 
   it('hourly 缺失(undefined)→ 空窗', () => {
     expect(hourlyWindow(undefined, NOW)).toEqual([])
+  })
+})
+
+// weatherIconUrl:和风 code → Meteocons 名,精确项 + 3xx/4xx 前缀兜底(未知 → not-available)。
+describe('weatherIconUrl', () => {
+  it('精确项:昼夜晴、雷雨、冻雨、未知', () => {
+    expect(weatherIconUrl('100')).toContain('/clear-day.svg')
+    expect(weatherIconUrl('150')).toContain('/clear-night.svg')
+    expect(weatherIconUrl('302')).toContain('/thunderstorms-day-rain.svg')
+    expect(weatherIconUrl('313')).toContain('/sleet.svg')
+    expect(weatherIconUrl('999')).toContain('/not-available.svg')
+  })
+
+  it('前缀兜底:3xx 归 rain、4xx 归 snow;空 code 空串', () => {
+    expect(weatherIconUrl('306')).toContain('/rain.svg')
+    expect(weatherIconUrl('401')).toContain('/snow.svg')
+    expect(weatherIconUrl('')).toBe('')
+    expect(weatherIconUrl(null)).toBe('')
   })
 })

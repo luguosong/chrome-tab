@@ -1,5 +1,5 @@
 import { useIconData } from '../context/IconDataContext'
-import { hourHM, hourlyWindow, locationKey, qweatherIconUrl, readWeatherLocation } from '../lib/weather'
+import { hourHM, hourlyWindow, locationKey, weatherIconUrl, readWeatherLocation } from '../lib/weather'
 import type { Icon } from '../lib/types'
 import Tile, { TilePrimary, TileSecondary } from './Tile'
 
@@ -7,7 +7,7 @@ import Tile, { TilePrimary, TileSecondary } from './Tile'
  * 天气图标的专属网格渲染(见 ADR-0009;3×1 跨格,首个非 3×2 跨格尺寸,CONTEXT.md「天气」):
  * 块内 = 小时序列横排 4 格(hourlyWindow 过滤缓存滞留条目,当前小时天然居首)——首格
  * 「现在」时间标签字色提亮区分(当前小时格即实况职责),其余格 HH:mm 直取 fxTime(同 Modal 口径,不做
- * 时区换算);每格 = 时间 + 状况图标(反色适配玻璃底)+ 温度。hourly 缺失/空窗 → 降级
+ * 时区换算);每格 = 时间 + 状况图标(Meteocons 彩色,深底直用无滤镜)+ 温度。hourly 缺失/空窗 → 降级
  * 实况摘要(图标 + 温度);实况也无 → ···。城市名行(多实例互区分的判据,取数失败也
  * 照常显示)= 这是什么;完整 24h/7d/空气/预警归详情 Modal(点块打开,detailEntry 缺省
  * 'block'——无滚动主体,不入 BigTile「更多」标头范式)。数据来自 IconDataContext 集中
@@ -36,11 +36,11 @@ export default function WeatherIconBody({ icon, overlay = false }: { icon: Icon;
               <TileSecondary className={'shrink-0 ' + (i === 0 ? 'text-white/90' : 'text-white/60')}>
                 {i === 0 ? '现在' : hourHM(h.fxTime)}
               </TileSecondary>
+              {/* Meteocons 彩色版直用无滤镜(单色时代靠 invert 反白,彩色禁配——见 weather.ts) */}
               <img
-                src={qweatherIconUrl(h.icon)}
+                src={weatherIconUrl(h.icon)}
                 alt={h.text}
                 className="flex-1 min-h-0 w-full object-contain"
-                style={{ filter: 'invert(1)' }}
               />
               <TilePrimary className="shrink-0 font-mono text-white/90">{h.temp}°</TilePrimary>
             </div>
@@ -49,10 +49,9 @@ export default function WeatherIconBody({ icon, overlay = false }: { icon: Icon;
       ) : now ? (
         <>
           <img
-            src={qweatherIconUrl(now.icon)}
+            src={weatherIconUrl(now.icon)}
             alt={now.text}
             className="w-[55%] h-[55%] object-contain"
-            style={{ filter: 'invert(1)' }}
           />
           <TilePrimary className="font-mono text-white/90">{now.temp}°</TilePrimary>
         </>
