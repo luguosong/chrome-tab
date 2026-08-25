@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getAlmanac } from '../lib/lunar'
+import { getCountdowns } from '../lib/countdown'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
+import CountdownEditModal from './CountdownEditModal'
 
 /** 生肖轮固定序(0=鼠)与地支序一一对应;本命年 = 农历年回退到该生肖最近年份 */
 const ZODIAC = '鼠牛虎兔龙蛇马羊猴鸡狗猪'.split('')
@@ -35,7 +37,8 @@ const XINGZUO = [
  *  触屏无 hover 由 title 兜底(完整宜忌/生肖本命年,项目既有模式)。
  *  DashboardPage 侧本组件 absolute 出流,搜索框位置与时钟高度解耦。 */
 export default function Clock() {
-  const { clockFont, clock24h } = useLayoutSettings()
+  const { clockFont, clock24h, importantDates } = useLayoutSettings()
+  const [editing, setEditing] = useState(false)
   const [now, setNow] = useState(() => new Date())
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 10_000) // 10s：分钟级精度足够
@@ -50,6 +53,8 @@ export default function Clock() {
   // 农历/宜忌按天重算:dep 是日期键而非 now,10s 心跳不触发
   const dayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`
   const almanac = useMemo(() => getAlmanac(now), [dayKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  // 倒计时同按天重算(CONTEXT.md「倒计时」);importantDates 引用随配置刷新
+  const countdowns = useMemo(() => getCountdowns(now, importantDates), [dayKey, importantDates]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="group relative select-none text-white">
       {/* 常显三行:text-shadow 收在内层,不随弹层继承 */}
@@ -72,6 +77,32 @@ export default function Clock() {
       {/* hover 展层:生肖轮 + 宜忌。opacity-0 时 pointer-events-none,不挡下方图标;
           显形后恢复,生肖 title(本命年)可触发。过渡 200ms 轻于 Modal pop-in 档。 */}
       <div className="absolute top-full left-0 z-10 mt-2 w-max max-w-[70vw] rounded-2xl glass-panel glass-panel-readable px-3 py-2 text-xs font-light text-white/90 opacity-0 translate-y-1 pointer-events-none transition duration-200 group-hover:opacity-100 group-hover:translate-y-0 group-hover:pointer-events-auto">
+        {/* 倒计时分区(CONTEXT.md「倒计时」):弹层最顶部——实用信息先于命理趣味。
+            空窗隐藏列表但保留一行入口,否则第一条无处可加;「编辑」开 CountdownEditModal。 */}
+        <div className="pb-1.5 mb-1.5 border-b border-white/10 space-y-0.5">
+          {countdowns.length === 0 ? (
+            <div className="text-white/50">暂无临近日子</div>
+          ) : (
+            countdowns.map((c) => (
+              <div key={c.key} className="flex justify-between gap-x-8">
+                <span className="text-white/70">{c.name}</span>
+                <span className="tabular-nums text-white/90">
+                  {c.days === 0 ? '今天' : c.days === 1 ? '明天' : `${c.days} 天`}
+                </span>
+              </div>
+            ))
+          )}
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="min-h-8 -mr-2 px-2 rounded-full text-white/45 hover:text-white/80 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
+            >
+              编辑
+            </button>
+          </div>
+        </div>
+
         <div className="flex gap-x-1.5">
           {ZODIAC.map((z, i) => {
             const cur = z === almanac.yearShengXiao
@@ -145,6 +176,8 @@ export default function Clock() {
           })}
         </div>
       </div>
+
+      {editing && <CountdownEditModal onClose={() => setEditing(false)} />}
     </div>
   )
 }

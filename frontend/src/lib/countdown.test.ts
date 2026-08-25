@@ -1,0 +1,103 @@
+import { describe, expect, it } from 'vitest'
+import { getCountdowns } from './countdown'
+import type { ImportantDate } from 'chrome-tab-shared'
+
+// 对拍基准:农历节日公历日期已用 lunar-typescript 实测核对(2026/2027 两年),
+// 浮动节日与公认公历核对(2026:复活节 4-5、母亲节 5-10、父亲节 6-21、感恩节 11-26)。
+// 断言变动 = 清单或算法变更,须人工复核。
+const user = (over: Partial<ImportantDate>): ImportantDate => ({
+  id: 'u1',
+  name: '测试日',
+  date: '2000-01-01',
+  calendar: 'solar',
+  repeat: 'annual',
+  ...over,
+})
+
+describe('getCountdowns 节假日', () => {
+  it('2026-09-01:中秋(9-25)24 天、国庆(10-1)恰 30 天入窗,升序;万圣节 60 天出窗', () => {
+    const items = getCountdowns(new Date(2026, 8, 1), [])
+    const names = items.map((i) => i.name)
+    expect(names).toEqual(['中秋', '国庆'])
+    expect(items[0]).toMatchObject({ days: 24, source: 'holiday' })
+    expect(items[1].days).toBe(30)
+  })
+
+  it('2026-08-26:中秋距 30 天恰入窗(边界含);2026-08-25 则 31 天恰出窗', () => {
+    expect(getCountdowns(new Date(2026, 7, 26), []).map((i) => i.name)).toEqual(['中秋'])
+    expect(getCountdowns(new Date(2026, 7, 25), [])).toEqual([])
+  })
+
+  it('2026-09-25 中秋当天:days=0(「今天」由 UI 措辞);国庆/重阳同窗随其后', () => {
+    const items = getCountdowns(new Date(2026, 8, 25), [])
+    expect(items.map((i) => i.name)).toEqual(['中秋', '国庆', '重阳'])
+    expect(items[0]).toMatchObject({ days: 0, source: 'holiday' })
+  })
+
+  it('2027-01-10:腊八(1-15)5 天、除夕(2-5)26 天、春节(2-6)27 天,升序', () => {
+    const items = getCountdowns(new Date(2027, 0, 10), [])
+    expect(items.map((i) => i.name)).toEqual(['腊八', '除夕', '春节'])
+    expect(items[1].days).toBe(26)
+  })
+
+  it('2026-04-01:清明与复活节同为 4-5(4 天);2026-11-01:感恩节 11-26 为 25 天', () => {
+    const april = getCountdowns(new Date(2026, 3, 1), [])
+    expect(april.filter((i) => i.name === '清明' || i.name === '复活节').every((i) => i.days === 4)).toBe(true)
+    const nov = getCountdowns(new Date(2026, 10, 1), [])
+    expect(nov.find((i) => i.name === '感恩节')?.days).toBe(25)
+    expect(nov.find((i) => i.name === '圣诞')).toBeUndefined() // 54 天,出窗
+  })
+
+  it('浮动节日锚点:2026 母亲节 5-10、父亲节 6-21;复活节 2027=3-28、2028=4-16', () => {
+    const may = getCountdowns(new Date(2026, 4, 1), [])
+    expect(may.find((i) => i.name === '母亲节')?.days).toBe(9)
+    expect(may.find((i) => i.name === '父亲节')).toBeUndefined() // 6-21 距 5-1 为 51 天,出窗
+    const jun = getCountdowns(new Date(2026, 5, 1), [])
+    expect(jun.find((i) => i.name === '父亲节')?.days).toBe(20)
+    const e27 = getCountdowns(new Date(2027, 2, 1), [])
+    expect(e27.find((i) => i.name === '复活节')?.days).toBe(27)
+    const e28 = getCountdowns(new Date(2028, 2, 20), [])
+    expect(e28.find((i) => i.name === '复活节')?.days).toBe(27)
+  })
+
+  it('年度滚年:2026-12-15 时元旦滚到 2027-01-01(17 天),非 2026-01-01', () => {
+    const items = getCountdowns(new Date(2026, 11, 15), [])
+    expect(items.find((i) => i.name === '元旦')?.days).toBe(17)
+  })
+})
+
+describe('getCountdowns 重要日子', () => {
+  it('公历 annual:今年未过取今年;已过滚次年(出窗即不显)', () => {
+    const birthday = user({ name: '生日', date: '1990-09-10' })
+    expect(getCountdowns(new Date(2026, 7, 25), [birthday])).toEqual([
+      expect.objectContaining({ name: '生日', days: 16, source: 'user' }),
+    ])
+    // 2026-09-11 时生日已过滚 2027-09-10(364 天出窗);中秋(9-25)等节假日照常在窗
+    const after = getCountdowns(new Date(2026, 8, 11), [birthday])
+    expect(after.filter((i) => i.source === 'user')).toEqual([])
+  })
+
+  it('农历 annual:按当年换算公历(2026 农历七月十四 = 08-26,明天)', () => {
+    const lunarBd = user({ name: '农历生日', date: '1990-07-14', calendar: 'lunar' })
+    expect(getCountdowns(new Date(2026, 7, 25), [lunarBd])).toEqual([
+      expect.objectContaining({ name: '农历生日', days: 1 }),
+    ])
+  })
+
+  it('once:未过期正常显示,过期即消失', () => {
+    const once = user({ name: '交房', date: '2026-09-05', repeat: 'once' })
+    expect(getCountdowns(new Date(2026, 7, 25), [once])[0].days).toBe(11)
+    const stale = getCountdowns(new Date(2026, 7, 26), [user({ name: '旧事', date: '2026-08-01', repeat: 'once' })])
+    expect(stale.find((i) => i.source === 'user')).toBeUndefined()
+  })
+
+  it('非法农历月日跳过不抛', () => {
+    const bad = user({ date: '2000-13-01', calendar: 'lunar' })
+    expect(getCountdowns(new Date(2026, 7, 25), [bad])).toEqual([])
+  })
+
+  it('与节假日混排:按剩余天数升序,不分来源', () => {
+    const items = getCountdowns(new Date(2026, 8, 20), [user({ name: '纪念日', date: '2000-09-23' })])
+    expect(items.map((i) => i.name)).toEqual(['纪念日', '中秋', '国庆', '重阳'])
+  })
+})

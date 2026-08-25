@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { AuthEnv } from './auth'
 import { BadRequest, touchVersion } from './common'
 import type { Db } from './db'
+import type { ImportantDate } from 'chrome-tab-shared'
 
 /**
  * 布局设置 upsert(api-contract §3):有行则改、无行则建;可空字段缺省落 LayoutLimits 默认
@@ -24,10 +25,14 @@ export const LAYOUT_DEFAULTS = {
   labelVisible: true,
   labelSize: 12,
   labelColor: '#ffffff',
+  importantDates: [] as ImportantDate[],
 } as const
 
-/** const 断言的字面量类型拓宽回基本型(默认值对象仅在缺省时使用,变量仍是宽类型)。 */
-type Widen<T> = { [K in keyof T]: T[K] extends boolean ? boolean : T[K] extends string ? string : number }
+/** const 断言的字面量类型拓宽回基本型(默认值对象仅在缺省时使用,变量仍是宽类型)。
+ *  非标量(如 ImportantDate[])原样保留——importantDates 例外地以结构值作默认。 */
+type Widen<T> = {
+  [K in keyof T]: T[K] extends boolean ? boolean : T[K] extends string ? string : T[K] extends number ? number : T[K]
+}
 type LayoutWire = Widen<typeof LAYOUT_DEFAULTS>
 
 /** layout_settings 行(0/1 整数)→ 14 字段 wire(布尔);无行时返回 defaults()。 */
@@ -49,6 +54,7 @@ export async function readLayout(db: Db, userId: number): Promise<LayoutWire> {
     labelVisible: !!row.label_visible,
     labelSize: row.label_size,
     labelColor: row.label_color,
+    importantDates: parseStoredDates(row.important_dates),
   }
 }
 
@@ -70,6 +76,7 @@ export async function updateLayout(db: Db, userId: number, body: Record<string, 
   const labelVisible = optBool(body, 'labelVisible', true)
   const labelSize = optInt(body, 'labelSize', 10, 16, LAYOUT_DEFAULTS.labelSize)
   const labelColor = optColor(body)
+  const importantDates = optDates(body)
 
   const values = {
     grid_width: gridWidth,
@@ -86,6 +93,7 @@ export async function updateLayout(db: Db, userId: number, body: Record<string, 
     label_visible: labelVisible ? 1 : 0,
     label_size: labelSize,
     label_color: labelColor,
+    important_dates: JSON.stringify(importantDates),
   }
   await db
     .insertInto('layout_settings')
@@ -137,6 +145,42 @@ function optBool(b: Record<string, unknown>, key: string, def: boolean): boolean
   if (v === undefined || v === null) return def
   if (typeof v !== 'boolean') throw new BadRequest(`${key}: 必须是布尔值`)
   return v
+}
+
+// ── 重要日子(ADR-0026 寄放布局设置;CONTEXT.md「重要日子」)──────────────────
+
+/** 存量行/坏 JSON 的读侧兜底:静默回落空列表(校验过的写入才会存进来)。 */
+function parseStoredDates(raw: string | null): ImportantDate[] {
+  if (!raw) return []
+  try {
+    const v: unknown = JSON.parse(raw)
+    return Array.isArray(v) ? (v as ImportantDate[]) : []
+  } catch {
+    return []
+  }
+}
+
+/** importantDates 可空字段:缺省 [];逐条结构校验(id/name 非空限长、date 形状、枚举),违例 400。 */
+function optDates(b: Record<string, unknown>): ImportantDate[] {
+  const v = b.importantDates
+  if (v === undefined || v === null) return []
+  if (!Array.isArray(v)) throw new BadRequest('importantDates: 必须是数组')
+  if (v.length > 100) throw new BadRequest('importantDates: 至多 100 条')
+  return v.map((it) => {
+    if (typeof it !== 'object' || it === null) throw new BadRequest('importantDates: 条目必须是对象')
+    const d = it as Record<string, unknown>
+    if (typeof d.id !== 'string' || !d.id || d.id.length > 64)
+      throw new BadRequest('importantDates.id: 非空字符串且 ≤64 字符')
+    if (typeof d.name !== 'string' || !d.name.trim() || d.name.length > 32)
+      throw new BadRequest('importantDates.name: 非空字符串且 ≤32 字符')
+    if (typeof d.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(d.date))
+      throw new BadRequest('importantDates.date: 须为 YYYY-MM-DD')
+    if (d.calendar !== 'solar' && d.calendar !== 'lunar')
+      throw new BadRequest('importantDates.calendar: 须为 solar 或 lunar')
+    if (d.repeat !== 'annual' && d.repeat !== 'once')
+      throw new BadRequest('importantDates.repeat: 须为 annual 或 once')
+    return { id: d.id, name: d.name, date: d.date, calendar: d.calendar, repeat: d.repeat }
+  })
 }
 
 function optEngine(b: Record<string, unknown>): string {

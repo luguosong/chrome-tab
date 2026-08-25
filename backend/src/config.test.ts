@@ -45,6 +45,7 @@ describe('GET /api/config', () => {
       searchBarWidth: 576, searchBarVisible: true, searchEngine: 'google',
       clockVisible: true, clockFont: 48, clock24h: true,
       labelVisible: true, labelSize: 12, labelColor: '#ffffff',
+      importantDates: [],
     })
     expect(typeof json.updatedAt).toBe('string')
     // 负向字段(test-align-map):顶层恰 4 字段,无旧 setting/navLinks;icon 无 ADR-0016 已删的 size
@@ -80,6 +81,7 @@ describe('PUT /api/layout-settings', () => {
       searchBarWidth: 800, searchBarVisible: false, searchEngine: 'bing',
       clockVisible: false, clockFont: 60, clock24h: false,
       labelVisible: false, labelSize: 14, labelColor: '#aAbBcC',
+      importantDates: [],
     })
     const after = (await (await req('GET', '/api/config', { cookie })).json()) as { updatedAt: string; layoutSettings: unknown }
     expect(after.updatedAt > before.updatedAt).toBe(true)
@@ -94,7 +96,35 @@ describe('PUT /api/layout-settings', () => {
       searchBarWidth: 576, searchBarVisible: true, searchEngine: 'google',
       clockVisible: true, clockFont: 48, clock24h: true,
       labelVisible: true, labelSize: 12, labelColor: '#ffffff',
+      importantDates: [],
     })
+  })
+
+  it('importantDates:合法列表往返、缺省补 []、非法条目 400(ADR-0026)', async () => {
+    const base = { gridWidth: 1024, gridGap: 8, iconScale: 1.5 }
+    const dates = [
+      { id: 'a1', name: '生日', date: '1990-08-15', calendar: 'lunar', repeat: 'annual' },
+      { id: 'b2', name: '交房', date: '2027-03-01', calendar: 'solar', repeat: 'once' },
+    ]
+    const ok = await req('PUT', '/api/layout-settings', { body: { ...base, importantDates: dates }, cookie })
+    expect(ok.status).toBe(200)
+    await expect(ok.json()).resolves.toMatchObject({ importantDates: dates })
+    const back = (await (await req('GET', '/api/config', { cookie })).json()) as {
+      layoutSettings: { importantDates: typeof dates }
+    }
+    expect(back.layoutSettings.importantDates).toEqual(dates)
+
+    for (const bad of [
+      'not-array',
+      [{ id: 'a', name: 'x', date: '1990-08-15', calendar: 'solar' }], // 缺 repeat
+      [{ id: 'a', name: 'x', date: '1990-8-15', calendar: 'solar', repeat: 'annual' }], // date 形状
+      [{ id: 'a', name: 'x', date: '1990-08-15', calendar: 'julian', repeat: 'annual' }],
+      [{ id: '', name: 'x', date: '1990-08-15', calendar: 'solar', repeat: 'annual' }], // 空 id
+      [{ id: 'a', name: 'x'.repeat(33), date: '1990-08-15', calendar: 'solar', repeat: 'annual' }], // 名超长
+      Array.from({ length: 101 }, (_, i) => ({ id: 'id' + i, name: 'x', date: '2000-01-01', calendar: 'solar', repeat: 'annual' })),
+    ]) {
+      await expectError(await req('PUT', '/api/layout-settings', { body: { ...base, importantDates: bad }, cookie }), 400)
+    }
   })
 
   it('400:必填缺失/超范围/非法枚举/坏色值', async () => {

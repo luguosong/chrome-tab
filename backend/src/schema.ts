@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS layout_settings (
     clock_24h         INTEGER NOT NULL DEFAULT 1,
     label_visible     INTEGER NOT NULL DEFAULT 1,
     label_size        INTEGER NOT NULL DEFAULT 12,
-    label_color       TEXT    NOT NULL DEFAULT '#ffffff'
+    label_color       TEXT    NOT NULL DEFAULT '#ffffff',
+    important_dates   TEXT
 );
 CREATE TABLE IF NOT EXISTS config_version (
     user_id     INTEGER PRIMARY KEY,
@@ -172,6 +173,8 @@ export function migrate(sqlite: SqliteConnection) {
     limits: 'TEXT',
     training_params: 'TEXT',
   })
+  // 「重要日子」寄放布局设置(ADR-0026):存量行 NULL,读侧兜底 []。
+  addMissingColumns(sqlite, 'layout_settings', { important_dates: 'TEXT' })
 }
 
 /**
@@ -231,6 +234,8 @@ export interface LayoutSettingsTable {
   label_visible: number
   label_size: number
   label_color: string
+  /** JSON 文本(ImportantDate[]);存量行 NULL(ADR-0026 加列)。 */
+  important_dates: string | null
 }
 
 export interface ConfigVersionTable {

@@ -31,6 +31,7 @@ export const DEFAULT_LAYOUT_SETTINGS: LayoutSettings = {
   labelVisible: true,
   labelSize: LAYOUT_LIMITS.labelSize.default,
   labelColor: '#ffffff',
+  importantDates: [],
 }
 
 /** 缺失字段补默认值;防御旧后端/旧备份缺新字段的过渡期(?? 只拦 null/undefined,0/false 保留)。 */
@@ -57,5 +58,6 @@ export function withDefaults(
     labelVisible: s?.labelVisible ?? true,
     labelSize: s?.labelSize ?? DEFAULT_LAYOUT_SETTINGS.labelSize,
     labelColor: s?.labelColor ?? '#ffffff',
+    importantDates: s?.importantDates ?? [],
   }
 }

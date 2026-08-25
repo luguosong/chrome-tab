@@ -155,6 +155,21 @@ export type ModelArchiveResponse = {
 export * from './changelogSources'
 
 /**
+ * 重要日期条目(CONTEXT.md「重要日子」,倒计时的用户配置数据源;寄放布局设置见
+ * ADR-0026)。date 为 YYYY-MM-DD 字面值,语义随 calendar/repeat:**annual 时年份
+ * 无意义**(每年按月日循环,农历按当年换算公历);once 为完整日期。农历日期即
+ * 用户输入的农历月日原样(如 1990-08-15 表示农历八月十五),闰月不区分。
+ */
+export type ImportantDate = {
+  id: string
+  name: string
+  /** YYYY-MM-DD;calendar='lunar' 时月日按农历解读。 */
+  date: string
+  calendar: 'solar' | 'lunar'
+  repeat: 'annual' | 'once'
+}
+
+/**
  * 布局设置(见 CONTEXT.md「布局设置」,五组):按用户持久化、跨设备共享。
  * 网格组与 8×8=64 格容量正交——只改像素几何,不改格子数。
  */
@@ -181,4 +196,6 @@ export type LayoutSettings = {
   labelVisible: boolean
   labelSize: number
   labelColor: string
+  /** 重要日子(寄放,ADR-0026;缺省 = 空列表,存量/旧客户端兼容)。 */
+  importantDates: ImportantDate[]
 }

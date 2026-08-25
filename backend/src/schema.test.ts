@@ -49,6 +49,7 @@ const LAYOUT_SETTINGS: Col[] = [
   ['label_visible', 'INTEGER', 1, '1', 0],
   ['label_size', 'INTEGER', 1, '12', 0],
   ['label_color', 'TEXT', 1, "'#ffffff'", 0],
+  ['important_dates', 'TEXT', 0, null, 0],
 ]
 const CONFIG_VERSION: Col[] = [
   ['user_id', 'INTEGER', 0, null, 1],
