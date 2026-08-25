@@ -1,0 +1,237 @@
+import { useEffect, useState } from 'react'
+import type { ModelProviderId, TrackedModel } from 'chrome-tab-shared'
+import { useModelArchive } from '../hooks/useModelArchive'
+import { timeAgo } from '../lib/timeAgo'
+import {
+  AVAILABILITY_LABELS,
+  EVENT_KIND_LABELS,
+  MODEL_KIND_LABELS,
+  PROVIDER_LABELS,
+  STAGE_LABELS,
+  isFreshModelEvent,
+  modelEventIso,
+} from '../lib/modelTracking'
+
+/**
+ * 模型追踪详情 Modal(见 CONTEXT.md「模型追踪」,ADR-0022「更多」标头唯一入口):
+ * 「全部」+ 各「跟踪厂家」tab(首片仅智谱,tab 随厂家票扩);模型行在**当前 Modal 内
+ * 就地展开**(基本资料/动态时间线/原始信源,不套第二层 Modal),24h 新动态行首红点
+ * (时间驱动,无已读概念)。信源失败保留最后成功结果并标记陈旧(CONTEXT.md「模型
+ * 档案」)——头部给一行陈旧提示。容器:fixed 遮罩 + 居中玻璃面板;Esc/点遮罩关闭,
+ * tab 为 TodoModal 同款下划线式。
+ */
+/** tab 维度 = 全部 + 各跟踪厂家(自 PROVIDER_LABELS 派生,厂家票扩 shared 时 tab 随动)。 */
+type Tab = 'all' | ModelProviderId
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'all', label: '全部' },
+  ...(Object.keys(PROVIDER_LABELS) as ModelProviderId[]).map((p) => ({
+    key: p,
+    label: PROVIDER_LABELS[p],
+  })),
+]
+
+export default function ModelModal({ onClose }: { onClose: () => void }) {
+  const { data, isError, refetch, isFetching } = useModelArchive()
+  const [tab, setTab] = useState<Tab>('all')
+  /** 就地展开的模型行(同时只开一行,展开/收起即点击行头)。 */
+  const [expandedId, setExpandedId] = useState<number | null>(null)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const staleSources = (data?.sources ?? []).filter((s) => s.stale)
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="模型追踪"
+    >
+      <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
+
+      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6 max-h-[80vh] overflow-y-auto modal-scroll animate-pop-in">
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="关闭"
+          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center"
+        >
+          ×
+        </button>
+
+        <div className="mb-3">
+          <div className="text-lg text-white/90">模型追踪</div>
+          <div className="text-xs text-white/50">AI 模型档案与动态(官方一手信源)</div>
+        </div>
+
+        <div role="tablist" aria-label="模型追踪视图" className="flex gap-4 border-b border-white/10 mb-2">
+          {TABS.map(({ key, label }) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={tab === key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={
+                'pb-1.5 -mb-px text-sm border-b-2 transition ' +
+                (tab === key
+                  ? 'text-accent border-accent'
+                  : 'text-white/60 border-transparent hover:text-white/85')
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {isError ? (
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-white/60">档案刷新失败</span>
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              disabled={isFetching}
+              className="border border-white/30 text-white/80 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent disabled:opacity-50"
+            >
+              刷新失败,重试
+            </button>
+          </div>
+        ) : data === undefined ? (
+          <div className="text-xs text-white/40 py-6 text-center">加载中…</div>
+        ) : (
+          <>
+            {/* 陈旧标记(CONTEXT.md「模型档案」):单信源失败保留最后成功结果 */}
+            {staleSources.length > 0 && (
+              <div className="text-[11px] text-white/50 py-1.5">
+                {staleSources
+                  .map((s) => {
+                    const at = s.lastSuccessAt ? `更新于 ${timeAgo(s.lastSuccessAt)}` : '尚未成功同步'
+                    return `${PROVIDER_LABELS[s.provider]}源同步失败,展示最近数据(${at})`
+                  })
+                  .join('；')}
+              </div>
+            )}
+            <ModelList
+              models={data.models.filter((m) => tab === 'all' || m.provider === tab)}
+              expandedId={expandedId}
+              onToggle={(id) => setExpandedId((cur) => (cur === id ? null : id))}
+            />
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** 模型行列表:行头(名称 + 厂家 + 种类·阶段·开放方式 + 最近动态)点击就地展开。 */
+function ModelList({
+  models,
+  expandedId,
+  onToggle,
+}: {
+  models: TrackedModel[]
+  expandedId: number | null
+  onToggle: (id: number) => void
+}) {
+  if (models.length === 0) {
+    return <div className="text-sm text-white/50 py-6 text-center">暂无跟踪模型</div>
+  }
+  return (
+    <ul className="space-y-1">
+      {models.map((m) => {
+        const open = expandedId === m.id
+        const latest = m.events[0]
+        return (
+          <li key={m.id} className="rounded-xl transition">
+            <button
+              type="button"
+              aria-expanded={open}
+              onClick={() => onToggle(m.id)}
+              className="w-full text-left rounded-xl px-3 py-2.5 hover:bg-white/10 transition"
+            >
+              <span className="flex items-baseline justify-between gap-3 min-w-0">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  {latest && isFreshModelEvent(latest.occurredOn) && (
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" aria-hidden="true" />
+                  )}
+                  <span className="truncate text-sm text-white/90">{m.name}</span>
+                  {m.stage === 'retired' && (
+                    <span className="shrink-0 rounded-full bg-white/15 px-1.5 py-0.5 text-[11px] text-white/55">
+                      已退役
+                    </span>
+                  )}
+                </span>
+                <span className="shrink-0 text-[11px] text-white/50">
+                  {PROVIDER_LABELS[m.provider]}
+                  <span className="ml-1.5" aria-hidden="true">
+                    {open ? '▾' : '▸'}
+                  </span>
+                </span>
+              </span>
+              <span className="mt-0.5 flex items-baseline justify-between gap-3 min-w-0 text-[11px] text-white/50">
+                <span className="min-w-0 truncate">
+                  {MODEL_KIND_LABELS[m.kind]} · {STAGE_LABELS[m.stage]} ·{' '}
+                  {m.availability.map((a) => AVAILABILITY_LABELS[a]).join('/')}
+                </span>
+                {latest && (
+                  <span className="shrink-0">
+                    {EVENT_KIND_LABELS[latest.kind]} ·{' '}
+                    {timeAgo(modelEventIso(latest.occurredOn)) || latest.occurredOn}
+                  </span>
+                )}
+              </span>
+            </button>
+            {open && (
+              <div className="px-3 pb-2.5 pt-0.5 space-y-2">
+                {m.summary && (
+                  <p className="text-[13px] text-white/65 leading-relaxed">{m.summary}</p>
+                )}
+                <div className="text-[11px] text-white/50 flex items-center gap-2 flex-wrap">
+                  <span className="text-white/40">信源</span>
+                  {m.sources.map((s) => (
+                    <a
+                      key={s.url}
+                      href={s.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline underline-offset-2 hover:text-accent"
+                    >
+                      {s.title}
+                    </a>
+                  ))}
+                </div>
+                {m.events.length > 0 ? (
+                  <ul className="space-y-1 border-t border-white/10 pt-1.5">
+                    {m.events.map((e) => (
+                      <li key={e.id} className="flex items-baseline gap-2 text-[12px]">
+                        <span className="shrink-0 font-mono text-white/40">{e.occurredOn}</span>
+                        <span className="shrink-0 text-white/50">{EVENT_KIND_LABELS[e.kind]}</span>
+                        <a
+                          href={e.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="min-w-0 flex-1 truncate text-white/80 hover:text-accent"
+                          title={e.title}
+                        >
+                          {e.title}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="text-[11px] text-white/40">暂无动态</div>
+                )}
+              </div>
+            )}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}

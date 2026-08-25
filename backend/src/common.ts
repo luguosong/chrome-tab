@@ -57,6 +57,21 @@ export const str = (m: Rec, k: string): string | null => {
   return v === undefined || v === null ? null : String(v)
 }
 
+/**
+ * 上游文本抓取(超时防挂起,ADR-0017;status/body 挂错误上供调用方分类)。
+ * changelog/videoUpdates/modelTracking 三处同形,自第三处起收归共享。
+ */
+export async function fetchText(url: string, timeoutMs: number, init?: RequestInit): Promise<string> {
+  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+  if (!res.ok) {
+    throw Object.assign(new Error(`${init?.method ?? 'GET'} ${url} → HTTP ${res.status}`), {
+      status: res.status,
+      body: (await res.text()).slice(0, 200),
+    })
+  }
+  return res.text()
+}
+
 /** config_version bump(ADR-0006):upsert 当前用户版本为 now。必须在写事务末尾调用,与配置写原子。 */
 export async function touchVersion(db: Db, userId: number): Promise<void> {
   const now = new Date().toISOString()

@@ -230,3 +230,24 @@ describe('AI 热点类型 aihot(单例,CONTEXT.md「AI 热点」)', () => {
     expect(editor.map((f) => f.name)).toEqual(['name'])
   })
 })
+
+describe('模型追踪类型 model(单例,issues/01;CONTEXT.md「模型追踪」)', () => {
+  it('登记为扩展、单例、detail=modal、「更多」标头唯一入口(ADR-0022)', () => {
+    expect(get('model')?.label).toBe('模型追踪')
+    expect(get('model')?.kind).toBe('extension')
+    expect(get('model')?.singleton).toBe(true)
+    expect(get('model')?.detail).toBe('modal')
+    expect(get('model')?.detailEntry).toBe('header')
+  })
+
+  it('固定占 3×2 跨格(ADR-0021);无实例参数(单例,data 无字段)', () => {
+    expect(get('model')?.size).toEqual({ w: 3, h: 2 })
+    expect(iconCells('model')).toBe(6)
+    expect(get('model')?.editor).toEqual([])
+  })
+
+  it('单例:不存在时允许,已存在时拒绝(新增抽屉置灰的判据)', () => {
+    expect(canAdd('model', ['nav', 'aihot'])).toBe(true)
+    expect(canAdd('model', ['nav', 'model'])).toBe(false)
+  })
+})

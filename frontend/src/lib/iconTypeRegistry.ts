@@ -33,8 +33,8 @@ export type EditorField =
 
 /** 刷新配置(spec §刷新策略):hook key + 间隔(ms)。0 = 不刷新。 */
 export type RefreshConfig = {
-  /** 'quotes' = useQuotes 轮询(60s); 'changelog' = useChangelog staleTime(1h); 'weather' = useWeather(后端缓存 10/30/5min); 'aihot' = useAiHot 自持(后端缓存 300s,单例不入集中层); 'todo' = useTodo 自持(后端缓存 60s,单例不入集中层); 'video' = useVideoFeed 自持(后端 1h 轮询预取,前端 staleTime 5min,单例不入集中层); 'none' = 不刷新。 */
-  kind: 'quotes' | 'changelog' | 'weather' | 'aihot' | 'todo' | 'video' | 'none'
+  /** 'quotes' = useQuotes 轮询(60s); 'changelog' = useChangelog staleTime(1h); 'weather' = useWeather(后端缓存 10/30/5min); 'aihot' = useAiHot 自持(后端缓存 300s,单例不入集中层); 'todo' = useTodo 自持(后端缓存 60s,单例不入集中层); 'video' = useVideoFeed 自持(后端 1h 轮询预取,前端 staleTime 5min,单例不入集中层); 'model' = useModelArchive 自持(后端 6h 轮询持久档案,前端 staleTime 5min,单例不入集中层); 'none' = 不刷新。 */
+  kind: 'quotes' | 'changelog' | 'weather' | 'aihot' | 'todo' | 'video' | 'model' | 'none'
 }
 
 /** 实时摘要数据(见 summarize 注释:ADR-0001 契约字段,当前无网格消费方)。 */
@@ -262,6 +262,24 @@ export const VIDEO_DEF: IconTypeDefinition = {
   summarize: () => null, // 网格渲染走专属 VideoIconBody,契约字段无消费方(同 nav/aihot/todo)
 }
 
+/** 模型追踪:扩展类型,单例(见 CONTEXT.md「模型追踪」——档案全局共享,实例无可绑参数)。
+ *  data 无字段;3×2 大 tile(块内滚动展示跟踪模型:名称 + 厂家 + 种类·阶段·开放方式 +
+ *  最近动态时间,24h 新动态红点),详情 Modal(「全部」+ 各厂家 tab,模型行就地展开
+ *  基本资料/动态时间线/原始信源,不套第二层 Modal),「更多」标头唯一入口(ADR-0022)。
+ *  数据 = 后端全局持久档案 + 6h 轮询(ADR-0025),前端只读、hook 自持(同 aihot/todo/video)。 */
+export const MODEL_DEF: IconTypeDefinition = {
+  id: 'model',
+  label: '模型追踪',
+  kind: 'extension',
+  singleton: true,
+  refresh: { kind: 'model' },
+  detail: 'modal',
+  size: { w: 3, h: 2 },
+  detailEntry: 'header',
+  editor: [],
+  summarize: () => null, // 网格渲染走专属 ModelIconBody,契约字段无消费方(同 nav/aihot/todo/video)
+}
+
 /**
  * 分组(ADR-0011):iOS 文件夹式收纳容器(块内成员 favicon 3×2 迷你预览,ADR-0015)。
  * kind='group' 不属于 base/extension 任一分区,
@@ -288,4 +306,5 @@ register('weather', WEATHER_DEF)
 register('aihot', AIHOT_DEF)
 register('todo', TODO_DEF)
 register('video', VIDEO_DEF)
+register('model', MODEL_DEF)
 register('group', GROUP_DEF)

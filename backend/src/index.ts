@@ -8,6 +8,7 @@ import { dailyBackup } from './backup'
 import { ChangelogService, prodChangelogDeps, startChangelogScheduler, type ChangelogServices } from './changelog'
 import { openDb } from './db'
 import { bootstrap } from './seed'
+import { ModelTrackingService, prodModelDeps, startModelTrackingScheduler } from './modelTracking'
 import { VideoUpdatesService, prodVideoDeps, startVideoUpdatesScheduler } from './videoUpdates'
 
 const dbPath = process.env.DB_PATH ?? 'data/newtab.db'
@@ -31,6 +32,10 @@ const changelog = Object.fromEntries(
 ) as ChangelogServices
 // 和风天气(ADR-0009):Key/个人专用主机走环境变量、不入库;缺省未配置 → 端点 500
 const videoUpdatesService = new VideoUpdatesService(db, prodVideoDeps())
+// 模型追踪(CONTEXT.md「模型追踪」,issues/01):init 同步完成基线入档(本地写,毫秒级),
+// 首轮取数异步进行——失败照陈旧口径降级,基线数据已保证 tile 即有内容
+const modelTrackingService = new ModelTrackingService(db, prodModelDeps())
+await modelTrackingService.init()
 const app = createApp({
   db,
   cookieSecure,
@@ -43,6 +48,7 @@ const app = createApp({
   dida: { token: process.env.DIDA365_TOKEN ?? '' },
   // 视频更新(CONTEXT.md「视频更新」):凭据 env 注入,两键均可缺省(降级见 videoUpdates.ts)
   videoUpdates: videoUpdatesService,
+  modelTracking: modelTrackingService,
 })
 
 const port = Number(process.env.PORT ?? 8080)
@@ -51,6 +57,8 @@ serve({ fetch: app.fetch, port }, (info) => console.log(`backend listening on :$
 startChangelogScheduler(Object.values(changelog))
 // 视频更新 1h 轮询(spec:非整点错开整点请求高峰;库即真相,无启动预热步骤)
 startVideoUpdatesScheduler(videoUpdatesService)
+// 模型追踪 6h 轮询(研究 §6;失败保留库内档案并标记陈旧,下轮即重试)
+startModelTrackingScheduler(modelTrackingService)
 
 // 每日 03:17(UTC):WAL checkpoint + 过期 session 清理 + VACUUM INTO 备份(票 09;恢复 = 拷回文件)
 schedule('17 3 * * *', async () => {

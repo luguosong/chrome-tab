@@ -46,6 +46,79 @@ export type VideoBlogger = {
   status: 'ok' | 'failing'
 }
 
+/**
+ * 模型追踪 wire 契约(CONTEXT.md「模型追踪/跟踪模型/模型档案」等;全局持久档案,
+ * ADR-0025)。occurredOn 为 YYYY-MM-DD——信源只有日期粒度(智谱发布页 Update label),
+ * 24h 红点窗口按北京时间零点锚定在前端推导(见 frontend lib/modelTracking.ts)。
+ * 首片(issues/01)只跟踪智谱文本模型;ModelProviderId 随后续厂家票扩。
+ */
+export type ModelProviderId = 'zhipu'
+
+/** 模型种类(CONTEXT.md「模型种类」,八类;与发布阶段/开放方式正交)。 */
+export type ModelKind =
+  | 'text'
+  | 'multimodal_understanding'
+  | 'image_generation'
+  | 'video_generation'
+  | 'audio_speech'
+  | 'embedding'
+  | 'rerank'
+  | 'moderation_classification'
+
+/** 发布阶段(CONTEXT.md「发布阶段」)。 */
+export type ReleaseStage = 'experimental' | 'preview' | 'beta' | 'ga' | 'deprecated' | 'retired'
+
+/** 开放方式(CONTEXT.md「开放方式」;同一模型可多选)。 */
+export type AvailabilityMode = 'api' | 'first_party_app' | 'open_weights'
+
+/** 模型动态类型(CONTEXT.md「模型动态」;自动解析只产 updated,语义化类型留给人工核验基线)。 */
+export type ModelEventKind =
+  | 'released'
+  | 'api_available'
+  | 'first_party_available'
+  | 'weights_available'
+  | 'updated'
+  | 'deprecated'
+  | 'retired'
+
+export type ModelEvent = {
+  id: number
+  kind: ModelEventKind
+  /** YYYY-MM-DD(信源日期粒度)。 */
+  occurredOn: string
+  title: string
+  sourceUrl: string
+}
+
+export type TrackedModel = {
+  id: number
+  provider: ModelProviderId
+  /** 上游官方模型 ID/家族(如 glm-5.3);移动别名与日期快照不另立模型。 */
+  officialId: string
+  name: string
+  kind: ModelKind
+  stage: ReleaseStage
+  availability: AvailabilityMode[]
+  summary: string | null
+  /** 基本资料的原始信源(模型文档页等)。 */
+  sources: Array<{ title: string; url: string }>
+  events: ModelEvent[]
+}
+
+/** 信源取数状态:失败保留最后成功结果并标记陈旧(CONTEXT.md「模型档案」)。 */
+export type ModelSourceStatus = {
+  provider: ModelProviderId
+  stale: boolean
+  /** 最近一次成功取数(ISO);null = 尚未成功过(档案为人工核验基线)。 */
+  lastSuccessAt: string | null
+}
+
+/** GET /api/model-tracking/archive 信封。 */
+export type ModelArchiveResponse = {
+  models: TrackedModel[]
+  sources: ModelSourceStatus[]
+}
+
 export * from './changelogSources'
 
 /**

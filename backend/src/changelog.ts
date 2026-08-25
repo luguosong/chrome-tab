@@ -8,6 +8,7 @@ import {
 } from 'chrome-tab-shared'
 import type { Db } from './db'
 import type { AuthEnv } from './auth'
+import { fetchText } from './common'
 
 /**
  * 更新日志译制代理(ADR-0005/0016/0017,语义照搬 Java changelog 模块;多源化见 ADR-0020)。
@@ -300,17 +301,7 @@ const SYSTEM_PROMPT = `你是专业技术译者。把用户给出的 CHANGELOG m
 4. 不要翻译：版本号（如 1.2.3）、代码片段内容、URL、命令名、配置键名。
 5. 通用技术术语（Claude Code、API、token、hook 等）可保留原文或按惯例中译。`
 
-async function fetchText(url: string, timeoutMs: number, init?: RequestInit): Promise<string> {
-  // 超时防挂起(ADR-0017):外呼挂死会让定时预取永不返回;LLM 单候选 60s(慢模型换下一候选,不再干等)
-  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
-  if (!res.ok)
-    // status/body 挂错误上:调用方据此分类(free 候选链按 403/404/no_available_channel/超时 换下一个)
-    throw Object.assign(new Error(`${init?.method ?? 'GET'} ${url} → HTTP ${res.status}`), {
-      status: res.status,
-      body: (await res.text()).slice(0, 200),
-    })
-  return res.text()
-}
+// fetchText 已收归 common.ts(changelog/videoUpdates/modelTracking 三处同形)
 
 /** 从 OpenAI 兼容响应取 choices[0].message.content;任何畸形形态返回 null(调用方据此降级英文)。 */
 export function extractContent(resp: unknown): string | null {

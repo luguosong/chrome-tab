@@ -13,6 +13,7 @@ export type IconTypeId =
   | 'aihot'
   | 'todo'
   | 'video'
+  | 'model'
   | 'group'
 
 /** 走马灯一屏:图标的容器(见 CONTEXT.md「页面」)。 */

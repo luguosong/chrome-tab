@@ -6,7 +6,7 @@ import type { VideoBlogger, VideoCategory, VideoFeedItem } from 'chrome-tab-shar
 import { TtlCache } from './common'
 import type { Db } from './db'
 import type { AuthEnv } from './auth'
-import { BadRequest, ConflictError, numericParam } from './common'
+import { BadRequest, ConflictError, fetchText, numericParam } from './common'
 
 /**
  * 视频更新(博主投稿跟踪,CONTEXT.md「视频更新/博主/分类」;ADR-0023/0024)。
@@ -769,28 +769,16 @@ export function videoUpdatesRoutes(service: VideoUpdatesService): Hono<AuthEnv> 
 
 // ---- 生产协作器 ----
 
-/** 上游文本抓取(复制自 changelog.ts fetchText:第二处同形,照 common.ts TtlCache 注释口径,第三处再提取)。 */
-async function prodFetchText(url: string, timeoutMs: number, init?: RequestInit): Promise<string> {
-  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
-  if (!res.ok) {
-    throw Object.assign(new Error(`${init?.method ?? 'GET'} ${url} → HTTP ${res.status}`), {
-      status: res.status,
-      body: (await res.text()).slice(0, 200),
-    })
-  }
-  return res.text()
-}
-
 export function prodVideoDeps(env: NodeJS.ProcessEnv = process.env): VideoDeps {
   // wbi key 按日更替:12h 缓存保证最坏半天内换新(签名错误典型 -352/-412,下轮重取自愈)
   const wbiCache = new TtlCache<string>()
   return {
-    fetchText: prodFetchText,
+    fetchText,
     getMixinKey: async () => {
       const cached = wbiCache.get('mixin')
       if (cached) return cached
       const json = JSON.parse(
-        await prodFetchText('https://api.bilibili.com/x/web-interface/nav', 15_000, {
+        await fetchText('https://api.bilibili.com/x/web-interface/nav', 15_000, {
           headers: { 'user-agent': BILI_UA },
         }),
       ) as { data?: { wbi_img?: { img_url?: string; sub_url?: string } } }

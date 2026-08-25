@@ -123,6 +123,42 @@ CREATE TABLE IF NOT EXISTS videos (
     FOREIGN KEY (blogger_id) REFERENCES video_bloggers(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_videos_blogger_pub ON videos (blogger_id, published_at DESC);
+-- 模型追踪(CONTEXT.md「模型追踪/模型档案」;ADR-0025):三表全为**全局**数据,无 user_id——
+-- 档案对所有用户共享(区别于 video_* 的账号级)。模型档案行来自代码内人工核验基线
+-- (idempotent upsert,部署即刷新 profile 字段);模型动态来自厂家发布页确定性解析
+-- (去重键 = 模型 + 类型 + 日期 + 信源,ON CONFLICT 幂等);occurred_on 为日期文本。
+CREATE TABLE IF NOT EXISTS model_archive (
+    id           INTEGER PRIMARY KEY,
+    provider     TEXT NOT NULL,
+    official_id  TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    stage        TEXT NOT NULL,
+    availability TEXT NOT NULL,
+    summary      TEXT,
+    sources      TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    UNIQUE (provider, official_id)
+);
+CREATE TABLE IF NOT EXISTS model_events (
+    id          INTEGER PRIMARY KEY,
+    model_id    INTEGER NOT NULL,
+    kind        TEXT NOT NULL,
+    occurred_on TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    source_url  TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    UNIQUE (model_id, kind, occurred_on, source_url),
+    FOREIGN KEY (model_id) REFERENCES model_archive(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_model_events_model ON model_events (model_id, occurred_on DESC);
+CREATE TABLE IF NOT EXISTS model_fetch_status (
+    provider        TEXT PRIMARY KEY NOT NULL,
+    stale           INTEGER NOT NULL DEFAULT 0,
+    last_success_at TEXT,
+    last_attempt_at TEXT
+);
 `
 
 /** openDb 打开连接后即执行;幂等(IF NOT EXISTS)。 */
@@ -234,6 +270,39 @@ export interface VideosTable {
   created_at: string
 }
 
+export interface ModelArchiveTable {
+  id: Generated<number>
+  provider: string
+  official_id: string
+  name: string
+  kind: string
+  stage: string
+  /** JSON 数组文本(应用层序列化,同 icons.data 约定)。 */
+  availability: string
+  summary: string | null
+  /** JSON 数组文本([{title,url}])。 */
+  sources: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ModelEventsTable {
+  id: Generated<number>
+  model_id: number
+  kind: string
+  occurred_on: string
+  title: string
+  source_url: string
+  created_at: string
+}
+
+export interface ModelFetchStatusTable {
+  provider: string
+  stale: number
+  last_success_at: string | null
+  last_attempt_at: string | null
+}
+
 export interface SchemaDatabase {
   users: UsersTable
   pages: PagesTable
@@ -246,4 +315,7 @@ export interface SchemaDatabase {
   video_categories: VideoCategoriesTable
   video_bloggers: VideoBloggersTable
   videos: VideosTable
+  model_archive: ModelArchiveTable
+  model_events: ModelEventsTable
+  model_fetch_status: ModelFetchStatusTable
 }

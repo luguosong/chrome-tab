@@ -99,6 +99,34 @@ const VIDEOS: Col[] = [
   ['published_at', 'INTEGER', 1, null, 0],
   ['created_at', 'TEXT', 1, null, 0],
 ]
+const MODEL_ARCHIVE: Col[] = [
+  ['id', 'INTEGER', 0, null, 1],
+  ['provider', 'TEXT', 1, null, 0],
+  ['official_id', 'TEXT', 1, null, 0],
+  ['name', 'TEXT', 1, null, 0],
+  ['kind', 'TEXT', 1, null, 0],
+  ['stage', 'TEXT', 1, null, 0],
+  ['availability', 'TEXT', 1, null, 0],
+  ['summary', 'TEXT', 0, null, 0],
+  ['sources', 'TEXT', 1, null, 0],
+  ['created_at', 'TEXT', 1, null, 0],
+  ['updated_at', 'TEXT', 1, null, 0],
+]
+const MODEL_EVENTS: Col[] = [
+  ['id', 'INTEGER', 0, null, 1],
+  ['model_id', 'INTEGER', 1, null, 0],
+  ['kind', 'TEXT', 1, null, 0],
+  ['occurred_on', 'TEXT', 1, null, 0],
+  ['title', 'TEXT', 1, null, 0],
+  ['source_url', 'TEXT', 1, null, 0],
+  ['created_at', 'TEXT', 1, null, 0],
+]
+const MODEL_FETCH_STATUS: Col[] = [
+  ['provider', 'TEXT', 1, null, 1],
+  ['stale', 'INTEGER', 1, '0', 0],
+  ['last_success_at', 'TEXT', 0, null, 0],
+  ['last_attempt_at', 'TEXT', 0, null, 0],
+]
 
 // openDb(':memory:') 已含 migrate;每个 describe 用新库,互不串数据
 function fresh() {
@@ -114,7 +142,7 @@ function tableCount(sqlite: Database): number {
   return (sqlite.prepare("SELECT count(*) c FROM sqlite_master WHERE type='table'").get() as { c: number }).c
 }
 
-describe('schema:11 张表结构(research/03 骨架 + sessions + 视频更新三表)', () => {
+describe('schema:14 张表结构(research/03 骨架 + sessions + 视频更新三表 + 模型追踪三表)', () => {
   const sqlite = fresh()
 
   it.each([
@@ -129,6 +157,9 @@ describe('schema:11 张表结构(research/03 骨架 + sessions + 视频更新三
     ['video_categories', VIDEO_CATEGORIES],
     ['video_bloggers', VIDEO_BLOGGERS],
     ['videos', VIDEOS],
+    ['model_archive', MODEL_ARCHIVE],
+    ['model_events', MODEL_EVENTS],
+    ['model_fetch_status', MODEL_FETCH_STATUS],
   ] as const)('%s', (table, expected) => {
     expect(cols(sqlite, table)).toEqual(expected)
   })
@@ -141,8 +172,8 @@ describe('schema:11 张表结构(research/03 骨架 + sessions + 视频更新三
     expect((sqlite.pragma('index_list(pages)') as { name: string }[]).map((i) => i.name)).toEqual(['idx_page_user'])
   })
 
-  it('全库恰 11 张表', () => {
-    expect(tableCount(sqlite)).toBe(11)
+  it('全库恰 14 张表', () => {
+    expect(tableCount(sqlite)).toBe(14)
   })
 })
 
@@ -211,6 +242,6 @@ describe('schema:建表幂等', () => {
       migrate(sqlite)
       migrate(sqlite)
     }).not.toThrow()
-    expect(tableCount(sqlite)).toBe(11)
+    expect(tableCount(sqlite)).toBe(14)
   })
 })
