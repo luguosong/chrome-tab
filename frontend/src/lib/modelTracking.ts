@@ -47,13 +47,16 @@ export const EVENT_KIND_LABELS: Record<ModelEventKind, string> = {
   first_party_available: '产品可用',
   weights_available: '权重开放',
   updated: '更新',
+  alias_repointed: '别名换指向',
   deprecated: '弃用预告',
   retired: '退役',
 }
 
-/** 厂家展示名(详情 Modal 的 tab 与行内厂家位共用)。 */
+/** 厂家展示名(详情 Modal 的 tab 与行内厂家位共用;tab 随厂家票扩自动派生)。 */
 export const PROVIDER_LABELS: Record<ModelProviderId, string> = {
   zhipu: '智谱',
+  anthropic: 'Anthropic',
+  xai: 'xAI',
 }
 
 /**

@@ -17,16 +17,20 @@ import { fetchText } from './common'
 import type { Db } from './db'
 import type { AuthEnv } from './auth'
 import { ZHIPU_BASELINE } from './zhipuBaseline'
+import { ANTHROPIC_BASELINE } from './anthropicBaseline'
+import { XAI_BASELINE } from './xaiBaseline'
 
 /**
  * 模型追踪(CONTEXT.md「模型追踪/跟踪模型/模型档案」;ADR-0025):全局单例图标的
  * 后端档案。与「AI 热点」的易失代理相反、与「视频更新」同为持久化轮询,但**无
  * user_id**——档案对所有用户共享,单个信源失败保留最后成功结果并标记陈旧
- * (model_fetch_status)。三段分工(研究 §6):**档案行(基本资料)只来自代码内
- * 人工核验基线**,部署即幂等 upsert 刷新;**模型动态来自厂家发布页确定性解析**
- * (智谱新品发布 Markdown 的 `<Update label description>` 块,日期粒度、按
- * 模型+类型+日期+信源去重);解析器**不认识**的更新块(基线外型号,含智谱平台
- * 托管的第三方模型)只作待核验线索跳过——待基线人工核验后纳入,这是「跟踪厂家」
+ * (model_fetch_status,按厂家隔离)。三段分工(研究 §6):**档案行(基本资料)只来自
+ * 代码内人工核验基线**,部署即幂等 upsert 刷新;**模型动态来自各厂家主发布源确定性
+ * 解析**(智谱新品发布 Markdown 的 `<Update label description>` 块、Anthropic
+ * release notes 的 `### 日期` 段内条目、xAI 发布流的 `## 月份`/`### 条目` 段——仅月
+ * 份粒度、事件锚定当月 1 日;按模型+类型+日期+信源去重);解析器
+ * **不认识**的更新块(基线外型号,含智谱平台托管的第三方模型、Anthropic 仅限受邀
+ * 项目的 Mythos 系列)只作待核验线索跳过——待基线人工核验后纳入,这是「跟踪厂家」
  * 的定义性约束(不开放任意厂家/信源配置,理由见 ADR-0025)。
  */
 
@@ -89,21 +93,184 @@ export interface BaselineModel {
   /** 官方披露的训练参数量(MoE 总/激活分别记录);未披露 → null。 */
   trainingParams: ModelTrainingParams | null
   /**
-   * 发布页块的归属判定(双条件,防上游张冠李戴——实测 GLM-Image 块误链 glm-4.7 文档页):
-   * 描述含 alias 之一(词边界匹配,「GLM-4.7」不认领「GLM-4.7-Flash」的块)**且** 块内
-   * 链接路径含 slug 之一(路径尾边界,「…/glm-4」不认领「…/glm-4-long」)。链接缺失 → 跳过。
+   * 发布页块的归属判定:alias 词边界匹配是共用底座(「GLM-4.7」不认领「GLM-4.7-Flash」
+   * 的块)。智谱/Anthropic 再加链接 slug 双条件(防上游张冠李戴——实测 GLM-Image 块误链
+   * glm-4.7 文档页);xAI 只用标题 alias(条目标题即官方条目名,见 matchXaiEvent)。
    */
   matchAliases: string[]
-  matchSlugs: string[]
+  /** 智谱/Anthropic 双条件的链接半边(路径尾边界,「…/glm-4」不认领「…/glm-4-long」);xAI 行省略。 */
+  matchSlugs?: string[]
   /** 人工核验的历史动态(官方发布页/弃用表口径);幂等入库,同键自动解析 'updated' 事件被其取代。 */
   events?: Array<Omit<ModelEvent, 'id'>>
 }
 
-export { ZHIPU_BASELINE }
+export { ZHIPU_BASELINE, ANTHROPIC_BASELINE, XAI_BASELINE }
 
-/** alias 词边界命中:前后不得是 [A-Za-z0-9_.-](「GLM-4.7」≠「GLM-4.7-FlashX」;中文不算边界内字符)。 */
+/** 全部厂家基线(init 幂等 upsert 的单一遍历源;新厂家票 = 基线文件 + 追加于此)。 */
+const ALL_BASELINES: BaselineModel[] = [...ZHIPU_BASELINE, ...ANTHROPIC_BASELINE, ...XAI_BASELINE]
+
+// ---- Anthropic release notes 解析(研究 §3:主发布源;页面混有 SDK/平台功能条目,
+//  须按明确模型名/ID 过滤——与智谱同用双条件归属)----
+
+/** Anthropic release notes 一个条目(解析后的统一形态)。 */
+export interface AnthropicNote {
+  /** YYYY-MM-DD(日期标题归一化后,含 'October 3rd, 2024' 式序数后缀)。 */
+  date: string
+  /** 条目 Markdown 原文(链接文本/URL 一并保留,alias 在原文上词边界匹配)。 */
+  text: string
+  /** 条目内链接 URL(按出现序)。 */
+  links: string[]
+}
+
+const MONTHS: Record<string, string> = {
+  January: '01', February: '02', March: '03', April: '04', May: '05', June: '06',
+  July: '07', August: '08', September: '09', October: '10', November: '11', December: '12',
+}
+
+/** 'August 5, 2026' / 'October 3rd, 2024' → '2026-08-05' / '2024-10-03';非法 → null。 */
+export function normalizeAnthropicDate(raw: string): string | null {
+  const m = /^([A-Z][a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,\s*(\d{4})$/.exec(raw.trim())
+  if (!m) return null
+  const [, mon, day, y] = m
+  const mo = MONTHS[mon!]
+  if (mo === undefined) return null
+  const d = Number(day)
+  const date = new Date(Date.UTC(Number(y), Number(mo) - 1, d))
+  if (date.getUTCMonth() !== Number(mo) - 1 || date.getUTCDate() !== d) return null
+  return `${y}-${mo}-${String(d).padStart(2, '0')}`
+}
+
+/** Anthropic release notes Markdown → 条目数组。按 `### 日期标题` 分段(段名即信源日期),
+ *  段内行首 `* ` 逐条提取文本与 `[label](url)` 链接;畸形日期段与空段跳过。 */
+export function parseAnthropicReleases(md: string): AnthropicNote[] {
+  const out: AnthropicNote[] = []
+  const headings = [...md.matchAll(/^### (.+)$/gm)]
+  for (let i = 0; i < headings.length; i++) {
+    const date = normalizeAnthropicDate(headings[i]![1]!)
+    if (date === null) continue
+    const body = md.slice(headings[i]!.index! + headings[i]![0].length, headings[i + 1]?.index)
+    for (const line of body.split('\n')) {
+      if (!line.startsWith('* ')) continue
+      const text = line.slice(2)
+      const links = [...text.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)].map((m) => m[1]!)
+      out.push({ date, text, links })
+    }
+  }
+  return out
+}
+
+/** 条目标题:首个英文句子的截断形态(release notes 条目无短标题,首句即最接近的概述)。 */
+function anthropicNoteTitle(text: string): string {
+  const firstSentence = text.split('. ')[0]!
+  return firstSentence.length > 160 ? `${firstSentence.slice(0, 157)}…` : firstSentence
+}
+
+/**
+ * release notes 条目 → (基线模型 officialId, 事件)。双条件归属与智谱同构:条目原文含
+ * 基线 alias(词边界;「Claude Opus 4」不认领「Claude Opus 4.8」的条目)**且** 条目内
+ * 存在链接命中基线 slug(路径尾边界)——SDK/平台功能条目与基线外型号(Mythos 等)因此
+ * 天然跳过。kind 恒 'updated',与基线事件同 (模型,日期,信源) 的条目由 poll 跳过。
+ */
+export function matchAnthropicEvent(n: AnthropicNote): { officialId: string; event: Omit<ModelEvent, 'id'> } | null {
+  for (const b of ANTHROPIC_BASELINE) {
+    const aliasHit = b.matchAliases.some((a) => aliasIn(a, n.text))
+    const link = n.links.find((u) => (b.matchSlugs ?? []).some((s) => slugIn(s, u)))
+    if (aliasHit && link) {
+      return {
+        officialId: b.officialId,
+        event: { kind: 'updated', occurredOn: n.date, title: anthropicNoteTitle(n.text), sourceUrl: link },
+      }
+    }
+  }
+  return null
+}
+
+// ---- xAI 发布流解析(研究 §3:主发布源;`## 月份` 标题仅月份粒度,条目 `### ` 自带标题)----
+
+/** xAI 发布流一个条目(解析后的统一形态)。 */
+export interface XaiReleaseEntry {
+  /** YYYY-MM(信源只有月份粒度;事件锚定当月 1 日)。 */
+  yearMonth: string
+  /** 条目标题(`### ` 行原文,即官方条目名——归属匹配只用标题,见 matchXaiEvent)。 */
+  title: string
+  /** 正文首个链接(相对路径已归一为绝对);无 → null。 */
+  linkUrl: string | null
+}
+
+/**
+ * xAI 发布流 Markdown → 条目数组。`## <Month>[ <YYYY>]` 月份标题分段、段内 `### ` 条目
+ * 逐个提取标题与正文首个链接。当年月份标题**不带年份**(2026-08-25 实抓口径),首个带
+ * 年份标题之前按 currentYear(生产传当年,测试传固定值保持确定性)、其后依显式年份。
+ * 非月份 `##` 段下的条目跳过;月份段之前的散条目跳过。
+ */
+export function parseXaiReleaseNotes(md: string, currentYear: number = new Date().getFullYear()): XaiReleaseEntry[] {
+  const out: XaiReleaseEntry[] = []
+  let year: number | null = null
+  let yearMonth: string | null = null
+  let title: string | null = null
+  let body: string[] = []
+  const flush = () => {
+    if (yearMonth !== null && title !== null) {
+      const link = /\[[^\]]*\]\(([^)\s]+)\)/.exec(body.join('\n'))?.[1]
+      out.push({
+        yearMonth,
+        title,
+        linkUrl: link ? (link.startsWith('/') ? `https://docs.x.ai${link}` : link) : null,
+      })
+    }
+    title = null
+    body = []
+  }
+  for (const line of md.split('\n')) {
+    const month = /^## ([A-Z][a-z]+)(?: (\d{4}))?$/.exec(line)
+    if (month) {
+      flush()
+      const mo = MONTHS[month[1]!]
+      if (mo === undefined) {
+        yearMonth = null
+        continue
+      }
+      if (month[2] !== undefined) year = Number(month[2])
+      yearMonth = `${year ?? currentYear}-${mo}`
+      continue
+    }
+    if (line.startsWith('### ')) {
+      flush()
+      title = line.slice(4).trim()
+      continue
+    }
+    if (title !== null) body.push(line)
+  }
+  flush()
+  return out
+}
+
+/**
+ * 发布流条目 → 基线模型命中数组(**可为多个**:家族条目「Grok 4.20 and Grok 4.20
+ * Multi-agent are live」同时命中两行)。归属只用标题词边界——xAI 条目标题即官方条目
+ * 名、自证归属,与智谱/Anthropic 的双条件不同(其正文链接常指向能力文档而非模型页,
+ * 不能作 slug 证据)。kind 恒 'updated',occurredOn 锚定当月 1 日(信源月份粒度);
+ * 与基线事件同 (模型,日期,信源) 的条目由 poll 跳过。
+ */
+export function matchXaiEvent(e: XaiReleaseEntry): Array<{ officialId: string; event: Omit<ModelEvent, 'id'> }> {
+  const out: Array<{ officialId: string; event: Omit<ModelEvent, 'id'> }> = []
+  for (const b of XAI_BASELINE) {
+    if (!b.matchAliases.some((a) => aliasIn(a, e.title))) continue
+    out.push({
+      officialId: b.officialId,
+      event: { kind: 'updated', occurredOn: `${e.yearMonth}-01`, title: e.title, sourceUrl: e.linkUrl ?? XAI_RELEASES_URL },
+    })
+  }
+  return out
+}
+
+/**
+ * alias 词边界命中:前不得是 [A-Za-z0-9_.-];后不得是标识符延续(单词字符、连字符,
+ * 或「.」后跟单词字符——版本号下一段)。「4.8.」这类英文句尾句点不算延续(Anthropic
+ * 条目为英文句子,「Claude Opus 4.8. See…」须命中);中文不算边界内字符。
+ */
 function aliasIn(alias: string, description: string): boolean {
-  const re = new RegExp(`(?<![\\w.-])${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.-])`)
+  const re = new RegExp(`(?<![\\w.-])${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-]|\\.\\w)`)
   return re.test(description)
 }
 
@@ -117,6 +284,11 @@ function slugIn(slug: string, docUrl: string): boolean {
 const eventKey = (modelId: number, occurredOn: string, sourceUrl: string) =>
   `${modelId}|${occurredOn}|${sourceUrl}`
 
+/** Array.filter 的非空收窄便利(matchXxxEvent 可能返回 null——基线外/双条件不满足)。 */
+function nonNull<T>(x: T | null): x is T {
+  return x !== null
+}
+
 /**
  * 更新块 → (基线模型 officialId, 事件)。仅双条件匹配的块产事件,kind 恒 'updated'
  * (自动解析不猜语义化事件类型;api_available 等语义类型只出自人工核验基线 events)。
@@ -127,7 +299,7 @@ export function matchZhipuEvent(u: ZhipuUpdate): { officialId: string; event: Om
   if (docUrl === null) return null // 无链接无法核验归属 → 待核验线索,不生成动态
   for (const b of ZHIPU_BASELINE) {
     const aliasHit = b.matchAliases.some((a) => aliasIn(a, u.description))
-    const slugHit = b.matchSlugs.some((s) => slugIn(s, docUrl))
+    const slugHit = (b.matchSlugs ?? []).some((s) => slugIn(s, docUrl))
     if (aliasHit && slugHit) {
       const event: Omit<ModelEvent, 'id'> = {
         kind: 'updated',
@@ -148,7 +320,11 @@ export interface ModelTrackingDeps {
 }
 
 /** 智谱新品发布页(主发布源,研究 §3)。 */
-const ZHIPU_RELEASES_URL = 'https://docs.bigmodel.cn/cn/update/new-releases.md'
+export const ZHIPU_RELEASES_URL = 'https://docs.bigmodel.cn/cn/update/new-releases.md'
+/** Anthropic Claude Platform release notes(主发布源,研究 §3)。 */
+export const ANTHROPIC_RELEASES_URL = 'https://platform.claude.com/docs/en/release-notes/overview.md'
+/** xAI 发布流(主发布源,研究 §3;公共缓存约 1 小时,轮询节奏 6h 不短于缓存)。 */
+export const XAI_RELEASES_URL = 'https://docs.x.ai/developers/release-notes.md'
 
 const nowIso = () => new Date().toISOString()
 
@@ -165,7 +341,7 @@ export class ModelTrackingService {
    * 启动,失败照陈旧口径降级——基线数据已在库,tile 即有内容)。
    */
   async init(): Promise<void> {
-    for (const b of ZHIPU_BASELINE) {
+    for (const b of ALL_BASELINES) {
       // profile 字段一处定义,insert 与 upsert 更新共用(新增字段只改这里)
       const profile = {
         name: b.name,
@@ -275,65 +451,108 @@ export class ModelTrackingService {
     }
   }
 
-  /** cron 入口:失败只记日志(6h 节奏即天然重试,禁密集重试,同 videoUpdates 口径)。 */
+  /** cron 入口:失败只记日志(6h 节奏即天然重试,禁密集重试,同 videoUpdates 口径);
+   *  各厂家独立 catch——单家失败不影响另一家本轮取数。 */
   pollQuietly(): void {
     void this.pollZhipu().catch((e) => console.error('模型追踪(智谱)取数失败:', e))
+    void this.pollAnthropic().catch((e) => console.error('模型追踪(Anthropic)取数失败:', e))
+    void this.pollXai().catch((e) => console.error('模型追踪(xAI)取数失败:', e))
   }
 
   /**
-   * 智谱一轮:发布页 → 匹配基线 → 事件幂等入库(去重键 = UNIQUE(model_id,kind,
-   * occurred_on,source_url),研究 §6.6)→ 信源标记成功。已有**任意类型**事件占住同
-   * (模型,日期,信源) 的公告跳过——人工核验基线事件(api_available 等)在库时,自动
-   * 解析不再为同一公告补 'updated' 重复行。失败口径覆盖两类:fetch 抛错,与「取到 200
-   * 但一个结构化块都解析不出」——后者即上游改版(确定性解析的主要失效面),同样标记
-   * 陈旧、保留库内最后成功结果,不静默清零。
+   * 匹配后的事件幂等入库(两家 poll 共用):去重键 = UNIQUE(model_id,kind,occurred_on,
+   * source_url),研究 §6.6。已有**任意类型**事件占住同 (模型,日期,信源) 的公告跳过
+   * ——人工核验基线事件(api_available 等)在库时,自动解析不再为同一公告补 'updated'
+   * 重复行。
    */
-  async pollZhipu(): Promise<void> {
+  private async ingest(
+    provider: ModelProviderId,
+    hits: Array<{ officialId: string; event: Omit<ModelEvent, 'id'> }>,
+  ): Promise<void> {
+    const archive = await this.db
+      .selectFrom('model_archive')
+      .select(['id', 'official_id'])
+      .where('provider', '=', provider)
+      .execute()
+    const idOf = new Map(archive.map((r) => [r.official_id, r.id]))
+    // 已入库公告键(模型+日期+信源,类型无关)——基线事件已覆盖的不再自动入库
+    const existing = await this.db
+      .selectFrom('model_events')
+      .select(['model_id', 'occurred_on', 'source_url'])
+      .execute()
+    const seen = new Set(existing.map((e) => eventKey(e.model_id, e.occurred_on, e.source_url)))
+    for (const hit of hits) {
+      const modelId = idOf.get(hit.officialId)
+      if (modelId === undefined) continue
+      if (seen.has(eventKey(modelId, hit.event.occurredOn, hit.event.sourceUrl))) continue
+      await this.db
+        .insertInto('model_events')
+        .values({
+          model_id: modelId,
+          kind: hit.event.kind,
+          occurred_on: hit.event.occurredOn,
+          title: hit.event.title,
+          source_url: hit.event.sourceUrl,
+          created_at: nowIso(),
+        })
+        .onConflict((oc) =>
+          oc
+            .columns(['model_id', 'kind', 'occurred_on', 'source_url'])
+            .doNothing(),
+        )
+        .execute()
+    }
+  }
+
+  /**
+   * 一轮取数的公共失败口径(fetch 抛错与「200 但零结构化条目」= 上游改版,均抛错标
+   * 陈旧、保留库内最后成功结果,不静默清零;markSource 自身失败不吞原始错误——极端:
+   * DB 写挂,原始信源错误更值得上抛/记日志)。结构差异(解析器/匹配器)由调用方闭合,
+   * 返回 null 即「解析不出任何结构化条目」。
+   */
+  private async pollOne(
+    provider: ModelProviderId,
+    url: string,
+    parseAndMatch: (md: string) => Array<{ officialId: string; event: Omit<ModelEvent, 'id'> }> | null,
+  ): Promise<void> {
     try {
-      const md = await this.deps.fetchText(ZHIPU_RELEASES_URL, 30_000)
-      const updates = parseZhipuReleases(md)
-      if (updates.length === 0) throw new Error('发布页无结构化更新块(疑似上游改版)')
-      const archive = await this.db
-        .selectFrom('model_archive')
-        .select(['id', 'official_id'])
-        .where('provider', '=', 'zhipu')
-        .execute()
-      const idOf = new Map(archive.map((r) => [r.official_id, r.id]))
-      // 已入库公告键(模型+日期+信源,类型无关)——基线事件已覆盖的不再自动入库
-      const existing = await this.db
-        .selectFrom('model_events')
-        .select(['model_id', 'occurred_on', 'source_url'])
-        .execute()
-      const seen = new Set(existing.map((e) => eventKey(e.model_id, e.occurred_on, e.source_url)))
-      for (const u of updates) {
-        const hit = matchZhipuEvent(u)
-        if (!hit) continue
-        const modelId = idOf.get(hit.officialId)
-        if (modelId === undefined) continue
-        if (seen.has(eventKey(modelId, hit.event.occurredOn, hit.event.sourceUrl))) continue
-        await this.db
-          .insertInto('model_events')
-          .values({
-            model_id: modelId,
-            kind: hit.event.kind,
-            occurred_on: hit.event.occurredOn,
-            title: hit.event.title,
-            source_url: hit.event.sourceUrl,
-            created_at: nowIso(),
-          })
-          .onConflict((oc) =>
-            oc
-              .columns(['model_id', 'kind', 'occurred_on', 'source_url'])
-              .doNothing(),
-          )
-          .execute()
-      }
-      await this.markSource('zhipu', true)
+      const md = await this.deps.fetchText(url, 30_000)
+      const hits = parseAndMatch(md)
+      if (hits === null) throw new Error('发布源无结构化条目(疑似上游改版)')
+      await this.ingest(provider, hits)
+      await this.markSource(provider, true)
     } catch (e) {
-      // markSource 自身失败不吞原始错误(极端:DB 写挂,原始信源错误更值得上抛/记日志)
-      await this.markSource('zhipu', false).catch(() => {})
+      await this.markSource(provider, false).catch(() => {})
       throw e
     }
+  }
+
+  /** 智谱一轮:发布页 `<Update>` 块 → 双条件匹配基线(零块 = 上游改版,同 pollOne 口径)。 */
+  async pollZhipu(): Promise<void> {
+    await this.pollOne('zhipu', ZHIPU_RELEASES_URL, (md) => {
+      const updates = parseZhipuReleases(md)
+      return updates.length === 0
+        ? null
+        : updates.map(matchZhipuEvent).filter(nonNull)
+    })
+  }
+
+  /** Anthropic 一轮:release notes `### 日期` 段条目 → 双条件匹配基线(零段 = 上游改版)。 */
+  async pollAnthropic(): Promise<void> {
+    await this.pollOne('anthropic', ANTHROPIC_RELEASES_URL, (md) => {
+      const notes = parseAnthropicReleases(md)
+      return notes.length === 0
+        ? null
+        : notes.map(matchAnthropicEvent).filter(nonNull)
+    })
+  }
+
+  /** xAI 一轮:发布流 `## 月份`/`### 条目` → 标题匹配基线(零条目 = 上游改版)。 */
+  async pollXai(): Promise<void> {
+    await this.pollOne('xai', XAI_RELEASES_URL, (md) => {
+      const entries = parseXaiReleaseNotes(md)
+      return entries.length === 0 ? null : entries.flatMap(matchXaiEvent)
+    })
   }
 
   private async markSource(provider: ModelProviderId, ok: boolean): Promise<void> {

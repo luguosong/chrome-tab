@@ -48,11 +48,13 @@ export type VideoBlogger = {
 
 /**
  * 模型追踪 wire 契约(CONTEXT.md「模型追踪/跟踪模型/模型档案」等;全局持久档案,
- * ADR-0025)。occurredOn 为 YYYY-MM-DD——信源只有日期粒度(智谱发布页 Update label),
+ * ADR-0025)。occurredOn 为 YYYY-MM-DD——信源粒度随厂家(智谱发布页 Update label 与
+ * Anthropic release notes 日期标题到日;xAI 发布流仅月份标题,事件锚定当月 1 日),
  * 24h 红点窗口按北京时间零点锚定在前端推导(见 frontend lib/modelTracking.ts)。
- * issues/01 贯通智谱文本首片;issues/02 补齐智谱八类全量档案;ModelProviderId 随后续厂家票扩。
+ * issues/01 贯通智谱文本首片;issues/02 补齐智谱八类全量档案;issues/04 接入
+ * Anthropic;issues/05 接入 xAI;ModelProviderId 随后续厂家票扩。
  */
-export type ModelProviderId = 'zhipu'
+export type ModelProviderId = 'zhipu' | 'anthropic' | 'xai'
 
 /** 模型种类(CONTEXT.md「模型种类」,八类;与发布阶段/开放方式正交)。 */
 export type ModelKind =
@@ -71,13 +73,14 @@ export type ReleaseStage = 'experimental' | 'preview' | 'beta' | 'ga' | 'depreca
 /** 开放方式(CONTEXT.md「开放方式」;同一模型可多选)。 */
 export type AvailabilityMode = 'api' | 'first_party_app' | 'open_weights'
 
-/** 模型动态类型(CONTEXT.md「模型动态」;自动解析只产 updated,语义化类型留给人工核验基线)。 */
+/** 模型动态类型(CONTEXT.md「模型动态」;自动解析只产 updated,语义化类型留给人工核验基线;alias_repointed = 移动别名/退役 ID 换指向,随 issues/05 xAI 引入)。 */
 export type ModelEventKind =
   | 'released'
   | 'api_available'
   | 'first_party_available'
   | 'weights_available'
   | 'updated'
+  | 'alias_repointed'
   | 'deprecated'
   | 'retired'
 

@@ -5,21 +5,32 @@ import { createApp } from './app'
 import { bootstrap } from './seed'
 import { openDb, type Db } from './db'
 import {
+  ANTHROPIC_BASELINE,
+  ANTHROPIC_RELEASES_URL,
   ModelTrackingService,
+  XAI_BASELINE,
+  XAI_RELEASES_URL,
   ZHIPU_BASELINE,
+  ZHIPU_RELEASES_URL,
+  matchAnthropicEvent,
+  matchXaiEvent,
   matchZhipuEvent,
+  normalizeAnthropicDate,
   normalizeZhipuDate,
+  parseAnthropicReleases,
+  parseXaiReleaseNotes,
   parseZhipuReleases,
   type ModelTrackingDeps,
 } from './modelTracking'
 
 /**
  * 模型追踪自动检查(issues/01:单例/占格、持久化、陈旧降级 + 鉴权;issues/02:八类
- * 映射、厂家归属、历史去重、多事件保留、退役排序、详情缺省值)。IO 全经
+ * 映射、厂家归属、历史去重、多事件保留、退役排序、详情缺省值;issues/04:Anthropic
+ * 解析/归属、固定快照识别、外部模型排除、退役保留、双厂家隔离)。IO 全经
  * ModelTrackingDeps 注入假实现,零真网(videoUpdates 红线)。
  */
 
-/** 发布页快照节选(2026-08-25 实抓口径:label 不补零、相对/绝对链接混用;含第三方 Vidu 块)。 */
+/** 智谱发布页快照节选(2026-08-25 实抓口径:label 不补零、相对/绝对链接混用;含第三方 Vidu 块)。 */
 const ZHIPU_MD = `# 新品发布
 
 <Update label="2026-8-19" description="GLM-5.3 新一代旗舰模型上线">
@@ -55,8 +66,90 @@ const ZHIPU_MD = `# 新品发布
 </Update>
 `
 
-function makeDeps(md: string): ModelTrackingDeps {
-  return { fetchText: async () => md }
+/**
+ * Anthropic release notes 快照节选(2026-08-25 实抓口径:`### 日期` 段 + `* ` 条目;
+ * 混有 SDK/平台功能、fast mode、Mythos(基线外)与弃用公告——正是双条件归属要过滤的噪音)。
+ */
+const ANTHROPIC_MD = `# Claude Platform release notes
+
+### August 20, 2026
+
+* We've released **v1.0 of the [Python SDK](https://platform.claude.com/docs/en/cli-sdks-libraries/sdks/python)**. The SDK's HTTP layer moves from httpx to httpx2.
+
+### July 24, 2026
+
+* We've launched **Claude Opus 5** (\`claude-opus-5\`), a step-change improvement over Claude Opus 4.8. See [What's new in Claude Opus 5](https://platform.claude.com/docs/en/models/opus-5/whats-new-opus-5) for new features and migration guidance.
+
+* We've removed [fast mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode#supported-models) for Claude Opus 4.7. To continue using fast mode, migrate to [Claude Opus 5](https://platform.claude.com/docs/en/about-claude/models/migration-guide#migrating-from-claude-opus-47).
+
+### June 9, 2026
+
+* We've launched **Claude Fable 5** (\`claude-fable-5\`), our most capable widely released model, alongside **Claude Mythos 5** (\`claude-mythos-5\`) for Project Glasswing participants. See [Introducing Claude Fable 5 and Claude Mythos 5](https://platform.claude.com/docs/en/models/fable-5/introducing-claude-fable-5-and-claude-mythos-5) for capabilities.
+
+### June 5, 2026
+
+* We announced the deprecation of the Claude Opus 4.1 model (\`claude-opus-4-1-20250805\`), with retirement scheduled for August 5, 2026. Read more in [Model deprecations](https://platform.claude.com/docs/en/about-claude/model-deprecations).
+
+### October 3rd, 2024
+
+* [Claude Haiku 3.5](https://www.anthropic.com/claude/haiku) is now available on the Claude API as a text-only model.
+`
+
+/**
+ * xAI 发布流快照节选(2026-08-25 实抓口径:`## 月份`/`### 条目`,当年标题不带年份、
+ * 往年显式;混有 Grok Bot 产品条目、家族合并条目与历史能力公告——标题归属要过滤的噪音)。
+ */
+const XAI_MD = `# Release Notes
+
+## August
+
+### Grok 4.6
+
+Grok 4.6, SpaceXAI's frontier model for coding, agentic tasks, and knowledge work, is now available on the xAI API. See the [Grok 4.6 overview](/developers/grok-4-6) and the [announcement](https://x.ai/news/grok-4-6).
+
+### Grok Bot
+
+Grok Bot is now available. See the [Grok Bot overview](/grok-bot/overview).
+
+## July
+
+### Grok Voice Think Fast 2.0 is available
+
+\`grok-voice-think-fast-2.0\` is now available with Speech to Speech. \`grok-voice-latest\` will route to this model starting August 5, 2026. To get started, see the [Speech to Speech docs](/developers/model-capabilities/audio/speech-to-speech).
+
+### grok-imagine-video-1.5 modalities
+
+\`grok-imagine-video-1.5\` now supports text-to-video, image-to-video, and reference-to-video. See [Video Generation](/developers/model-capabilities/video/generation).
+
+## March
+
+### Grok 4.20 and Grok 4.20 Multi-agent are live
+
+* For more details on Grok 4.20 Multi-agent, check out the [docs](/developers/model-capabilities/text/multi-agent)
+
+## December 2025
+
+### Grok Speech to Speech API is released
+
+Grok Speech to Speech API is generally available.
+`
+
+/**
+ * 按 URL 分发页面。单字符串 = 智谱页内容 + Anthropic/xAI 页固定夹具(既有单厂家
+ * 用例下三轮询都成功且行为确定);Record 原样分发,未列出的 URL 抛错。
+ */
+function makeDeps(md: string | Record<string, string>): ModelTrackingDeps {
+  const pages: Record<string, string> =
+    typeof md === 'string'
+      ? { [ZHIPU_RELEASES_URL]: md, [ANTHROPIC_RELEASES_URL]: ANTHROPIC_MD, [XAI_RELEASES_URL]: XAI_MD }
+      : md
+  return {
+    fetchText: async (url) => {
+      const page = pages[url]
+      if (page === undefined) throw new Error('HTTP 404')
+      return page
+    },
+  }
 }
 
 function failingDeps(): ModelTrackingDeps {
@@ -74,6 +167,9 @@ async function byId(svc: ModelTrackingService, officialId: string) {
   const a = await svc.archive()
   return a.models.find((m) => m.officialId === officialId)
 }
+
+/** 三厂家基线总行数(init 入档的期望值)。 */
+const TOTAL_BASELINE = ZHIPU_BASELINE.length + ANTHROPIC_BASELINE.length + XAI_BASELINE.length
 
 describe('模型追踪:图标类型接线(单例/占格)', () => {
   it('MODEL 进单例枚举与跨格表(3×2=6 格,对齐前端注册表)', () => {
@@ -188,12 +284,16 @@ describe('模型追踪:基线自身(issues/02 八类全量)', () => {
     expect([...ids].some((id) => id.endsWith('-250414'))).toBe(false)
   })
 
-  it('已退役模型入档且 stage=retired、排序沉底', async () => {
+  it('已退役模型入档且 stage=retired、排序沉底(智谱 2 条 + Anthropic 6 条 + xAI 1 条)', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
     const a = await svc.archive()
     const retired = a.models.filter((m) => m.stage === 'retired')
-    expect(retired.map((m) => m.officialId).sort()).toEqual(['glm-4-0520', 'glm-z1'])
+    expect(retired.map((m) => m.officialId).sort()).toEqual([
+      'claude-3-5-haiku', 'claude-3-7-sonnet', 'claude-3-haiku', 'claude-opus-4', 'claude-opus-4-1', 'claude-sonnet-4',
+      'glm-4-0520', 'glm-z1',
+      'grok-code-fast-1',
+    ])
     // retired 沉底:其后不再有可用模型
     const firstRetired = a.models.findIndex((m) => m.stage === 'retired')
     expect(a.models.slice(firstRetired).every((m) => m.stage === 'retired')).toBe(true)
@@ -211,12 +311,13 @@ describe('模型追踪:基线自身(issues/02 八类全量)', () => {
 })
 
 describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
-  it('init 基线入档:全量模型、profile 字段(定价/限额/参数量)齐备;首轮取数后智谱源就位', async () => {
+  it('init 基线入档:双厂家全量模型、profile 字段(定价/限额/参数量)齐备;首轮取数后源就位', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
     await svc.pollZhipu()
+    await svc.pollAnthropic()
     const a = await svc.archive()
-    expect(a.models).toHaveLength(ZHIPU_BASELINE.length)
+    expect(a.models).toHaveLength(TOTAL_BASELINE)
     const glm53 = a.models.find((m) => m.officialId === 'glm-5.3')!
     expect(glm53.kind).toBe('text')
     expect(glm53.stage).toBe('ga')
@@ -226,7 +327,9 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
       { label: '上下文窗口', text: '1M', scope: null },
       { label: '最大输出', text: '128K', scope: null },
     ])
-    expect(a.sources).toEqual([{ provider: 'zhipu', stale: false, lastSuccessAt: expect.any(String) }])
+    const source = (p: string) => a.sources.find((s) => s.provider === p)!
+    expect(source('zhipu')).toMatchObject({ stale: false, lastSuccessAt: expect.any(String) })
+    expect(source('anthropic')).toMatchObject({ stale: false, lastSuccessAt: expect.any(String) })
   })
 
   it('详情缺省值:官方未披露的参数量/限额/价格在档案侧为 null(前端显示「未知」)', async () => {
@@ -314,7 +417,7 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
     // 模拟重启:新 Service 挂同一 db,不再 init/poll,直接读
     const revived = new ModelTrackingService(db, makeDeps(''))
     const a = await revived.archive()
-    expect(a.models).toHaveLength(ZHIPU_BASELINE.length)
+    expect(a.models).toHaveLength(TOTAL_BASELINE)
     expect((await byId(revived, 'glm-5.3'))!.events.length).toBeGreaterThan(0)
   })
 
@@ -337,23 +440,44 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
     const failing = new ModelTrackingService(db, failingDeps())
     await expect(failing.pollZhipu()).rejects.toThrow('HTTP 503')
     let a = await failing.archive()
-    expect(a.sources[0]).toMatchObject({ provider: 'zhipu', stale: true })
+    const zhipu = () => a.sources.find((s) => s.provider === 'zhipu')!
+    expect(zhipu()).toMatchObject({ stale: true })
     expect((await byId(failing, 'glm-5.3'))!.events.length).toBeGreaterThan(0) // 档案保留
     const ok = new ModelTrackingService(db, makeDeps(ZHIPU_MD))
     await ok.pollZhipu()
     a = await ok.archive()
-    expect(a.sources[0]!.stale).toBe(false)
+    expect(zhipu()!.stale).toBe(false)
   })
 
-  it('上游改版降级:200 但零结构化块 → 抛错并置陈旧,既有档案保留', async () => {
+  it('上游改版降级:200 但零结构化块 → 抛错并置陈旧,既有档案保留;另一厂家不受牵连', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
     await svc.pollZhipu()
+    // 智谱页改版为无结构化块;Anthropic 页仍是有效夹具(makeDeps 单字符串语义)
     const drifty = new ModelTrackingService(db, makeDeps('<html>上游改版了</html>'))
     await expect(drifty.pollZhipu()).rejects.toThrow('疑似上游改版')
+    await drifty.pollAnthropic()
     const a = await drifty.archive()
-    expect(a.sources[0]!.stale).toBe(true)
-    expect(a.models).toHaveLength(ZHIPU_BASELINE.length)
+    const source = (p: string) => a.sources.find((s) => s.provider === p)!
+    expect(source('zhipu')!.stale).toBe(true)
+    expect(source('anthropic')!.stale).toBe(false) // 验收:单厂家陈旧不牵连另一家
+    expect(a.models).toHaveLength(TOTAL_BASELINE)
+  })
+
+  it('Anthropic 信源失败只标记该厂家陈旧:智谱档案与源状态不受影响', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, makeDeps(ZHIPU_MD))
+    await svc.pollZhipu()
+    await svc.pollAnthropic()
+    const failing = new ModelTrackingService(db, failingDeps())
+    await expect(failing.pollAnthropic()).rejects.toThrow('HTTP 503')
+    const a = await failing.archive()
+    const source = (p: string) => a.sources.find((s) => s.provider === p)!
+    expect(source('anthropic')!.stale).toBe(true)
+    expect(source('zhipu')!.stale).toBe(false)
+    // Anthropic 档案保留(基线在库),智谱动态不受影响
+    expect((await byId(failing, 'claude-opus-5'))!.events.length).toBeGreaterThan(0)
+    expect((await byId(failing, 'glm-5.3'))!.events.length).toBeGreaterThan(0)
   })
 
   it('基线幂等:init 两轮不重复建档(profile 刷新语义)', async () => {
@@ -361,7 +485,7 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
     await makeService(db, makeDeps(''))
     await makeService(db, makeDeps(''))
     const svc = new ModelTrackingService(db, makeDeps(''))
-    expect((await svc.archive()).models).toHaveLength(ZHIPU_BASELINE.length)
+    expect((await svc.archive()).models).toHaveLength(TOTAL_BASELINE)
   })
 })
 
@@ -371,6 +495,8 @@ describe('模型追踪:路由', () => {
     await bootstrap(db, { username: 'admin', password: 'admin-pw' })
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
     await svc.pollZhipu()
+    await svc.pollAnthropic()
+    await svc.pollXai() // 三源显式就位(sources 数确定,不靠 init 内未等待轮询的时序)
     const app = createApp({ db, modelTracking: svc })
     const anon = await app.request('/api/model-tracking/archive')
     expect(anon.status).toBe(401)
@@ -383,7 +509,288 @@ describe('模型追踪:路由', () => {
     const res = await app.request('/api/model-tracking/archive', { headers: { cookie } })
     expect(res.status).toBe(200)
     const json = (await res.json()) as { models: unknown[]; sources: unknown[] }
-    expect(json.models).toHaveLength(ZHIPU_BASELINE.length)
-    expect(json.sources).toHaveLength(1)
+    expect(json.models).toHaveLength(TOTAL_BASELINE)
+    expect(json.sources).toHaveLength(3)
+  })
+})
+
+describe('模型追踪:Anthropic release notes 解析(纯函数)', () => {
+  it('日期标题归一化:英文月份 + 序数后缀兼容,非法拒绝', () => {
+    expect(normalizeAnthropicDate('August 5, 2026')).toBe('2026-08-05')
+    expect(normalizeAnthropicDate('October 3rd, 2024')).toBe('2024-10-03')
+    expect(normalizeAnthropicDate('February 1st, 2025')).toBe('2025-02-01')
+    expect(normalizeAnthropicDate('Notamonth 5, 2026')).toBeNull()
+    expect(normalizeAnthropicDate('August 32, 2026')).toBeNull()
+    expect(normalizeAnthropicDate('')).toBeNull()
+  })
+
+  it('提取日期段条目:段名归一为日期、条目原文与链接按出现序', () => {
+    const notes = parseAnthropicReleases(ANTHROPIC_MD)
+    expect(notes).toHaveLength(6)
+    expect(notes[0]).toMatchObject({ date: '2026-08-20' })
+    expect(notes[0]!.links).toEqual(['https://platform.claude.com/docs/en/cli-sdks-libraries/sdks/python'])
+    // 序数后缀日期段(2024 年旧格式)正常解析
+    expect(notes[5]).toMatchObject({ date: '2024-10-03' })
+  })
+
+  it('畸形日期段跳过,空文返回空数组', () => {
+    expect(parseAnthropicReleases('')).toEqual([])
+    expect(parseAnthropicReleases('### Someday 1, 2026\n* [x](https://a.b/c)')).toEqual([])
+  })
+
+  it('双条件归属:Opus 5/Fable 5 发布条目产事件;SDK、fast mode、弃用公告条目跳过', () => {
+    const notes = parseAnthropicReleases(ANTHROPIC_MD)
+    const opus5 = matchAnthropicEvent(notes[1]!)!
+    expect(opus5.officialId).toBe('claude-opus-5')
+    expect(opus5.event).toMatchObject({
+      kind: 'updated',
+      occurredOn: '2026-07-24',
+      sourceUrl: 'https://platform.claude.com/docs/en/models/opus-5/whats-new-opus-5',
+    })
+    expect(opus5.event.title).toContain("We've launched **Claude Opus 5**")
+    expect(matchAnthropicEvent(notes[0]!)).toBeNull() // Python SDK(平台功能)
+    expect(matchAnthropicEvent(notes[2]!)).toBeNull() // fast mode 移除(链接不含 opus-4-7 slug)
+    expect(matchAnthropicEvent(notes[4]!)).toBeNull() // Opus 4.1 弃用公告(链接为弃用表,退役口径归基线)
+    expect(matchAnthropicEvent(notes[5]!)).toBeNull() // Haiku 3.5 产品页链接无本型号 slug
+  })
+
+  it('基线外型号不认领:仅限受邀项目(Project Glasswing)的 Mythos 条目不产动态', () => {
+    const notes = parseAnthropicReleases(ANTHROPIC_MD)
+    // Fable 5 与 Mythos 5 同条目:基线只认领 Fable 5,Mythos 无档案行
+    expect(matchAnthropicEvent(notes[3]!)!.officialId).toBe('claude-fable-5')
+    expect(ANTHROPIC_BASELINE.some((b) => b.officialId.includes('mythos'))).toBe(false)
+  })
+
+  it('词边界:「Claude Opus 4」不认领「Claude Opus 4.8」的条目,「claude-haiku-4-5」不认领 dated 快照链接', () => {
+    const [note] = parseAnthropicReleases(
+      "### July 1, 2026\n\n* Something new for Claude Opus 4.8. See [docs](https://platform.claude.com/docs/en/models/opus-4-8/overview).\n",
+    )
+    // 文本提 4.8、链接也是 4.8:应归 claude-opus-4-8,而非基线里的 claude-opus-4(词边界)
+    expect(matchAnthropicEvent(note!)!.officialId).toBe('claude-opus-4-8')
+    const [snapshot] = parseAnthropicReleases(
+      "### July 2, 2026\n\n* Update for Claude Haiku 4.5. See [snapshot](https://platform.claude.com/docs/en/models/haiku-4-5-20251001/overview).\n",
+    )
+    // 家族 slug 尾边界不认领日期快照链接(dated URL 不自动归属,防误领)
+    expect(matchAnthropicEvent(snapshot!)).toBeNull()
+  })
+})
+
+describe('模型追踪:Anthropic 基线自身(issues/04)', () => {
+  it('厂家归属:全部 provider=anthropic、officialId 唯一、kind 全为 text(视觉输入不另立记录)', () => {
+    for (const b of ANTHROPIC_BASELINE) expect(b.provider).toBe('anthropic')
+    expect(new Set(ANTHROPIC_BASELINE.map((b) => b.officialId)).size).toBe(ANTHROPIC_BASELINE.length)
+    expect(new Set(ANTHROPIC_BASELINE.map((b) => b.kind))).toEqual(new Set<ModelKind>(['text']))
+  })
+
+  it('外部模型排除:无 embedding(推荐的外部 Voyage 不归入)、无审核/分类等非 text 行', () => {
+    const ids = ANTHROPIC_BASELINE.map((b) => b.officialId).join(' ')
+    expect(ids).not.toContain('voyage')
+    expect(ANTHROPIC_BASELINE.filter((b) => b.kind !== 'text')).toEqual([])
+    expect(ANTHROPIC_BASELINE.some((b) => b.kind === 'moderation_classification')).toBe(false)
+  })
+
+  it('固定型号识别:4.6 世代起无日期后缀 ID 即固定快照,直接入档;日期快照 ID 不另立行', () => {
+    const ids = new Set(ANTHROPIC_BASELINE.map((b) => b.officialId))
+    for (const dateless of ['claude-opus-4-6', 'claude-opus-4-7', 'claude-opus-4-8', 'claude-opus-5', 'claude-sonnet-4-6', 'claude-sonnet-5', 'claude-fable-5'])
+      expect(ids.has(dateless)).toBe(true)
+    expect([...ids].some((id) => /-20\d{6}$/.test(id))).toBe(false)
+  })
+
+  it('档案服务:Anthropic 全量入档、价格/限额落库、基线上线与退役动态共存', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, makeDeps(''))
+    const anthropic = (await svc.archive()).models.filter((m) => m.provider === 'anthropic')
+    expect(anthropic).toHaveLength(16)
+    const opus5 = anthropic.find((m) => m.officialId === 'claude-opus-5')!
+    expect(opus5.pricing!.entries.map((e) => e.text)).toEqual([
+      '输入 5 美元/百万 tokens',
+      '输出 25 美元/百万 tokens',
+    ])
+    expect(opus5.limits).toEqual([
+      { label: '上下文窗口', text: '1M', scope: null },
+      { label: '最大输出', text: '128K', scope: null },
+    ])
+    expect(opus5.trainingParams).toBeNull() // Anthropic 未披露参数量
+    const opus41 = anthropic.find((m) => m.officialId === 'claude-opus-4-1')!
+    expect(opus41.stage).toBe('retired')
+    expect(opus41.events.map((e) => e.kind).sort()).toEqual(['api_available', 'deprecated', 'retired'])
+    // 退役模型在 Anthropic 行集内沉底(排序口径与全局一致)
+    const firstRetired = anthropic.findIndex((m) => m.stage === 'retired')
+    expect(firstRetired).toBeGreaterThan(0)
+    expect(anthropic.slice(firstRetired).every((m) => m.stage === 'retired')).toBe(true)
+  })
+
+  it('历史去重:基线已核验的发布公告,自动解析不再补「updated」重复行', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, makeDeps(ZHIPU_MD))
+    await svc.pollAnthropic()
+    await svc.pollAnthropic() // 两轮:同页幂等 + 基线事件在场
+    const opus5 = await byId(svc, 'claude-opus-5')
+    // 2026-07-24 公告只有基线 api_available 一条(无 'updated' 重复)
+    expect(opus5!.events).toHaveLength(1)
+    expect(opus5!.events[0]).toMatchObject({ kind: 'api_available', occurredOn: '2026-07-24' })
+    const fable5 = await byId(svc, 'claude-fable-5')
+    expect(fable5!.events).toHaveLength(1)
+    expect(fable5!.events[0]!.kind).toBe('api_available')
+  })
+
+  it('自动解析仍能捕获基线未覆盖的新公告(kind=updated)', async () => {
+    const { db } = openDb(':memory:')
+    const md = `# Claude Platform release notes
+
+### September 9, 2026
+
+* [Claude Opus 5](https://platform.claude.com/docs/en/models/opus-5/overview) now supports a new output format. See [What's new](https://platform.claude.com/docs/en/models/opus-5/whats-new-opus-5) for details.
+`
+    const svc = await makeService(db, makeDeps({ [ZHIPU_RELEASES_URL]: '', [ANTHROPIC_RELEASES_URL]: md }))
+    await svc.pollAnthropic()
+    const opus5 = await byId(svc, 'claude-opus-5')
+    expect(opus5!.events.map((e) => e.kind)).toEqual(['updated', 'api_available'])
+  })
+})
+
+describe('模型追踪:xAI 发布流解析(纯函数,issues/05)', () => {
+  it('月份/年份推断:当年标题不带年份按 currentYear,显式年份标题自锚;条目标题与正文首链(相对路径归一)提取', () => {
+    const entries = parseXaiReleaseNotes(XAI_MD, 2026)
+    expect(entries.map((e) => e.yearMonth)).toEqual([
+      '2026-08', '2026-08',
+      '2026-07', '2026-07',
+      '2026-03',
+      '2025-12',
+    ])
+    expect(entries[0]).toEqual({
+      yearMonth: '2026-08',
+      title: 'Grok 4.6',
+      linkUrl: 'https://docs.x.ai/developers/grok-4-6',
+    })
+  })
+
+  it('非月份 ## 段下的条目与月份段之前的散条目跳过;空文返回空数组', () => {
+    expect(parseXaiReleaseNotes('', 2026)).toEqual([])
+    expect(parseXaiReleaseNotes('## Notamonth\n\n### Stray entry\n\nbody', 2026)).toEqual([])
+    expect(parseXaiReleaseNotes('### Before any month\n\nbody', 2026)).toEqual([])
+  })
+
+  it('标题归属:型号条目命中并锚定当月 1 日;产品条目(Grok Bot)与历史能力公告不产事件', () => {
+    const entries = parseXaiReleaseNotes(XAI_MD, 2026)
+    const byTitle = (t: string) => entries.find((e) => e.title === t)!
+    expect(matchXaiEvent(byTitle('Grok 4.6'))).toEqual([
+      {
+        officialId: 'grok-4.6',
+        event: {
+          kind: 'updated',
+          occurredOn: '2026-08-01',
+          title: 'Grok 4.6',
+          sourceUrl: 'https://docs.x.ai/developers/grok-4-6',
+        },
+      },
+    ])
+    expect(matchXaiEvent(byTitle('Grok Bot'))).toEqual([]) // 非模型条目
+    expect(matchXaiEvent(byTitle('Grok Speech to Speech API is released'))).toEqual([]) // 能力 API 历史公告,不属于任一基线行
+  })
+
+  it('家族合并条目多命中:「Grok 4.20 and Grok 4.20 Multi-agent are live」同时命中 reasoning 与 multi-agent 两行', () => {
+    const entries = parseXaiReleaseNotes(XAI_MD, 2026)
+    const family = matchXaiEvent(entries.find((e) => e.yearMonth === '2026-03')!)
+    expect(family.map((h) => h.officialId).sort()).toEqual(['grok-4.20-0309-reasoning', 'grok-4.20-multi-agent-0309'])
+    expect(family[0]!.event.occurredOn).toBe('2026-03-01') // 月份粒度锚定当月 1 日
+  })
+
+  it('标题词边界:「grok-imagine-video-1.5 modalities」只命中 1.5 行,不误认 grok-imagine-video', () => {
+    const entries = parseXaiReleaseNotes(XAI_MD, 2026)
+    const v15 = entries.find((e) => e.title === 'grok-imagine-video-1.5 modalities')!
+    expect(matchXaiEvent(v15).map((h) => h.officialId)).toEqual(['grok-imagine-video-1.5'])
+  })
+})
+
+describe('模型追踪:xAI 基线自身(issues/05)', () => {
+  it('多型号种类覆盖:文本/图像生成/视频生成/音频四类;provider/officialId 唯一', () => {
+    expect(new Set(XAI_BASELINE.map((b) => b.kind))).toEqual(
+      new Set(['text', 'image_generation', 'video_generation', 'audio_speech']),
+    )
+    for (const b of XAI_BASELINE) expect(b.provider).toBe('xai')
+    expect(new Set(XAI_BASELINE.map((b) => b.officialId)).size).toBe(XAI_BASELINE.length)
+  })
+
+  it('移动别名不另立模型:基线无 -latest 行、无 grok-voice-latest;固定型号 -0309 是在售本体入档', () => {
+    const ids = XAI_BASELINE.map((b) => b.officialId)
+    expect(ids.some((id) => id.endsWith('-latest'))).toBe(false)
+    expect(ids).not.toContain('grok-voice-latest')
+    expect(ids).toContain('grok-4.20-0309-reasoning')
+    expect(ids).toContain('grok-4.20-multi-agent-0309')
+  })
+
+  it('独立命名型号分别记录:Grok / Imagine / Voice 各系列齐备,Imagine Image 与 Video 分立', () => {
+    const ids = XAI_BASELINE.map((b) => b.officialId)
+    expect(ids).toContain('grok-4.6')
+    expect(ids).toContain('grok-imagine-image-2.0')
+    expect(ids).toContain('grok-imagine-video')
+    expect(ids).toContain('grok-voice-think-fast-2.0')
+    expect(ids).toContain('text-to-speech')
+  })
+
+  it('别名换指向与退役重定向作为动态保留,不改写原型号发布历史', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, makeDeps(''))
+    // think-fast-2.0:上线 + 别名换指向(grok-voice-latest → 本型号,官方明文 2026-08-05)
+    const v2 = await byId(svc, 'grok-voice-think-fast-2.0')
+    expect(v2!.events.map((e) => e.kind).sort()).toEqual(['alias_repointed', 'api_available'])
+    expect(v2!.events.find((e) => e.kind === 'alias_repointed')).toMatchObject({ occurredOn: '2026-08-05' })
+    // think-fast-1.0:原上线动态保留(2026-04-23 不被改写)+ deprecated 追加
+    const v1 = await byId(svc, 'grok-voice-think-fast-1.0')
+    expect(v1!.events.map((e) => e.kind).sort()).toEqual(['api_available', 'deprecated'])
+    expect(v1!.events.find((e) => e.kind === 'api_available')!.occurredOn).toBe('2026-04-23')
+    // 退役重定向:grok-code-fast-1 保留沉底行,retired 动态注明重定向去向
+    const cf = await byId(svc, 'grok-code-fast-1')
+    expect(cf!.stage).toBe('retired')
+    expect(cf!.events).toHaveLength(1)
+    expect(cf!.events[0]).toMatchObject({ kind: 'retired' })
+  })
+})
+
+describe('模型追踪:xAI 档案服务(轮询/厂家隔离)', () => {
+  it('pollXai:月份锚定 updated 动态入库,两轮幂等不翻倍', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, makeDeps(''))
+    await svc.pollXai()
+    await svc.pollXai()
+    const v2 = await byId(svc, 'grok-voice-think-fast-2.0')
+    // 基线 2 条(api_available + alias_repointed)+ July 条目自动 updated(2026-07-01)
+    expect(v2!.events.map((e) => e.kind).sort()).toEqual(['alias_repointed', 'api_available', 'updated'])
+    expect(v2!.events.find((e) => e.kind === 'updated')).toMatchObject({ occurredOn: '2026-07-01' })
+    const v15 = await byId(svc, 'grok-imagine-video-1.5')
+    expect(v15!.events).toHaveLength(1)
+    expect(v15!.events[0]).toMatchObject({ kind: 'updated', occurredOn: '2026-07-01' })
+  })
+
+  it('xAI 信源失败只标记该厂家陈旧:智谱/Anthropic 源与档案不受影响(issues/05 验收)', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, makeDeps(ZHIPU_MD))
+    await svc.pollZhipu()
+    await svc.pollAnthropic()
+    await svc.pollXai()
+    const failing = new ModelTrackingService(db, failingDeps())
+    await expect(failing.pollXai()).rejects.toThrow('HTTP 503')
+    const a = await failing.archive()
+    const source = (p: string) => a.sources.find((s) => s.provider === p)!
+    expect(source('xai')!.stale).toBe(true)
+    expect(source('zhipu')!.stale).toBe(false)
+    expect(source('anthropic')!.stale).toBe(false)
+    expect((await byId(failing, 'grok-4.6'))!.events.length).toBeGreaterThan(0) // xAI 档案保留
+    expect((await byId(failing, 'glm-5.3'))!.events.length).toBeGreaterThan(0) // 智谱不受牵连
+  })
+
+  it('xAI 上游改版:200 但零结构化条目 → 抛错标陈旧,档案保留', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, makeDeps({
+      [ZHIPU_RELEASES_URL]: ZHIPU_MD,
+      [ANTHROPIC_RELEASES_URL]: ANTHROPIC_MD,
+      [XAI_RELEASES_URL]: '<html>上游改版了</html>',
+    }))
+    await svc.init()
+    await expect(svc.pollXai()).rejects.toThrow('疑似上游改版')
+    const a = await svc.archive()
+    expect(a.sources.find((s) => s.provider === 'xai')!.stale).toBe(true)
+    expect(a.models).toHaveLength(TOTAL_BASELINE)
   })
 })
