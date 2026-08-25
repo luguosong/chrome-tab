@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { getChangelogSource, type ChangelogSourceId } from 'chrome-tab-shared'
-import { useChangelog, useTranslateVersions } from '../hooks/useChangelog'
+import { useChangelog, useTranslateStatus, useTranslateVersions } from '../hooks/useChangelog'
 import { inline } from '../lib/changelogParser'
 
 /**
@@ -12,7 +12,9 @@ import { inline } from '../lib/changelogParser'
  * 左侧连续细轨 + 每版本一个节点,最新版 accent 高亮 + 「最新」药丸,旧版弱化;每版本
  * 日期 = 后端 releaseTimes 全表(ADR-0022)绝对日期,失败/错位降级不显示。
  * 未译版本(不在 translatedVersions 内)显示「翻译」按钮 → POST /translate 按需补译,
- * 译毕后端持久化、invalidate 重拉即变中文(ADR-0017)。
+ * 译毕后端持久化、invalidate 重拉即变中文(ADR-0017)。pending 期间轮询译制阶段
+ * (GET /translate/status):按钮显「译中 Ns…/排队中…」,hover 显当前候选模型——
+ * LLM 分钟级慢与互斥链排队不再表现为「卡死」。
  *
  * 刷新失败降级(spec user story 15):query error 非空 → 显示重试按钮,点击重拉。
  *
@@ -33,6 +35,17 @@ export default function ChangelogModal({
   const noRaw = !def.changelogUrl
   const { data, isError, refetch } = useChangelog(source)
   const translateMut = useTranslateVersions(source)
+  // 译制可观察:pending 期间轮询后端阶段;translating 显模型/耗时,idle 即排队(互斥链)
+  const phaseQ = useTranslateStatus(source, translateMut.isPending)
+  const ph = phaseQ.data
+  const translating = ph?.status === 'translating'
+  const elapsedSec =
+    translating && ph.since ? Math.max(0, Math.round((Date.now() - Date.parse(ph.since)) / 1000)) : null
+  // pending 按钮的双视图(label 显眼/title 详情),提前算好消嵌套三元重复
+  const pendingLabel = translating ? `译中 ${elapsedSec ?? 0}s…` : '排队中…'
+  const pendingHint = translating
+    ? `正在调用 ${ph?.model}(候选 ${ph?.attempt}/${ph?.total})`
+    : '排队中——后台刷新/译制任务执行中,完成后自动开始'
 
   const versions = data?.versions ?? []
   const times = data?.releaseTimes ?? {}
@@ -173,10 +186,10 @@ export default function ChangelogModal({
                               type="button"
                               disabled={translateMut.isPending}
                               onClick={() => translateMut.mutate([v.title])}
-                              title="机器翻译此版本(译后持久化)"
+                              title={translateMut.isPending ? pendingHint : '机器翻译此版本(译后持久化)'}
                               className="rounded-full border border-white/25 px-2 py-0.5 text-[10px] leading-none text-white/60 hover:border-accent hover:text-accent disabled:opacity-50 transition-colors"
                             >
-                              {translateMut.isPending ? '译中…' : '翻译'}
+                              {translateMut.isPending ? pendingLabel : '翻译'}
                             </button>
                           )}
                         </div>

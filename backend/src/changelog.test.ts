@@ -12,6 +12,7 @@ import {
   splitBlocks,
   synthesizeVersionsMarkdown,
   type ChangelogDeps,
+  type TranslatePhase,
 } from './changelog'
 
 // 语义源 = Java ChangelogSlicerTest / ChangelogServiceTest / ChangelogControllerTest,
@@ -274,6 +275,34 @@ describe('ChangelogService 编排(ADR-0017)', () => {
     // 3 块各译恰好一次(recent=2 覆盖 3.0/2.0 + 补译 1.0)
     expect(calls).toBe(3)
   })
+
+  it('译制阶段 translatePhase:LLM 挂起中读为 translating(model+候选序),链空后回 idle', async () => {
+    const db = openDb(':memory:').db
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const duringCall: TranslatePhase[] = []
+    const s = makeService(db, {
+      translate: async (b, onPhase) => {
+        onPhase?.('m1', 1, 2)
+        duringCall.push(s.translatePhase()) // onPhase 落字段后、LLM 返回前的中间态(读器返副本)
+        onPhase?.('m2', 2, 2) // 换候选:since 不重置(elapsed = 总等待,候选变化由 model/attempt 表达)
+        duringCall.push(s.translatePhase())
+        await gate
+        return TRANSLATOR(b)
+      },
+    })
+    const pending = s.translateVersions(['3.0'])
+    await new Promise((r) => setTimeout(r)) // 让链跑到挂起点
+
+    expect(duringCall).toEqual([
+      { status: 'translating', model: 'm1', attempt: 1, total: 2, since: expect.any(String) },
+      { status: 'translating', model: 'm2', attempt: 2, total: 2, since: duringCall[0]!.since },
+    ])
+
+    release()
+    await pending
+    expect(s.translatePhase()).toEqual({ status: 'idle' }) // 排队推断 = 前端 isPending && idle
+  })
 })
 
 describe('多源(ADR-0020:每源一 Service,快照按源分行;译文按块哈希跨源共享)', () => {
@@ -450,12 +479,15 @@ describe('extractContent(畸形响应 → null 触发降级,不抛)', () => {
 // ---- 模型候选链(prodChangelogDeps.translate 真链路,mock globalThis.fetch)----
 
 describe('modelCandidates(free 优先,CHANGELOG_LLM_MODEL 逗号分隔覆盖)', () => {
-  it('默认:三 free + coding-glm-5.2 兜底', () => {
+  it('默认:六 free + coding-glm-5.3 兜底', () => {
     expect(modelCandidates()).toEqual([
       'coding-glm-5.1-free',
       'coding-kimi-k3-free',
       'gemini-3.6-flash-free',
-      'coding-glm-5.2',
+      'gemini-3.7-flash-free',
+      'gpt-5.5-free',
+      'coding-glm-5-free',
+      'coding-glm-5.3',
     ])
   })
 
@@ -473,14 +505,15 @@ describe('translate 候选链(候选失效=403/404/no_available_channel 换下�
     delete process.env.CHANGELOG_LLM_MODEL
   })
 
-  /** 依次返回 seq 响应(超出取末个),记录每次请求的 model 字段顺序。 */
-  function mockFetchSeq(seq: Array<{ status: number; body: unknown }>): string[] {
+  /** 依次返回 seq 响应(超出取末个),记录每次请求的 model 字段顺序;timeout: true 模拟超时拒绝。 */
+  function mockFetchSeq(seq: Array<{ status?: number; body?: unknown; timeout?: boolean }>): string[] {
     const models: string[] = []
     let i = 0
     globalThis.fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
       models.push(JSON.parse(String(init?.body)).model)
       const s = seq[Math.min(i++, seq.length - 1)]!
-      return new Response(JSON.stringify(s.body), { status: s.status })
+      if (s.timeout) throw new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+      return new Response(JSON.stringify(s.body), { status: s.status ?? 200 })
     }) as typeof fetch
     return models
   }
@@ -504,6 +537,14 @@ describe('translate 候选链(候选失效=403/404/no_available_channel 换下�
     expect(models).toEqual(['m1', 'm2'])
   })
 
+  it('超时(TimeoutError)同样换下一候选:挂死模型不再拖满单模型上限(300s→60s 语义配套)', async () => {
+    process.env.AIHUBMIX_API_KEY = 'k'
+    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
+    const models = mockFetchSeq([{ timeout: true }, OK])
+    await expect(prodChangelogDeps().translate('块')).resolves.toBe('译文')
+    expect(models).toEqual(['m1', 'm2'])
+  })
+
   it('401(key 无效)换模型无益:直接抛,不再请求', async () => {
     process.env.AIHUBMIX_API_KEY = 'k'
     process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
@@ -522,6 +563,18 @@ describe('translate 候选链(候选失效=403/404/no_available_channel 换下�
 
   it('Key 缺失:返回 null(Service 层据此透传英文原文)', async () => {
     expect(prodChangelogDeps().translate('块')).resolves.toBeNull()
+  })
+
+  it('onPhase 回调:每次换候选前上报 (model, attempt, total),Service 据此暴露阶段', async () => {
+    process.env.AIHUBMIX_API_KEY = 'k'
+    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
+    const events: Array<[string, number, number]> = []
+    mockFetchSeq([NO_CHANNEL, OK])
+    await prodChangelogDeps().translate('块', (model, attempt, total) => events.push([model, attempt, total]))
+    expect(events).toEqual([
+      ['m1', 1, 2],
+      ['m2', 2, 2],
+    ])
   })
 })
 
@@ -678,6 +731,48 @@ describe('POST /api/changelog/translate(按需补译,ADR-0017)', () => {
       const json = (await res.json()) as { markdown: string }
       expect(json.markdown).toContain('三') // 既有快照照常返回
     }
+  })
+})
+
+describe('GET /api/changelog/translate/status(译制阶段:排队/换候选可观察)', () => {
+  it('未认证 401 空体', async () => {
+    const res = await app.request('/api/changelog/translate/status')
+    expect(res.status).toBe(401)
+    expect(await res.text()).toBe('')
+  })
+
+  it('链空 idle;LLM 挂起中 translating(含 model/候选序),译毕回 idle', async () => {
+    const { db } = openDb(':memory:')
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const svc = makeService(db, {
+      translate: async (b, onPhase) => {
+        onPhase?.('m1', 1, 2)
+        await gate
+        return TRANSLATOR(b)
+      },
+    })
+    const app2 = createApp({
+      db,
+      changelog: { 'claude-code': svc, 'matt-skills': makeService(db), codex: makeService(db, {}, 'codex') },
+    })
+    await bootstrap(db, { username: 'admin', password: 'admin-pw' })
+    const login = await app2.request('/api/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin-pw' }),
+    })
+    const cookie2 = login.headers.getSetCookie()[0]!.split(';')[0]!
+
+    const pending = svc.translateVersions(['3.0'])
+    await new Promise((r) => setTimeout(r)) // 让链跑到挂起点
+    const mid = await app2.request('/api/changelog/translate/status', { headers: { cookie: cookie2 } })
+    expect(await mid.json()).toMatchObject({ status: 'translating', model: 'm1', attempt: 1, total: 2 })
+
+    release()
+    await pending
+    const after = await app2.request('/api/changelog/translate/status', { headers: { cookie: cookie2 } })
+    expect(await after.json()).toEqual({ status: 'idle' })
   })
 })
 

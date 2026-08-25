@@ -59,3 +59,29 @@ export function useTranslateVersions(source: ChangelogSourceId = DEFAULT_CHANGEL
     onSuccess: () => qc.invalidateQueries({ queryKey: ['changelog', source] }),
   })
 }
+
+/** 译制阶段(GET /translate/status 响应,与后端 TranslatePhase 对齐——HTTP 边界 JSON
+ *  契约,类型两侧各自定义,同 ChangelogResponse 范式):translating = 链上正调 LLM;
+ *  mutation pending 而 status=idle = 排队中(互斥链前序任务执行中,ADR-0017)。 */
+export type TranslatePhase = {
+  status: 'idle' | 'translating'
+  model?: string
+  attempt?: number
+  total?: number
+  since?: string
+}
+
+/** 译制阶段轮询:仅 mutation pending 期间拉,2s 一拍,结束即 enabled=false 停。
+ *  structuralSharing 关掉——阶段值连续两拍相同时也要换引用,「译中 Ns」才有走时。 */
+export function useTranslateStatus(
+  source: ChangelogSourceId = DEFAULT_CHANGELOG_SOURCE,
+  enabled = false,
+) {
+  return useQuery<TranslatePhase>({
+    queryKey: ['changelog', 'translateStatus', source],
+    queryFn: () => apiFetch<TranslatePhase>(`/api/changelog/translate/status?source=${source}`),
+    enabled,
+    refetchInterval: 2_000,
+    structuralSharing: false,
+  })
+}

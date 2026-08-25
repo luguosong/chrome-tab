@@ -68,11 +68,27 @@ export function synthesizeVersionsMarkdown(times: Record<string, string>): strin
 export interface ChangelogDeps {
   /** 拉 CHANGELOG.md 原文。抛错 → 兜底路径 500,前端走「刷新失败/重试」。 */
   fetchMarkdown: () => Promise<string>
-  /** 译制单个版本块。返回 null = 拒绝(如未配置 Key);抛错 = 译制失败。 */
-  translate: (versionBlock: string) => Promise<string | null>
+  /** 译制单个版本块。返回 null = 拒绝(如未配置 Key);抛错 = 译制失败。
+   *  onPhase:每次尝试一个候选模型前上报(model, 候选序 1 基, 链长),Service 据此暴露译制阶段。 */
+  translate: (
+    versionBlock: string,
+    onPhase?: (model: string, attempt: number, total: number) => void,
+  ) => Promise<string | null>
   /** 外源全量发布信息:latest + times(版本号→ISO,大 tile 版本榜单一行一版本
    *  带时间)。失败由实现方吞掉返回 null,不阻塞主链路。 */
   fetchReleaseInfo: () => Promise<{ latest: string | null; times: Record<string, string> } | null>
+}
+
+/** 译制阶段(GET /api/changelog/translate/status 透传,内存态不落库):链上正在调
+ *  LLM 时 translating(含候选细节),其余 idle——前端「排队中」推断 = 请求 pending
+ *  且本状态 idle(排在 refresh 等链上前序任务后面,ADR-0017 互斥链)。 */
+export interface TranslatePhase {
+  status: 'idle' | 'translating'
+  model?: string
+  attempt?: number
+  total?: number
+  /** 进入 translating 的时刻(ISO),前端据此显示已耗时 */
+  since?: string
 }
 
 export interface Snapshot {
@@ -91,6 +107,13 @@ export class ChangelogService {
   private memory: Snapshot | null = null
   /** Java synchronized 的 async 对应物:refresh/translateVersions 排到同一条链上串行执行 */
   private tail: Promise<unknown> = Promise.resolve()
+  /** 译制阶段(内存读器供 status 路由;终态不驻留——请求回执才是终态信号) */
+  private phase: TranslatePhase = { status: 'idle' }
+
+  /** 返回副本:调用方(HTTP/测试)不持内部可变引用。 */
+  translatePhase(): TranslatePhase {
+    return { ...this.phase }
+  }
 
   constructor(
     private readonly db: Db,
@@ -165,7 +188,9 @@ export class ChangelogService {
   }
 
   private exclusive<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.tail.then(fn, fn) // 前者失败不阻塞后来者
+    const run = this.tail.then(fn, fn).finally(() => {
+      this.phase = { status: 'idle' } // 链空回 idle;后序任务 onPhase 会重新置 translating
+    }) // 前者失败不阻塞后来者
     this.tail = run.catch(() => {})
     return run
   }
@@ -176,7 +201,14 @@ export class ChangelogService {
     if (byHash.has(hash)) return
     let translated: string | null
     try {
-      translated = await this.deps.translate(block.raw)
+      translated = await this.deps.translate(block.raw, (model, attempt, total) => {
+        // since 只在 idle→translating 设:换候选不重置——elapsed 语义 = 本次译制总等待,
+        // 「译中 5s→归零重计」会被读成「重来了」;候选变化本身由 model/attempt 字段表达。
+        this.phase =
+          this.phase.status === 'translating'
+            ? { ...this.phase, model, attempt, total }
+            : { status: 'translating', model, attempt, total, since: nowIso() }
+      })
     } catch (e) {
       console.warn(`版本 ${block.title} 译制失败,保持英文:`, e)
       return
@@ -246,6 +278,7 @@ export function changelogRoutes(services: ChangelogServices): Hono<AuthEnv> {
   })
   return new Hono<AuthEnv>()
     .get('/api/changelog', async (c) => c.json(toResponse(await pick(c).get())))
+    .get('/api/changelog/translate/status', (c) => c.json(pick(c).translatePhase()))
     .post('/api/changelog/translate', async (c) => {
       const body = await c.req.json().catch(() => null)
       const versions = (body as { versions?: unknown } | null)?.versions
@@ -268,10 +301,10 @@ const SYSTEM_PROMPT = `你是专业技术译者。把用户给出的 CHANGELOG m
 5. 通用技术术语（Claude Code、API、token、hook 等）可保留原文或按惯例中译。`
 
 async function fetchText(url: string, timeoutMs: number, init?: RequestInit): Promise<string> {
-  // 超时防挂起(ADR-0017):外呼挂死会让定时预取永不返回;LLM 译一大块可达分钟级
+  // 超时防挂起(ADR-0017):外呼挂死会让定时预取永不返回;LLM 单候选 60s(慢模型换下一候选,不再干等)
   const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
   if (!res.ok)
-    // status/body 挂错误上:调用方据此分类(free 候选链按 403/404/no_available_channel 换下一个)
+    // status/body 挂错误上:调用方据此分类(free 候选链按 403/404/no_available_channel/超时 换下一个)
     throw Object.assign(new Error(`${init?.method ?? 'GET'} ${url} → HTTP ${res.status}`), {
       status: res.status,
       body: (await res.text()).slice(0, 200),
@@ -288,21 +321,28 @@ export function extractContent(resp: unknown): string | null {
 }
 
 /**
- * 译制模型候选链(2026-08-23):free 优先,free 全不可用落到付费 coding-glm-5.2。
- * 候选失效 = 403/404(模型被禁/不存在)或 400 no_available_channel(渠道没了);其他错误(401 key/网络/5xx)换模型无益,直接抛。
+ * 译制模型候选链(2026-08-25):free 优先,free 全不可用落到付费 coding-glm-5.3。
+ * 候选失效 = 403/404(模型被禁/不存在)、400 no_available_channel(渠道没了)或超时(挂死);其他错误(401 key/网络/5xx)换模型无益,直接抛。
  * CHANGELOG_LLM_MODEL 支持逗号分隔列表覆盖;Key 沿用 AIHUBMIX_API_KEY。
  */
-export const DEFAULT_LLM_MODELS = 'coding-glm-5.1-free,coding-kimi-k3-free,gemini-3.6-flash-free,coding-glm-5.2'
+export const DEFAULT_LLM_MODELS =
+  'coding-glm-5.1-free,coding-kimi-k3-free,gemini-3.6-flash-free,gemini-3.7-flash-free,gpt-5.5-free,coding-glm-5-free,coding-glm-5.3'
 
 export function modelCandidates(env: NodeJS.ProcessEnv = process.env): string[] {
   // 空串回退默认:compose 引用行对 .env 缺省键注入的是 ''(非 undefined),split 后会是空列表
   return (env.CHANGELOG_LLM_MODEL?.trim() || DEFAULT_LLM_MODELS).split(',').map((m) => m.trim()).filter(Boolean)
 }
 
-/** 网关对该候选「没戏了,换下一个」的判定:模型被禁/不存在/无渠道。 */
+/** 网关对该候选「没戏了,换下一个」的判定:模型被禁/不存在/无渠道/超时(fetchText 的
+ *  AbortSignal.timeout 抛 TimeoutError——挂死的 free 模型换下一个,不再单点拖满上限)。 */
 function isCandidateExhausted(e: unknown): boolean {
-  const err = e as { status?: number; body?: string }
-  return err?.status === 403 || err?.status === 404 || /no_available_channel/.test(err?.body ?? '')
+  const err = e as { status?: number; body?: string; name?: string }
+  return (
+    err?.status === 403 ||
+    err?.status === 404 ||
+    err?.name === 'TimeoutError' ||
+    /no_available_channel/.test(err?.body ?? '')
+  )
 }
 
 export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_SOURCE): ChangelogDeps {
@@ -350,12 +390,13 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
           return synthesizeVersionsMarkdown(info.times)
         },
     fetchReleaseInfo,
-    translate: async (block) => {
+    translate: async (block, onPhase) => {
       if (!apiKey) return null // Key 缺失:Service 层据此透传英文原文
       let lastErr: unknown
-      for (const model of models) {
+      for (const [i, model] of models.entries()) {
+        onPhase?.(model, i + 1, models.length)
         try {
-          const resp = await fetchText(`${LLM_BASE_URL}/chat/completions`, 300_000, {
+          const resp = await fetchText(`${LLM_BASE_URL}/chat/completions`, 60_000, {
             method: 'POST',
             headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
             body: JSON.stringify({
