@@ -19,6 +19,7 @@ import type { AuthEnv } from './auth'
 import { ZHIPU_BASELINE } from './zhipuBaseline'
 import { ANTHROPIC_BASELINE } from './anthropicBaseline'
 import { XAI_BASELINE } from './xaiBaseline'
+import { OPENAI_BASELINE, OPENAI_CHANGELOG_PAGE_URL, openaiChangelogAnchor } from './openaiBaseline'
 import { DEEPSEEK_BASELINE, DEEPSEEK_UPDATES_URL, matchDeepSeekEvent, parseDeepSeekUpdates } from './deepseekBaseline'
 
 /**
@@ -29,7 +30,9 @@ import { DEEPSEEK_BASELINE, DEEPSEEK_UPDATES_URL, matchDeepSeekEvent, parseDeepS
  * 代码内人工核验基线**,部署即幂等 upsert 刷新;**模型动态来自各厂家主发布源确定性
  * 解析**(智谱新品发布 Markdown 的 `<Update label description>` 块、Anthropic
  * release notes 的 `### 日期` 段内条目、xAI 发布流的 `## 月份`/`### 条目` 段——仅月
- * 份粒度、事件锚定当月 1 日、DeepSeek API Change Log 的 HTML `Date:` 段内 h3 小节);按模型+类型+日期+信源去重);解析器
+ * 份粒度、事件锚定当月 1 日
+ * DeepSeek API Change Log 的 HTML `Date:` 段内 h3 小节、OpenAI API changelog
+ * 的 `## 月份`/`### 日` 段内类型行(`Model:` 字段即结构化归属);按模型+类型+日期+信源去重);解析器
  * **不认识**的更新块(基线外型号,含智谱平台托管的第三方模型、Anthropic 仅限受邀
  * 项目的 Mythos 系列)只作待核验线索跳过——待基线人工核验后纳入,这是「跟踪厂家」
  * 的定义性约束(不开放任意厂家/信源配置,理由见 ADR-0025)。
@@ -96,7 +99,9 @@ export interface BaselineModel {
   /**
    * 发布页块的归属判定:alias 词边界匹配是共用底座(「GLM-4.7」不认领「GLM-4.7-Flash」
    * 的块)。智谱/Anthropic 再加链接 slug 双条件(防上游张冠李戴——实测 GLM-Image 块误链
-   * glm-4.7 文档页);xAI 只用标题 alias(条目标题即官方条目名,见 matchXaiEvent)。
+   * glm-4.7 文档页);xAI 只用标题 alias(条目标题即官方条目名,见 matchXaiEvent);
+   * OpenAI 用 changelog 类型行的 `Model:` 字段精确/最长前缀匹配(结构化 ID,见
+   * resolveOpenAIModelId),无需词边界。
    */
   matchAliases: string[]
   /** 智谱/Anthropic 双条件的链接半边(路径尾边界,「…/glm-4」不认领「…/glm-4-long」);xAI 行省略。 */
@@ -105,10 +110,16 @@ export interface BaselineModel {
   events?: Array<Omit<ModelEvent, 'id'>>
 }
 
-export { ZHIPU_BASELINE, ANTHROPIC_BASELINE, XAI_BASELINE, DEEPSEEK_BASELINE }
+export { ZHIPU_BASELINE, ANTHROPIC_BASELINE, XAI_BASELINE, OPENAI_BASELINE, DEEPSEEK_BASELINE }
 
 /** 全部厂家基线(init 幂等 upsert 的单一遍历源;新厂家票 = 基线文件 + 追加于此)。 */
-const ALL_BASELINES: BaselineModel[] = [...ZHIPU_BASELINE, ...ANTHROPIC_BASELINE, ...XAI_BASELINE, ...DEEPSEEK_BASELINE]
+const ALL_BASELINES: BaselineModel[] = [
+  ...ZHIPU_BASELINE,
+  ...ANTHROPIC_BASELINE,
+  ...XAI_BASELINE,
+  ...OPENAI_BASELINE,
+  ...DEEPSEEK_BASELINE,
+]
 
 // ---- Anthropic release notes 解析(研究 §3:主发布源;页面混有 SDK/平台功能条目,
 //  须按明确模型名/ID 过滤——与智谱同用双条件归属)----
@@ -314,6 +325,130 @@ export function matchZhipuEvent(u: ZhipuUpdate): { officialId: string; event: Om
   return null
 }
 
+// ---- OpenAI API changelog 解析(研究 §3:主发布源。与别家不同,条目类型行自带
+//  `Model: id` 结构化字段,归属无需双条件猜测——精确 ID 匹配 + 最长前缀快照归族)----
+
+/** OpenAI API changelog(主发布源;.md 形式直抓,锚点用人类可读页 URL——基址出自 openaiBaseline 单一事实源)。 */
+export const OPENAI_CHANGELOG_URL = `${OPENAI_CHANGELOG_PAGE_URL}.md`
+
+/** changelog 一个条目(解析后的统一形态)。 */
+export interface OpenAIChangelogEntry {
+  /** YYYY-MM-DD(`## Month, YYYY` 月标题与 `### Mon DD` 日标题两级合成)。 */
+  date: string
+  /** 条目类型行原文(Feature/Update/Announcement/Fix…)。 */
+  typeLine: string
+  /** 类型行声明的模型 ID(changelog 用精确 API ID,含日期快照与移动别名)。 */
+  models: string[]
+  /** 正文首行(自动解析事件的标题;无正文 → 空串)。 */
+  firstLine: string
+}
+
+/** changelog Markdown → 条目数组。月标题定年月、日标题定日;类型行(Feature/Update/…
+ *  开头)起一条,正文首行为标题;无日期上下文或畸形日期下的条目跳过;不认识的
+ *  `##`/`###` 标题保守清空日期上下文(实测 156 个日标题全部规整,此分支为防线)。 */
+export function parseOpenAIChangelog(md: string): OpenAIChangelogEntry[] {
+  const out: OpenAIChangelogEntry[] = []
+  let year: string | null = null
+  let month: string | null = null
+  let day: string | null = null
+  let entry: OpenAIChangelogEntry | null = null
+  const flush = () => {
+    if (entry !== null) out.push(entry)
+    entry = null
+  }
+  for (const line of md.split('\n')) {
+    if (line.startsWith('## ')) {
+      flush()
+      const monthHeading = /^## ([A-Z][a-z]+), (\d{4})\s*$/.exec(line)
+      year = monthHeading?.[2] ?? null
+      month = (monthHeading !== null ? MONTHS[monthHeading[1]!] : null) ?? null
+      day = null
+      continue
+    }
+    if (line.startsWith('### ')) {
+      flush()
+      const dayHeading = /^### ([A-Z][a-z]{2}) (\d{1,2})\s*$/.exec(line)
+      const d = dayHeading !== null ? Number(dayHeading[2]) : NaN
+      day = month !== null && d >= 1 && d <= 31 ? String(d).padStart(2, '0') : null
+      continue
+    }
+    if (/^(Feature|Update|Announcement|Fix|Deprecation|Breaking change)\b/.test(line)) {
+      if (year !== null && month !== null && day !== null) {
+        flush()
+        entry = {
+          date: `${year}-${month}-${day}`,
+          typeLine: line.trim(),
+          models: [...line.matchAll(/Model: ([a-zA-Z0-9._-]+)/g)].map((m) => m[1]!),
+          firstLine: '',
+        }
+      }
+      continue
+    }
+    if (entry !== null && entry.firstLine === '' && line.trim() !== '') entry.firstLine = line.trim()
+  }
+  flush()
+  return out
+}
+
+/**
+ * 条目模型 ID → 基线 officialId。**精确 alias 命中优先返回**(「gpt-5.2-codex」归自己,
+ * 不被「gpt-5.2」前缀认领);否则取最长 `id.startsWith(alias + '-')` 前缀命中——日期
+ * 快照(gpt-image-2-2026-04-21、gpt-4o-mini-transcribe-2025-12-15)归家族行;移动别名
+ * (chat-latest、daybreak-*-latest、gpt-5.x-chat-latest)不在基线,天然返回 null。
+ */
+export function resolveOpenAIModelId(id: string): string | null {
+  let best: string | null = null
+  let bestLen = -1
+  for (const b of OPENAI_BASELINE) {
+    for (const a of b.matchAliases) {
+      if (a === id) return b.officialId
+      if (id.startsWith(`${a}-`) && a.length > bestLen) {
+        best = b.officialId
+        bestLen = a.length
+      }
+    }
+  }
+  return best
+}
+
+/** 条目标题:正文首行,超长截断(changelog 无短标题,首句即最接近的概述)。 */
+function openaiEntryTitle(firstLine: string): string {
+  return firstLine.length > 160 ? `${firstLine.slice(0, 157)}…` : firstLine
+}
+
+/**
+ * changelog 条目 → 每个被认领模型一条事件(kind 恒 'updated',自动解析不猜语义;
+ * 同条目多个 ID 命中同一行只产一条)。与基线事件同 (模型,日期,锚点) 的条目由
+ * poll 跳过——基线 api_available 等语义事件在库时不补 'updated' 重复行。
+ * ponytail: 锚点为日粒度,同日同模型两条公告会撞去重键只留一条(实测 changelog
+ * 同日多公告均为不同模型/无模型条目;若上游出现同日同模型双公告,再升条目序号锚)。
+ */
+export function matchOpenAIEvents(
+  entries: OpenAIChangelogEntry[],
+): Array<{ officialId: string; event: Omit<ModelEvent, 'id'> }> {
+  const out: Array<{ officialId: string; event: Omit<ModelEvent, 'id'> }> = []
+  for (const e of entries) {
+    if (e.models.length === 0) continue
+    const anchor = openaiChangelogAnchor(e.date)
+    const claimed = new Set<string>()
+    for (const id of e.models) {
+      const officialId = resolveOpenAIModelId(id)
+      if (officialId === null || claimed.has(officialId)) continue
+      claimed.add(officialId)
+      out.push({
+        officialId,
+        event: {
+          kind: 'updated',
+          occurredOn: e.date,
+          title: openaiEntryTitle(e.firstLine !== '' ? e.firstLine : e.typeLine),
+          sourceUrl: anchor,
+        },
+      })
+    }
+  }
+  return out
+}
+
 // ---- 服务(档案读写 + 轮询;IO 经 ModelTrackingDeps 注入,测试零真网)----
 
 export interface ModelTrackingDeps {
@@ -458,6 +593,7 @@ export class ModelTrackingService {
     void this.pollZhipu().catch((e) => console.error('模型追踪(智谱)取数失败:', e))
     void this.pollAnthropic().catch((e) => console.error('模型追踪(Anthropic)取数失败:', e))
     void this.pollXai().catch((e) => console.error('模型追踪(xAI)取数失败:', e))
+    void this.pollOpenAI().catch((e) => console.error('模型追踪(OpenAI)取数失败:', e))
     void this.pollDeepSeek().catch((e) => console.error('模型追踪(DeepSeek)取数失败:', e))
   }
 
@@ -563,6 +699,14 @@ export class ModelTrackingService {
     await this.pollOne('xai', XAI_RELEASES_URL, (md) => {
       const entries = parseXaiReleaseNotes(md)
       return entries.length === 0 ? null : entries.flatMap(matchXaiEvent)
+    })
+  }
+
+  /** OpenAI 一轮:changelog 类型行 `Model:` 字段精确/前缀匹配基线(零条目 = 上游改版)。 */
+  async pollOpenAI(): Promise<void> {
+    await this.pollOne('openai', OPENAI_CHANGELOG_URL, (md) => {
+      const entries = parseOpenAIChangelog(md)
+      return entries.length === 0 ? null : matchOpenAIEvents(entries)
     })
   }
 

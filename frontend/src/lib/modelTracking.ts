@@ -55,6 +55,7 @@ export const EVENT_KIND_LABELS: Record<ModelEventKind, string> = {
 /** 厂家展示名(详情 Modal 的 tab 与行内厂家位共用;tab 随厂家票扩自动派生)。 */
 export const PROVIDER_LABELS: Record<ModelProviderId, string> = {
   zhipu: '智谱',
+  openai: 'OpenAI',
   anthropic: 'Anthropic',
   xai: 'xAI',
   deepseek: 'DeepSeek',

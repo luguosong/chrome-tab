@@ -8,21 +8,31 @@ import {
   ANTHROPIC_BASELINE,
   ANTHROPIC_RELEASES_URL,
   ModelTrackingService,
+  OPENAI_BASELINE,
+  OPENAI_CHANGELOG_URL,
   XAI_BASELINE,
   XAI_RELEASES_URL,
   ZHIPU_BASELINE,
   ZHIPU_RELEASES_URL,
   matchAnthropicEvent,
+  matchOpenAIEvents,
   matchXaiEvent,
   matchZhipuEvent,
   normalizeAnthropicDate,
   normalizeZhipuDate,
   parseAnthropicReleases,
+  parseOpenAIChangelog,
   parseXaiReleaseNotes,
   parseZhipuReleases,
+  resolveOpenAIModelId,
   type ModelTrackingDeps,
 } from './modelTracking'
-import { DEEPSEEK_BASELINE, DEEPSEEK_UPDATES_URL, matchDeepSeekEvent, parseDeepSeekUpdates } from './deepseekBaseline'
+import {
+  DEEPSEEK_BASELINE,
+  DEEPSEEK_UPDATES_URL,
+  matchDeepSeekEvent,
+  parseDeepSeekUpdates,
+} from './deepseekBaseline'
 
 /**
  * 模型追踪自动检查(issues/01:单例/占格、持久化、陈旧降级 + 鉴权;issues/02:八类
@@ -136,6 +146,48 @@ Grok Speech to Speech API is generally available.
 `
 
 /**
+ * OpenAI API changelog 快照节选(2026-08-25 实抓口径:`## 月份, 年`/`### 缩写日` 两级
+ * 标题、类型行 `Feature · Model: id` 自带结构化模型 ID;同日双条目与无模型条目并存,
+ * 尾部一个非日期 `###` 标题验证保守清空日期上下文)。
+ */
+const OPENAI_MD = `# Changelog
+
+## August, 2026
+
+### Aug 21
+
+Update · Model: gpt-5.6-sol
+
+GPT-5.6 Sol now costs $4 per million input tokens and $20 per million output tokens.
+
+### Aug 21
+
+Feature
+
+Released the Prompt Caching dashboard.
+
+## July, 2026
+
+### Jul 9
+
+Feature · Model: gpt-5.6-sol · Model: gpt-5.6-terra · Model: gpt-5.6-luna
+
+Released the GPT-5.6 model family, including Sol, Terra, and Luna.
+
+### Jul 6
+
+Feature · Model: gpt-realtime-2.1 · Model: gpt-realtime-2.1-mini
+
+Released GPT-Realtime-2.1, an updated realtime reasoning model.
+
+### Non-date Heading
+
+Update · Model: gpt-image-2
+
+透明背景支持(无日期上下文,应被跳过)。
+`
+
+/**
  * DeepSeek API Change Log 快照节选(2026-08-25 实抓口径:`<h2 id="date-…">Date:` 日期
  * 段 + `<h3 id="…">` 小节)。噪音齐备:页首非日期 h2 段(含其内 h3)、别名标题段
  * (deepseek-chat)、家族段(DeepSeek-V4)、非模型段(New API Features)、实体标题
@@ -165,8 +217,8 @@ const DEEPSEEK_HTML = `<html><body>
 </body></html>`
 
 /**
- * 按 URL 分发页面。单字符串 = 智谱页内容 + Anthropic/xAI 页固定夹具(既有单厂家
- * 用例下三轮询都成功且行为确定);Record 原样分发,未列出的 URL 抛错。
+ * 按 URL 分发页面。单字符串 = 智谱页内容 + 其余厂家页固定夹具(既有单厂家用例下
+ * 各轮询都成功且行为确定);Record 原样分发,未列出的 URL 抛错。
  */
 function makeDeps(md: string | Record<string, string>): ModelTrackingDeps {
   const pages: Record<string, string> =
@@ -175,6 +227,7 @@ function makeDeps(md: string | Record<string, string>): ModelTrackingDeps {
           [ZHIPU_RELEASES_URL]: md,
           [ANTHROPIC_RELEASES_URL]: ANTHROPIC_MD,
           [XAI_RELEASES_URL]: XAI_MD,
+          [OPENAI_CHANGELOG_URL]: OPENAI_MD,
           [DEEPSEEK_UPDATES_URL]: DEEPSEEK_HTML,
         }
       : md
@@ -203,9 +256,9 @@ async function byId(svc: ModelTrackingService, officialId: string) {
   return a.models.find((m) => m.officialId === officialId)
 }
 
-/** 三厂家基线总行数(init 入档的期望值)。 */
+/** 各厂家基线总行数(init 入档的期望值;含并行会话已接线进 ALL_BASELINES 的厂家)。 */
 const TOTAL_BASELINE =
-  ZHIPU_BASELINE.length + ANTHROPIC_BASELINE.length + XAI_BASELINE.length + DEEPSEEK_BASELINE.length
+  ZHIPU_BASELINE.length + ANTHROPIC_BASELINE.length + XAI_BASELINE.length + OPENAI_BASELINE.length + DEEPSEEK_BASELINE.length
 
 describe('模型追踪:图标类型接线(单例/占格)', () => {
   it('MODEL 进单例枚举与跨格表(3×2=6 格,对齐前端注册表)', () => {
@@ -320,17 +373,18 @@ describe('模型追踪:基线自身(issues/02 八类全量)', () => {
     expect([...ids].some((id) => id.endsWith('-250414'))).toBe(false)
   })
 
-  it('已退役模型入档且 stage=retired、排序沉底(智谱 2 条 + Anthropic 6 条 + xAI 1 条 + DeepSeek 8 条)', async () => {
+  it('已退役模型入档且 stage=retired、排序沉底(期望自基线推导——新厂家票扩清单不再改此处)', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
     const a = await svc.archive()
     const retired = a.models.filter((m) => m.stage === 'retired')
-    expect(retired.map((m) => m.officialId).sort()).toEqual([
-      'claude-3-5-haiku', 'claude-3-7-sonnet', 'claude-3-haiku', 'claude-opus-4', 'claude-opus-4-1', 'claude-sonnet-4',
-      'deepseek-coder-v2', 'deepseek-r1', 'deepseek-v2', 'deepseek-v2.5', 'deepseek-v3', 'deepseek-v3.1', 'deepseek-v3.2', 'deepseek-v3.2-speciale',
-      'glm-4-0520', 'glm-z1',
-      'grok-code-fast-1',
-    ])
+    const expected = [
+      ...ZHIPU_BASELINE, ...ANTHROPIC_BASELINE, ...XAI_BASELINE,       ...OPENAI_BASELINE, ...DEEPSEEK_BASELINE,
+    ]
+      .filter((b) => b.stage === 'retired')
+      .map((b) => b.officialId)
+      .sort()
+    expect(retired.map((m) => m.officialId).sort()).toEqual(expected)
     // retired 沉底:其后不再有可用模型
     const firstRetired = a.models.findIndex((m) => m.stage === 'retired')
     expect(a.models.slice(firstRetired).every((m) => m.stage === 'retired')).toBe(true)
@@ -533,7 +587,9 @@ describe('模型追踪:路由', () => {
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
     await svc.pollZhipu()
     await svc.pollAnthropic()
-    await svc.pollXai() // 三源显式就位(sources 数确定,不靠 init 内未等待轮询的时序)
+    await svc.pollXai()
+    await svc.pollOpenAI()
+    await svc.pollDeepSeek() // 五源显式就位(sources 数确定,不靠 init 内未等待轮询的时序)
     const app = createApp({ db, modelTracking: svc })
     const anon = await app.request('/api/model-tracking/archive')
     expect(anon.status).toBe(401)
@@ -547,7 +603,7 @@ describe('模型追踪:路由', () => {
     expect(res.status).toBe(200)
     const json = (await res.json()) as { models: unknown[]; sources: unknown[] }
     expect(json.models).toHaveLength(TOTAL_BASELINE)
-    expect(json.sources).toHaveLength(4)
+    expect(json.sources).toHaveLength(5)
   })
 })
 
@@ -841,6 +897,171 @@ describe('模型追踪:xAI 基线信源一致性(评审修正)', () => {
         }
       }
     }
+  })
+})
+
+describe('模型追踪:OpenAI changelog 解析(纯函数,issues/03)', () => {
+  it('提取条目:月/日两级标题合成日期,类型行 Model: 字段逐段提取,正文首行为标题', () => {
+    const entries = parseOpenAIChangelog(OPENAI_MD)
+    // 5 个类型行,但 Non-date Heading 后的条目无日期上下文 → 4 条
+    expect(entries).toHaveLength(4)
+    expect(entries[0]).toMatchObject({
+      date: '2026-08-21',
+      models: ['gpt-5.6-sol'],
+      firstLine: 'GPT-5.6 Sol now costs $4 per million input tokens and $20 per million output tokens.',
+    })
+    expect(entries[1]).toMatchObject({ date: '2026-08-21', models: [] }) // Feature 无模型条目
+    expect(entries[2]).toMatchObject({
+      date: '2026-07-09',
+      models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
+    })
+  })
+
+  it('空文返回空数组;非日期 ### 标题保守清空日期上下文(后续条目跳过)', () => {
+    expect(parseOpenAIChangelog('')).toEqual([])
+    const entries = parseOpenAIChangelog(OPENAI_MD)
+    expect(entries.at(-1)).toMatchObject({ date: '2026-07-06' }) // Non-date Heading 后的 gpt-image-2 条目未成为第 5 条
+  })
+
+  it('归属解析:精确 alias 优先(gpt-5.2-codex 不被 gpt-5.2 认领),日期快照最长前缀归族', () => {
+    expect(resolveOpenAIModelId('gpt-5.2-codex')).toBe('gpt-5.2-codex')
+    expect(resolveOpenAIModelId('gpt-image-2-2026-04-21')).toBe('gpt-image-2')
+    expect(resolveOpenAIModelId('gpt-4o-mini-transcribe-2025-12-15')).toBe('gpt-4o-mini-transcribe')
+    expect(resolveOpenAIModelId('sora-2-2025-10-06')).toBe('sora-2')
+    // 移动别名不在基线 → null(移动别名、latest 与日期快照不另占一行,issues/03)
+    for (const id of ['chat-latest', 'daybreak-red-latest', 'daybreak-blue-latest', 'gpt-5.3-chat-latest', 'chatgpt-image-latest']) {
+      expect(resolveOpenAIModelId(id)).toBeNull()
+    }
+  })
+
+  it('条目 → 事件:一表多模型各产一条、同键同锚点;无模型条目与基线外别名条目不产事件', () => {
+    const events = matchOpenAIEvents(parseOpenAIChangelog(OPENAI_MD))
+    expect(events.map((e) => e.officialId)).toEqual([
+      'gpt-5.6-sol',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-realtime-2.1',
+      'gpt-realtime-2.1-mini',
+    ])
+    expect(events[2]!.event).toMatchObject({
+      kind: 'updated',
+      occurredOn: '2026-07-09',
+      sourceUrl: 'https://developers.openai.com/api/docs/changelog#jul-9',
+    })
+  })
+})
+
+describe('模型追踪:OpenAI 基线自身(issues/03)', () => {
+  it('官方目录种类映射:六类入档(目录无独立 rerank;GPT 主线图像输入是能力非种类),provider/officialId 唯一', () => {
+    const kinds = new Set(OPENAI_BASELINE.map((b) => b.kind))
+    expect(kinds).toEqual(
+      new Set(['text', 'audio_speech', 'image_generation', 'video_generation', 'embedding', 'moderation_classification']),
+    )
+    for (const b of OPENAI_BASELINE) expect(b.provider).toBe('openai')
+    expect(new Set(OPENAI_BASELINE.map((b) => b.officialId)).size).toBe(OPENAI_BASELINE.length)
+  })
+
+  it('独立变体分立、移动别名与日期快照不另立行;text-moderation 三别名归一行', () => {
+    const ids = new Set(OPENAI_BASELINE.map((b) => b.officialId))
+    for (const id of ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.6-cyber', 'gpt-oss-120b', 'gpt-oss-20b', 'text-moderation']) {
+      expect(ids.has(id)).toBe(true)
+    }
+    for (const banned of ['chat-latest', 'chatgpt-4o-latest', 'daybreak-blue-latest', 'daybreak-red-latest', 'gpt-5-chat-latest', 'gpt-5.3-chat-latest', 'chatgpt-image-latest']) {
+      expect(ids.has(banned)).toBe(false)
+    }
+    expect([...ids].some((id) => /-\d{8}$/.test(id))).toBe(false) // 日期快照归家族行
+  })
+
+  it('多阶段动态保留:sora-2 上线+API 扩充+弃用;gpt-5.2-codex 上线+弃用+退役;降价单列', () => {
+    const kindsOf = (id: string) =>
+      (OPENAI_BASELINE.find((b) => b.officialId === id)!.events ?? []).map((e) => e.kind)
+    expect(kindsOf('sora-2')).toEqual(['first_party_available', 'api_available', 'updated', 'deprecated'])
+    expect(kindsOf('gpt-5.2-codex')).toEqual(['api_available', 'deprecated', 'retired'])
+    // 上线 → ChatGPT 产品侧 → 降价(产品发布与 API 上线按事件分立,issues/03 AC2)
+    expect(kindsOf('gpt-5.6-sol')).toEqual(['api_available', 'first_party_available', 'updated'])
+    // gpt-oss 同日双渠道也分立:权重开放 + API 上线
+    expect(kindsOf('gpt-oss-120b')).toEqual(['weights_available', 'api_available'])
+  })
+
+  it('训练参数量:gpt-oss 双型号官方披露(MoE 总/激活分记),其余未披露为 null', () => {
+    expect(OPENAI_BASELINE.find((b) => b.officialId === 'gpt-oss-120b')!.trainingParams).toEqual({ total: '117B', active: '5.1B' })
+    expect(OPENAI_BASELINE.find((b) => b.officialId === 'gpt-oss-20b')!.trainingParams).toEqual({ total: '21B', active: '3.6B' })
+    expect(OPENAI_BASELINE.filter((b) => b.trainingParams === null)).toHaveLength(OPENAI_BASELINE.length - 2)
+  })
+
+  it('价格保留官方口径:长上下文双档价(≤/>272K)、Sora 按秒按分辨率、审核免费、已下架价为 null', () => {
+    const sol = OPENAI_BASELINE.find((b) => b.officialId === 'gpt-5.6-sol')!
+    expect(sol.pricing!.entries.map((e) => e.scope)).toEqual([
+      '≤272K context length',
+      '≤272K context length',
+      '>272K context length',
+      '>272K context length',
+    ])
+    const soraPro = OPENAI_BASELINE.find((b) => b.officialId === 'sora-2-pro')!
+    expect(soraPro.pricing!.entries).toHaveLength(3) // 720p / 1024p / 1080p 每秒价
+    expect(OPENAI_BASELINE.find((b) => b.officialId === 'omni-moderation')!.pricing!.entries[0]!.text).toBe('免费')
+    expect(OPENAI_BASELINE.find((b) => b.officialId === 'gpt-5.2-codex')!.pricing).toBeNull() // 关停后价格页不列
+  })
+})
+
+describe('模型追踪:OpenAI 档案服务(轮询/历史去重/厂家隔离,issues/03)', () => {
+  it('init 入档:OpenAI 模型在库,profile 齐备(价格/限额);信源就位(前端 tab 数据源)', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, makeDeps(ZHIPU_MD))
+    await svc.pollOpenAI()
+    const sol = await byId(svc, 'gpt-5.6-sol')
+    expect(sol!.provider).toBe('openai')
+    expect(sol!.pricing!.region).toBe('OpenAI API(美元)')
+    expect(sol!.limits).toEqual([
+      { label: '上下文窗口', text: '1,050,000', scope: null },
+      { label: '最大输出', text: '128,000', scope: null },
+    ])
+    const a = await svc.archive()
+    expect(a.models.some((m) => m.provider === 'openai')).toBe(true)
+    expect(a.sources.find((s) => s.provider === 'openai')!.stale).toBe(false)
+  })
+
+  it('历史去重:基线事件占住同 (模型,日期,锚点) 的公告,changelog 不产 updated 重复(两轮幂等)', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, makeDeps(ZHIPU_MD))
+    await svc.pollOpenAI()
+    await svc.pollOpenAI()
+    const sol = await byId(svc, 'gpt-5.6-sol')
+    // 2026-07-09 家族上线:仅基线 api_available;2026-08-21 降价:仅基线 updated
+    expect(sol!.events.filter((e) => e.occurredOn === '2026-07-09')).toHaveLength(1)
+    expect(sol!.events.filter((e) => e.occurredOn === '2026-08-21')).toHaveLength(1)
+    const terra = await byId(svc, 'gpt-5.6-terra')
+    expect(terra!.events.filter((e) => e.occurredOn === '2026-07-09')).toHaveLength(1)
+  })
+
+  it('自动解析捕获基线外新公告:未记录的 changelog 条目以 updated 入库,与基线事件共存', async () => {
+    const { db } = openDb(':memory:')
+    const md = `# Changelog\n\n## September, 2026\n\n### Sep 9\n\nUpdate · Model: gpt-5.6-sol\n\nGPT-5.6 Sol context window expanded.\n`
+    const svc = await makeService(db, makeDeps({ [OPENAI_CHANGELOG_URL]: md }))
+    await svc.pollOpenAI()
+    const sol = await byId(svc, 'gpt-5.6-sol')
+    expect(sol!.events.filter((e) => e.occurredOn === '2026-09-09')).toEqual([
+      expect.objectContaining({
+        kind: 'updated',
+        title: 'GPT-5.6 Sol context window expanded.',
+        sourceUrl: 'https://developers.openai.com/api/docs/changelog#sep-9',
+      }),
+    ])
+  })
+
+  it('厂家隔离:OpenAI 上游改版只标记 openai 陈旧,智谱源与两家档案均不受影响', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, makeDeps(ZHIPU_MD))
+    await svc.pollOpenAI()
+    // 只换 OpenAI 页(200 但零结构化条目 = 上游改版口径),不经 init → 无其他后台轮询
+    const drifty = new ModelTrackingService(db, makeDeps({ [OPENAI_CHANGELOG_URL]: '<html>redesigned</html>' }))
+    await expect(drifty.pollOpenAI()).rejects.toThrow('疑似上游改版')
+    const a = await drifty.archive()
+    expect(a.sources.find((s) => s.provider === 'openai')!.stale).toBe(true)
+    expect(a.sources.find((s) => s.provider === 'zhipu')!.stale).toBe(false)
+    expect((await byId(drifty, 'gpt-5.6-sol'))!.events.length).toBeGreaterThan(0) // 档案保留
+    expect(a.models.some((m) => m.provider === 'zhipu')).toBe(true)
   })
 })
 
