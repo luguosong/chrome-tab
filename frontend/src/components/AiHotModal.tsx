@@ -7,12 +7,14 @@ import type { Icon } from '../lib/types'
 
 /**
  * AI 热点详情 Modal(见 CONTEXT.md「AI 热点」,与天气同范式的详情容器),三 tab:
- *  - 热点榜(默认):事件级聚合排名流,条目主跳 AIHOT 站内事件页(links.story,
+ *  - 日报(默认,2026-08-25 随块内改日报):每早八时定稿的带日期快照
+ *    (CONTEXT.md「AI 日报」),日期标头 + 五分类分组 + 摘要全显的阅读视图;
+ *  - 热点榜:事件级聚合排名流,条目主跳 AIHOT 站内事件页(links.story,
  *    报道时间线 + AI 综述),原文出处(links.original)作次链接直给;
  *  - 模型精选:精选流 ×「模型发布」分类的条目级策展(CONTEXT.md「模型精选」),
- *    主跳 AIHOT 站内阅读页(中文摘要),原文作次链;懒挂载——切到该 tab 才取数;
- *  - 日报:每早八时定稿的带日期快照(CONTEXT.md「AI 日报」),日期标头 + 五分类
- *    分组 + 摘要全显的阅读视图;懒挂载同上,取数无轮询(定稿一天一版)。
+ *    主跳 AIHOT 站内阅读页(中文摘要),原文作次链。
+ * 模型精选/日报面板懒挂载——切到该 tab 才挂载组件、才发请求;日报取数无轮询
+ * (定稿一天一版)。
  * 数据自持 useAiHot / useAiHotModelPicks / useAiHotDaily(图标 body 与热点同
  * queryKey 去重);失败(null / isError)→ 面板内「刷新失败,重试」。容器:fixed
  * 遮罩 + 居中玻璃面板;Esc / 点遮罩关闭(同 WeatherModal;tab 为 TodoModal 同款
@@ -27,7 +29,8 @@ const TABS: { key: Tab; label: string }[] = [
 
 export default function AiHotModal({ icon, onClose }: { icon: Icon; onClose: () => void }) {
   const { data, isError, refetch, isFetching } = useAiHot()
-  const [tab, setTab] = useState<Tab>('hot')
+  // 默认日报(2026-08-25 起块内即日报,「更多」= 块内内容展开,默认视图随之)
+  const [tab, setTab] = useState<Tab>('daily')
   // 失败 = 网络错(isError)或后端从未取到(data===null,HTTP 200);
   // data===undefined 是首次加载中,不算失败(区别于 null,WeatherModal 同款显式加载态)。
   const failed = isError || data === null
@@ -48,9 +51,9 @@ export default function AiHotModal({ icon, onClose }: { icon: Icon; onClose: () 
       aria-modal="true"
       aria-label="AI 热点"
     >
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
 
-      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6 max-h-[80vh] overflow-y-auto">
+      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6 max-h-[80vh] overflow-y-auto animate-pop-in">
         <button
           type="button"
           onClick={onClose}

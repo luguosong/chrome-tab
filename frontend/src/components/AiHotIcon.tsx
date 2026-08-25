@@ -1,4 +1,4 @@
-import { useAiHot } from '../hooks/useAiHot'
+import { useAiHotDaily } from '../hooks/useAiHot'
 import { extractString } from '../lib/iconData'
 import { tileFont } from '../lib/iconLayout'
 import { useEditMode } from '../context/EditModeContext'
@@ -8,13 +8,16 @@ import BigTile from './BigTile'
 
 /**
  * AI 热点图标的专属网格渲染(见 CONTEXT.md「AI 热点」;ADR-0021 跨格大 tile):
- * 外壳/标头走 BigTile(ADR-0022 抽取),主体 = 单列滚动新闻流(一行一条,标题
- * 最多两行:超一行自动换行、超两行 line-clamp 省略——中文热点标题 20~40 字基本
- * 完整可读;序号锚第一行基线,top-3 accent)。点击派发(ADR-0022):整块点击
- * 无操作,详情 Modal(AiHotModal,完整榜单)入口 = 标头「更多」按钮;标题即
- * 外链直达 AIHOT 站点(同待办标题直达收集箱);条目链接 stopPropagation 外跳
- * AIHOT 事件页照旧。空榜/取数失败降级 ···(BigTile 空态,重试入口在 Modal)。
- * 数据自持 useAiHot。
+ * 外壳/标头走 BigTile(ADR-0022 抽取),主体 = AI 日报标题列表(2026-08-25 迭代,
+ * 原热点榜移回 Modal)——日报无排名,不放序号,透出上游五分类编组作为唯一结构
+ * (分类标头 accent 弱色,Modal 日报 tab 同款);标题单行截断(日报 20~30 条,
+ * 单行保列表密度,完整标题走悬浮 title 与 Modal)。点击派发(ADR-0022):整块
+ * 点击无操作,详情 Modal(AiHotModal,默认 tab 即日报)入口 = 标头「更多」按钮;
+ * 条目链接 stopPropagation 外跳 AIHOT 阅读页,编辑模式渲染纯文本。鲜度位显示
+ * 出刊推定时刻:日报只带日期粒度,按上游「每早八时(北京时间)定稿」补 T08:00
+ * 时区偏移,由 timeAgo 显示「N 小时前」——日期粒度下的最诚实表达。空刊/取数
+ * 失败降级 ···(BigTile 空态,重试入口在 Modal)。数据自持 useAiHotDaily
+ * (定稿快照,同 hook 无轮询,Modal 日报 tab 同 queryKey 去重)。
  */
 export default function AiHotIconBody({
   icon,
@@ -26,12 +29,12 @@ export default function AiHotIconBody({
   /** 「更多」按钮直调(ADR-0022);undefined = 编辑模式/overlay,按钮不渲染。 */
   onOpenDetail?: () => void
 }) {
-  const { data } = useAiHot()
+  const { data } = useAiHotDaily()
   const { editing } = useEditMode()
   const { iconScale } = useLayoutSettings()
   const name = extractString(icon.data, 'name') || 'AI 热点'
-  const topics = data ?? []
-  const fresh = topics[0]?.latestAt ?? null
+  const sections = (data?.sections ?? []).filter((s) => s.items.length > 0)
+  const fresh = data?.date ? `${data.date}T08:00:00+08:00` : null
   const fontSize = tileFont(iconScale, 'secondary')
 
   return (
@@ -41,50 +44,48 @@ export default function AiHotIconBody({
       titleLinkHint="打开 AIHOT 站点"
       fresh={fresh}
       onOpenDetail={onOpenDetail}
-      moreTitle="查看完整榜单"
+      moreTitle="查看完整日报"
       overlay={overlay}
     >
-      {topics.length === 0 ? null : (
-        <ol
+      {sections.length === 0 ? null : (
+        <div
           // 原生滚动翻阅全量(雾胶囊滚动条 tile-scroll,触屏 pan-y 保原生滚动,
-          // TouchSensor delay+tolerance 分流拖拽)。单列(2026-08-23 迭代,原双列):
-          // 一行一条,标题 line-clamp-2——「更多文字」由宽度×两行满足,字号维持 secondary 档
+          // TouchSensor delay+tolerance 分流拖拽)。条目 key 双下标:定稿快照渲染期
+          // 不重排,安全(见 lib/aihot.ts 类型注释)
           className="flex-1 min-h-0 overflow-y-auto flex flex-col px-2 py-1.5 tile-scroll [touch-action:pan-y]"
         >
-          {topics.map((t) => (
-            <li
-              key={t.rank}
-              className="flex items-baseline gap-2 min-w-0 px-2 py-1 rounded-lg hover:bg-white/10 transition"
-            >
-              <span
-                className={
-                  'font-mono shrink-0 w-4 text-right tabular-nums ' +
-                  (t.rank <= 3 ? 'text-accent' : 'text-white/40')
-                }
-                style={{ fontSize }}
-              >
-                {t.rank}
-              </span>
-              {t.storyUrl && !editing ? (
-                <a
-                  href={t.storyUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  title={t.title}
-                  className="min-w-0 line-clamp-2 text-white/90 hover:text-accent"
-                  style={{ fontSize }}
-                >
-                  {t.title}
-                </a>
-              ) : (
-                <span className="min-w-0 line-clamp-2 text-white/90" title={t.title} style={{ fontSize }}>
-                  {t.title}
-                </span>
-              )}
-            </li>
+          {sections.map((s, si) => (
+            // 分类间距挂 section:first-child(标头 div 恒为 section 首子,first: 挂它身上恒真)
+            <section key={si} className="mt-2 first:mt-0">
+              <div className="px-2 pb-0.5 text-accent/80" style={{ fontSize }}>
+                {s.label}
+              </div>
+              <ul>
+                {s.items.map((it, ii) => (
+                  <li key={ii} className="min-w-0 px-2 py-1 rounded-lg hover:bg-white/10 transition">
+                    {it.aihotUrl && !editing ? (
+                      <a
+                        href={it.aihotUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        title={it.title}
+                        className="block truncate text-white/90 hover:text-accent"
+                        style={{ fontSize }}
+                      >
+                        {it.title}
+                      </a>
+                    ) : (
+                      <span className="block truncate text-white/90" title={it.title} style={{ fontSize }}>
+                        {it.title}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
           ))}
-        </ol>
+        </div>
       )}
     </BigTile>
   )
