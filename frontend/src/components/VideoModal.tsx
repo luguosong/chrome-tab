@@ -97,7 +97,7 @@ export default function VideoModal({ onClose }: { onClose: () => void }) {
         </button>
 
         <div className="mb-3 flex items-center gap-2">
-          <div className="text-lg text-white/90">视频更新</div>
+          <h2 className="text-lg font-semibold text-white/90">视频更新</h2>
           <button
             type="button"
             onClick={() => void feed.refetch()}
@@ -183,7 +183,7 @@ function VideoRow({ video: v }: { video: VideoFeedItem }) {
             />
           )}
           {!!v.durationSeconds && (
-            <span className="absolute right-1 bottom-1 rounded bg-black/70 px-1 font-mono text-[10px] text-white/90">
+            <span className="absolute right-1 bottom-1 rounded bg-black/70 px-1 font-mono text-meta text-white/90">
               {fmtDuration(v.durationSeconds)}
             </span>
           )}
@@ -245,7 +245,7 @@ function ManagePane() {
     <div className="space-y-5">
       {/* 分类区 */}
       <section aria-label="分类管理">
-        <h3 className="mb-2 text-xs uppercase tracking-wider text-white/50">分类</h3>
+        <h3 className="mb-2 text-meta uppercase tracking-wider text-white/50">分类</h3>
         <ul className="space-y-1">
           {categories.map((c, i) => (
             <li key={c.id} className="flex items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-white/5">
@@ -262,7 +262,7 @@ function ManagePane() {
                     if (e.key === 'Escape') setRenamingId(null)
                   }}
                   onBlur={() => setRenamingId(null)}
-                  className="flex-1 min-w-0 rounded-lg bg-white/10 px-2 py-1 text-sm text-white/90 outline-none focus:ring-1 focus:ring-accent/60"
+                  className="flex-1 min-w-0 rounded-lg bg-white/10 px-2 py-1 text-sm text-white/90 outline-none focus:ring-1 focus:ring-accent"
                 />
               ) : (
                 <button
@@ -315,7 +315,7 @@ function ManagePane() {
             onChange={(e) => setCatDraft(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && submitCategory()}
             placeholder="新分类名称"
-            className="flex-1 min-w-0 rounded-xl bg-white/10 px-3 py-2 text-sm text-white/90 placeholder:text-white/35 outline-none focus:ring-1 focus:ring-accent/60"
+            className="flex-1 min-w-0 rounded-xl bg-white/10 px-3 py-2 text-sm text-white/90 placeholder:text-white/35 outline-none focus:ring-1 focus:ring-accent"
           />
           <button
             type="button"
@@ -328,7 +328,7 @@ function ManagePane() {
         </div>
       </section>      {/* 博主区 */}
       <section aria-label="博主管理">
-        <h3 className="mb-2 text-xs uppercase tracking-wider text-white/50">博主</h3>
+        <h3 className="mb-2 text-meta uppercase tracking-wider text-white/50">博主</h3>
         {bloggers.data !== undefined && bloggers.data.length === 0 ? (
           <p className="text-sm text-white/50 py-2">粘贴 YouTube 频道页或 B站空间页链接添加博主</p>
         ) : (
@@ -351,13 +351,14 @@ function ManagePane() {
             onKeyDown={(e) => e.key === 'Enter' && submitBlogger()}
             placeholder={addBlogger.isPending ? '解析博主信息…' : 'https://www.youtube.com/@… 或 https://space.bilibili.com/…'}
             disabled={addBlogger.isPending}
-            className="flex-1 min-w-0 rounded-xl bg-white/10 px-3 py-2 text-sm text-white/90 placeholder:text-white/35 outline-none focus:ring-1 focus:ring-accent/60 disabled:opacity-50"
+            className="flex-1 min-w-0 rounded-xl bg-white/10 px-3 py-2 text-sm text-white/90 placeholder:text-white/35 outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
           />
           <button
             type="button"
             onClick={submitBlogger}
             disabled={addBlogger.isPending || !urlDraft.trim()}
-            className="rounded-xl bg-accent/80 hover:bg-accent px-3 py-2 text-sm text-white disabled:opacity-50"
+            className="rounded-full bg-accent px-3.5 py-2 text-sm font-medium text-white transition hover:bg-accent/90
+              active:bg-accent/80 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-white/60"
           >
             添加
           </button>

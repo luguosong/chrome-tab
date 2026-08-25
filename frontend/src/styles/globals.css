@@ -3,11 +3,20 @@
 /* class-based 深色模式：.dark 加在 <html> 上 */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* 主题 token */
+/* 主题 token(accent = Apple Sky Link Blue #2997ff,深色面唯一交互色——
+   换自旧陶土 #d97151,2026-08-25;--font-sans 覆盖后经 v4 preflight 的
+   --default-font-family 自动应用到 html,无需 body 规则) */
 @theme {
-  --color-accent: #d97151;
+  --color-accent: #2997ff;
   --color-up: #ff5c5c;
   --color-down: #3ddc97;
+  --font-sans:
+    system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei",
+    "Noto Sans SC", sans-serif;
+  /* meta 档(11px):eyebrow/日期/计数/badge 的收编档,替代散布的 text-[11px];
+     只绑行高不绑字距——多数消费方是元信息行,tracking 由 eyebrow 位显式声明 */
+  --text-meta: 0.6875rem;
+  --text-meta--line-height: 1rem;
 }
 
 /* 行内代码（changelog 渲染等） */

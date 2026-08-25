@@ -54,7 +54,7 @@ export default function SearchBox() {
           placeholder="搜索或输入网址，回车跳转"
           autoComplete="off"
           aria-label="搜索或输入网址"
-          className="flex-1 min-w-0 ml-3 bg-transparent border-none outline-none text-sm text-white placeholder-white/60"
+          className="flex-1 min-w-0 ml-3 bg-transparent border-none outline-none text-sm text-white placeholder-white/50"
         />
       </LensBox>
     </form>

@@ -58,7 +58,7 @@ function TypeSection({
   if (defs.length === 0) return null
   return (
     <section>
-      <h3 className="mb-2 text-[11px] uppercase tracking-[0.15em] text-white/45">{title}</h3>
+      <h3 className="mb-2 text-meta uppercase tracking-wider text-white/50">{title}</h3>
       <div className="space-y-3">
         {defs.map((def) => (
           <TypeCard
@@ -132,7 +132,7 @@ function TypeCard({
       <div className="glass-soft rounded-2xl p-4 opacity-60">
         <div className="flex items-center justify-between">
           <span className="text-sm text-white/80">{def.label}</span>
-          <span className="text-[11px] text-white/50">已添加</span>
+          <span className="text-meta text-white/50">已添加</span>
         </div>
       </div>
     )
@@ -148,7 +148,7 @@ function TypeCard({
         <span className="text-sm font-medium text-white/95">{def.label}</span>
         <span
           aria-label={`占 ${span.w}×${span.h} 格`}
-          className="rounded-full bg-white/10 px-2 py-0.5 font-mono text-[11px] tabular-nums text-white/60"
+          className="rounded-full bg-white/10 px-2 py-0.5 font-mono text-meta tabular-nums text-white/60"
         >
           {span.w}×{span.h}
         </span>
@@ -215,8 +215,8 @@ function TypeCard({
       <button
         type="submit"
         disabled={create.isPending || noPage || locMissing}
-        className="w-full rounded-full bg-accent/90 py-1.5 text-sm font-medium text-white transition hover:bg-accent
-          active:bg-accent/75 focus-visible:outline-2 focus-visible:outline-white/60 disabled:opacity-50"
+        className="w-full rounded-full bg-accent py-1.5 text-sm font-medium text-white transition hover:bg-accent/90
+          active:bg-accent/80 focus-visible:outline-2 focus-visible:outline-white/60 disabled:opacity-50"
       >
         {create.isPending ? '添加中…' : locMissing ? '请选择城市' : `添加${def.label}`}
       </button>

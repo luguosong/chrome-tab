@@ -57,7 +57,7 @@ export default function AiHotIconBody({
           {sections.map((s, si) => (
             // 分类间距挂 section:first-child(标头 div 恒为 section 首子,first: 挂它身上恒真)
             <section key={si} className="mt-2 first:mt-0">
-              <div className="px-2 pb-0.5 text-accent/80" style={{ fontSize }}>
+              <div className="px-2 pb-0.5 text-accent" style={{ fontSize }}>
                 {s.label}
               </div>
               <ul>

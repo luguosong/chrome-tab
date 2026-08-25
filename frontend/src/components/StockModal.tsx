@@ -86,7 +86,7 @@ export default function StockModal({
 
         {/* 标题 */}
         <div className="mb-4">
-          <div className="text-lg text-white/90">{name}</div>
+          <h2 className="text-lg font-semibold text-white/90">{name}</h2>
           <div className="text-xs text-white/50 font-mono">{code}</div>
         </div>
 
@@ -113,7 +113,7 @@ export default function StockModal({
         {/* 公司概述(仅公司型;指数只显示行情,见 ADR-0004) */}
         {showOverview && (
           <div className="mb-5">
-            <div className="text-[11px] uppercase tracking-wider text-white/50 mb-2">
+            <div className="text-meta uppercase tracking-wider text-white/50 mb-2">
               公司概述
             </div>
 
@@ -163,7 +163,7 @@ export default function StockModal({
 
         {/* K 线(收盘价折线,东财 push2his,见 ADR-0004 / CONTEXT「公司概述」) */}
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-white/50 mb-2">
+          <div className="text-meta uppercase tracking-wider text-white/50 mb-2">
             K 线
           </div>
           <div className="h-32 rounded-xl border border-white/10 bg-white/5 px-3 py-2">

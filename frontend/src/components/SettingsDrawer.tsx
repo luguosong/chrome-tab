@@ -175,7 +175,7 @@ export function SettingsPane({
 /** 节标题:小字 + 发丝线,只承担分组导航,不与控件抢视觉。 */
 function Section({ children }: { children: string }) {
   return (
-    <h3 className="pt-2 pb-1.5 mb-4 border-b border-white/10 text-[11px] font-medium tracking-[0.15em] text-white/45">
+    <h3 className="pt-2 pb-1.5 mb-4 border-b border-white/10 text-meta uppercase tracking-wider text-white/50">
       {children}
     </h3>
   )
@@ -247,7 +247,7 @@ function Slider({
     <div className="mb-5">
       <div className="flex items-center justify-between mb-1.5 text-xs text-white/80">
         <span>{label}</span>
-        <span className="rounded-full bg-white/10 px-2 py-0.5 font-mono text-[11px] tabular-nums text-white/70">
+        <span className="rounded-full bg-white/10 px-2 py-0.5 font-mono text-meta tabular-nums text-white/70">
           {value}
           {unit}
         </span>

@@ -58,15 +58,15 @@ export default function AiHotModal({ icon, onClose }: { icon: Icon; onClose: () 
           type="button"
           onClick={onClose}
           aria-label="关闭"
-          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center"
+          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center focus-visible:outline-2 focus-visible:outline-white/60"
         >
           ×
         </button>
 
         <div className="mb-3">
-          <div className="text-lg text-white/90">
+          <h2 className="text-lg font-semibold text-white/90">
             {extractString(icon.data, 'name') || 'AI 热点'}
-          </div>
+          </h2>
           <div className="text-xs text-white/50">AIHOT 事件热点榜 + 模型精选 + AI 日报</div>
         </div>
 
@@ -130,7 +130,7 @@ export default function AiHotModal({ icon, onClose }: { icon: Icon; onClose: () 
                     ) : (
                       <span className="text-sm text-white/90 leading-snug">{t.title}</span>
                     )}
-                    <div className="text-[11px] text-white/50 mt-1 flex items-center gap-2 flex-wrap">
+                    <div className="text-meta text-white/50 mt-1 flex items-center gap-2 flex-wrap">
                       {t.sourceName && <span className="truncate max-w-[40%]">{t.sourceName}</span>}
                       {t.sourceCount > 1 && <span>{t.sourceCount} 源</span>}
                       {t.latestAt && <span>{timeAgo(t.latestAt)}</span>}
@@ -203,7 +203,7 @@ function ModelPicksPanel() {
           ) : (
             <span className="text-sm text-white/90 leading-snug">{p.title}</span>
           )}
-          <div className="text-[11px] text-white/50 mt-1 flex items-center gap-2 flex-wrap">
+          <div className="text-meta text-white/50 mt-1 flex items-center gap-2 flex-wrap">
             {p.sourceName && <span className="truncate max-w-[40%]">{p.sourceName}</span>}
             {p.publishedAt && <span>{timeAgo(p.publishedAt)}</span>}
             {p.originalUrl && (
@@ -284,7 +284,7 @@ function DailyPanel() {
                 ) : (
                   <span className="text-sm text-white/90 leading-snug">{it.title}</span>
                 )}
-                <div className="text-[11px] text-white/50 mt-1 flex items-center gap-2 flex-wrap">
+                <div className="text-meta text-white/50 mt-1 flex items-center gap-2 flex-wrap">
                   {it.sourceName && <span className="truncate max-w-[40%]">{it.sourceName}</span>}
                   {it.originalUrl && (
                     <a
@@ -298,7 +298,7 @@ function DailyPanel() {
                   )}
                 </div>
                 {it.summary && (
-                  <p className="text-[13px] text-white/60 leading-relaxed mt-1.5">{it.summary}</p>
+                  <p className="text-sm text-white/60 leading-relaxed mt-1.5">{it.summary}</p>
                 )}
               </li>
             ))}

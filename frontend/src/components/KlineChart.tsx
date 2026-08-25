@@ -60,7 +60,7 @@ export default function KlineChart({ klines }: { klines: KlinePoint[] }) {
         )}
       </svg>
       {n > 1 && (
-        <div className="flex justify-between pt-1 font-mono text-[11px] text-white/40">
+        <div className="flex justify-between pt-1 font-mono text-meta text-white/40">
           <span>{klines[0].date}</span>
           <span>{klines[n - 1].date}</span>
         </div>

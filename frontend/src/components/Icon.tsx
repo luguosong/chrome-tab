@@ -317,7 +317,7 @@ function EditActions({
               setEditOpen(!editOpen)
             }}
             onContextMenu={(e) => e.stopPropagation()}
-            className="glass-panel w-8 h-8 rounded-full text-[11px] leading-none text-white/90 flex items-center justify-center hover:bg-white/40 active:bg-white/40 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-white/60"
+            className="glass-panel w-8 h-8 rounded-full text-meta leading-none text-white/90 flex items-center justify-center hover:bg-white/40 active:bg-white/40 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-white/60"
             title="编辑"
           >
             ✎

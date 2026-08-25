@@ -173,7 +173,7 @@ export default function PageTabs() {
               onClick={() => goTo(i)}
               title={editing ? `${p.name} · 双击重命名 · 拖拽排序` : p.name}
               className={
-                'group flex items-center gap-1 px-3 py-2 rounded-full text-[13px] whitespace-nowrap ' +
+                'group flex items-center gap-1 px-3 py-2 rounded-full text-sm whitespace-nowrap ' +
                 'transition select-none focus-visible:outline-2 focus-visible:outline-white/60 ' +
                 // 选中拇指的实心白是 prototype/liquid-glass 定稿裁决:L2 镜头轨上的选中态
                 // 刻意区别于 .glass-segment-thumb 的 L1 轨道滑块(玻璃页签上再叠玻璃会糊)
@@ -247,7 +247,7 @@ export default function PageTabs() {
               }}
               onContextMenu={(e) => e.stopPropagation()}
               title="新建页"
-              className="shrink-0 px-3 py-2 rounded-full text-[13px] text-white/80 hover:text-white flex items-center justify-center focus-visible:outline-2 focus-visible:outline-white/60"
+              className="shrink-0 px-3 py-2 rounded-full text-sm text-white/80 hover:text-white flex items-center justify-center focus-visible:outline-2 focus-visible:outline-white/60"
             >
               +
             </button>

@@ -63,7 +63,7 @@ export default function WeatherModal({
 
         {/* 标题:城市 + 行政区划 */}
         <div className="mb-4">
-          <div className="text-lg text-white/90">{name}</div>
+          <h2 className="text-lg font-semibold text-white/90">{name}</h2>
           {loc && (
             <div className="text-xs text-white/50">
               {[loc.adm1, loc.adm2].filter(Boolean).join(' · ')}
@@ -249,7 +249,7 @@ function AlertBody({ a }: { a: WeatherAlert }) {
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
-    <div className="text-[11px] uppercase tracking-wider text-white/50 mb-2">{children}</div>
+    <div className="text-meta uppercase tracking-wider text-white/50 mb-2">{children}</div>
   )
 }
 

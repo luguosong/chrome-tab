@@ -84,7 +84,7 @@ export default function ChangelogModal({
         {/* 顶栏:标题 + 副标题 + 关闭 */}
         <div className="flex items-start justify-between px-6 pt-4 pb-2">
           <div className="min-w-0">
-            <h2 className="text-base font-semibold text-white/90">{sourceLabel} 更新日志</h2>
+            <h2 className="text-lg font-semibold text-white/90">{sourceLabel} 更新日志</h2>
             <p className="mt-0.5 text-xs text-white/50">
               {latest ? `共 ${versions.length} 个版本 · 最新 ${latest}` : '加载中…'}
             </p>
@@ -159,14 +159,14 @@ export default function ChangelogModal({
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3
                             className={
-                              'font-mono text-[15px] ' +
+                              'font-mono text-sm ' +
                               (isLatest ? 'text-accent font-semibold' : 'text-white/75')
                             }
                             dangerouslySetInnerHTML={{ __html: inline(v.title) }}
                           />
-                          {date && <span className="font-mono text-[11px] text-white/40">{date}</span>}
+                          {date && <span className="font-mono text-meta text-white/40">{date}</span>}
                           {isLatest && (
-                            <span className="rounded-full bg-accent/20 px-2 py-0.5 text-[11px] font-medium leading-none text-accent">
+                            <span className="rounded-full bg-accent/20 px-2 py-0.5 text-meta font-medium leading-none text-accent">
                               最新
                             </span>
                           )}
@@ -176,7 +176,7 @@ export default function ChangelogModal({
                               target="_blank"
                               rel="noreferrer"
                               title="GitHub Releases(新标签页打开)"
-                              className="rounded-full border border-white/25 px-2.5 py-1 text-[11px] leading-none text-white/60 hover:border-accent hover:text-accent transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
+                              className="rounded-full border border-white/25 px-2.5 py-1 text-meta leading-none text-white/60 hover:border-accent hover:text-accent transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
                             >
                               GitHub ↗
                             </a>
@@ -187,7 +187,7 @@ export default function ChangelogModal({
                               disabled={translateMut.isPending}
                               onClick={() => translateMut.mutate([v.title])}
                               title={translateMut.isPending ? pendingHint : '机器翻译此版本(译后持久化)'}
-                              className="rounded-full border border-white/25 px-2.5 py-1 text-[11px] leading-none text-white/60 hover:border-accent hover:text-accent disabled:opacity-50 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
+                              className="rounded-full border border-white/25 px-2.5 py-1 text-meta leading-none text-white/60 hover:border-accent hover:text-accent disabled:opacity-50 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
                             >
                               {translateMut.isPending ? pendingLabel : '翻译'}
                             </button>
@@ -197,13 +197,13 @@ export default function ChangelogModal({
                           <div key={j} className="mt-1.5">
                             {g.name && (
                               <div
-                                className="mb-0.5 text-[12px] font-medium text-white/80"
+                                className="mb-0.5 text-xs font-medium text-white/80"
                                 dangerouslySetInnerHTML={{ __html: inline(g.name) }}
                               />
                             )}
                             <ul className="space-y-1">
                               {g.items.map((it, k) => (
-                                <li key={k} className="flex gap-2 text-[13px] text-white/70">
+                                <li key={k} className="flex gap-2 text-sm text-white/70">
                                   <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-white/40" />
                                   <span
                                     className="min-w-0"

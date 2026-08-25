@@ -43,7 +43,7 @@ export default function LoginPage() {
             onChange={(e) => setUsername(e.target.value)}
             placeholder="用户名"
             autoComplete="username"
-            className="bg-white/20 text-white placeholder-white/50 px-3 py-2 rounded-lg outline-none transition focus:ring-2 focus:ring-accent/60"
+            className="bg-white/20 text-white placeholder-white/50 px-3 py-2 rounded-lg outline-none transition focus:ring-2 focus:ring-accent"
           />
           <input
             type="password"
@@ -51,7 +51,7 @@ export default function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="密码"
             autoComplete="current-password"
-            className="bg-white/20 text-white placeholder-white/50 px-3 py-2 rounded-lg outline-none transition focus:ring-2 focus:ring-accent/60"
+            className="bg-white/20 text-white placeholder-white/50 px-3 py-2 rounded-lg outline-none transition focus:ring-2 focus:ring-accent"
           />
           {err && <div className="text-down text-sm text-center">{err}</div>}
           <button

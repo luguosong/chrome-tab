@@ -128,7 +128,7 @@ export default function CountdownEditModal({ onClose }: { onClose: () => void })
 
         {draft === null ? (
           <>
-            <h2 className="text-base font-medium mb-3">重要日子</h2>
+            <h2 className="text-lg font-semibold mb-3">重要日子</h2>
             <div className="space-y-1">
               {layout.importantDates.length === 0 && (
                 <p className="text-xs text-white/50 py-2">暂无重要日子,点下方「添加」新建。</p>
@@ -167,7 +167,7 @@ export default function CountdownEditModal({ onClose }: { onClose: () => void })
           </>
         ) : (
           <>
-            <h2 className="text-base font-medium mb-3">{draft.id ? '编辑重要日子' : '添加重要日子'}</h2>
+            <h2 className="text-lg font-semibold mb-3">{draft.id ? '编辑重要日子' : '添加重要日子'}</h2>
             <div className="space-y-3">
               <input
                 autoFocus

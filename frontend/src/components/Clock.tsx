@@ -126,7 +126,7 @@ export default function Clock() {
           显隐由 panelOpen(hover-intent,见上)驱动,过渡 200ms 轻于 Modal pop-in 档。 */}
       <div
         ref={panelRef}
-        className={`absolute top-full left-0 z-10 mt-2 w-max max-w-[70vw] rounded-2xl glass-panel glass-panel-readable px-3 py-2 text-xs font-light text-white/90 transition duration-200 ${
+        className={`absolute top-full left-0 z-10 mt-2 w-max max-w-[70vw] rounded-2xl glass-panel glass-panel-readable px-3 py-2 text-xs text-white/90 transition duration-200 ${
           panelOpen
             ? 'opacity-100 translate-y-0 pointer-events-auto'
             : 'opacity-0 translate-y-1 pointer-events-none'
@@ -167,7 +167,7 @@ export default function Clock() {
               <span
                 key={z}
                 title={`${BRANCH[i]}${z} · ${benMing} 本命年`}
-                className={cur ? 'font-medium text-[#FF7A5C]' : 'text-white/45'}
+                className={cur ? 'font-medium text-accent' : 'text-white/45'}
               >
                 {z}
               </span>
@@ -176,7 +176,7 @@ export default function Clock() {
         </div>
         {/* 星座轮:太阳周期,与生肖轮(农历年)构成「年的十二分」双轮组,与生肖轮间
             不加分隔(同组)。双字名直排(gap 收窄保弹层紧凑),区间走 title;
-            当前星座「点朱」(同生肖轮当年语汇,皆「循环中的当下」)。 */}
+            当前星座走 accent(同生肖轮当年语汇,皆「循环中的当下」)。 */}
         <div className="mt-1 flex gap-x-1">
           {XINGZUO.map((x) => {
             const cur = x.name === almanac.xingZuo
@@ -184,7 +184,7 @@ export default function Clock() {
               <span
                 key={x.name}
                 title={`${x.name}座 ${x.range}`}
-                className={cur ? 'font-medium text-[#FF7A5C]' : 'text-white/45'}
+                className={cur ? 'font-medium text-accent' : 'text-white/45'}
               >
                 {x.name}
               </span>
@@ -194,7 +194,9 @@ export default function Clock() {
 
         {/* 宜忌:对立二元并置一行,细竖线分组(同组横线、异组竖线的分区语汇)。
             语义色:宜=emerald-300、忌=red-300(与错误文案红同档)——绿/红专职
-            吉凶,朱红让位给生肖/星座「当下」标记,消解三处同色异义。 */}
+            吉凶;生肖/星座「当下」标记走 accent(2026-08-25 起交互色换蓝,
+            与旧朱红「同色异义」的隔离动机随换色消解,并入 accent 即本项目
+            「当下/选中」语汇)。 */}
         <div className="mt-1.5 pt-1.5 border-t border-white/10 grid grid-cols-2 gap-x-3">
           <div
             className="text-emerald-300"
