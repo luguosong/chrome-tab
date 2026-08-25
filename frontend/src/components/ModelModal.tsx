@@ -65,13 +65,13 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
           type="button"
           onClick={onClose}
           aria-label="关闭"
-          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center"
+          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center focus-visible:outline-2 focus-visible:outline-white/60"
         >
           ×
         </button>
 
         <div className="mb-3">
-          <div className="text-lg text-white/90">模型追踪</div>
+          <h2 className="text-lg font-semibold text-white/90">模型追踪</h2>
           <div className="text-xs text-white/50">AI 模型档案与动态(官方一手信源)</div>
         </div>
 
@@ -113,7 +113,7 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
           <>
             {/* 陈旧标记(CONTEXT.md「模型档案」):单信源失败保留最后成功结果 */}
             {staleSources.length > 0 && (
-              <div className="text-[11px] text-white/50 py-1.5">
+              <div className="text-meta text-white/50 py-1.5">
                 {staleSources
                   .map((s) => {
                     const at = s.lastSuccessAt ? `更新于 ${timeAgo(s.lastSuccessAt)}` : '尚未成功同步'
@@ -170,19 +170,19 @@ function ModelList({
                   )}
                   <span className="truncate text-sm text-white/90">{m.name}</span>
                   {m.stage === 'retired' && (
-                    <span className="shrink-0 rounded-full bg-white/15 px-1.5 py-0.5 text-[11px] text-white/55">
+                    <span className="shrink-0 rounded-full bg-white/15 px-1.5 py-0.5 text-meta text-white/55">
                       已退役
                     </span>
                   )}
                 </span>
-                <span className="shrink-0 text-[11px] text-white/50">
+                <span className="shrink-0 text-meta text-white/50">
                   {PROVIDER_LABELS[m.provider]}
                   <span className="ml-1.5" aria-hidden="true">
                     {open ? '▾' : '▸'}
                   </span>
                 </span>
               </span>
-              <span className="mt-0.5 flex items-baseline justify-between gap-3 min-w-0 text-[11px] text-white/50">
+              <span className="mt-0.5 flex items-baseline justify-between gap-3 min-w-0 text-meta text-white/50">
                 <span className="min-w-0 truncate">
                   {MODEL_KIND_LABELS[m.kind]} · {STAGE_LABELS[m.stage]} ·{' '}
                   {m.availability.map((a) => AVAILABILITY_LABELS[a]).join('/')}
@@ -198,10 +198,10 @@ function ModelList({
             {open && (
               <div className="px-3 pb-2.5 pt-0.5 space-y-2">
                 {m.summary && (
-                  <p className="text-[13px] text-white/65 leading-relaxed">{m.summary}</p>
+                  <p className="text-sm text-white/65 leading-relaxed">{m.summary}</p>
                 )}
                 {/* 详情资料行(issues/02):限额/训练参数量/价格,未披露的维度显示「未知」/「官方未披露」 */}
-                <div className="space-y-0.5 text-[11px] text-white/50">
+                <div className="space-y-0.5 text-meta text-white/50">
                   <div>
                     <span className="text-white/40">限额</span>{' '}
                     {formatModelLimits(m.limits) ?? '未知(官方未披露)'}
@@ -232,7 +232,7 @@ function ModelList({
                   })()}
                 </div>
                 <EvaluationSection evaluations={m.evaluations} status={evaluationStatus} />
-                <div className="text-[11px] text-white/50 flex items-center gap-2 flex-wrap">
+                <div className="text-meta text-white/50 flex items-center gap-2 flex-wrap">
                   <span className="text-white/40">信源</span>
                   {m.sources.map((s) => (
                     <a
@@ -249,7 +249,7 @@ function ModelList({
                 {m.events.length > 0 ? (
                   <ul className="space-y-1 border-t border-white/10 pt-1.5">
                     {m.events.map((e) => (
-                      <li key={e.id} className="flex items-baseline gap-2 text-[12px]">
+                      <li key={e.id} className="flex items-baseline gap-2 text-xs">
                         <span className="shrink-0 font-mono text-white/40">{e.occurredOn}</span>
                         <span className="shrink-0 text-white/50">{EVENT_KIND_LABELS[e.kind]}</span>
                         <a
@@ -265,7 +265,7 @@ function ModelList({
                     ))}
                   </ul>
                 ) : (
-                  <div className="text-[11px] text-white/40">暂无动态</div>
+                  <div className="text-meta text-white/40">暂无动态</div>
                 )}
               </div>
             )}
@@ -291,21 +291,21 @@ function EvaluationSection({
 }) {
   if (!status.configured) {
     return (
-      <div className="text-[11px] text-white/50">
+      <div className="text-meta text-white/50">
         <span className="text-white/40">评测</span> 未配置({EVALUATION_ATTRIBUTION.label} Key)
       </div>
     )
   }
   if (evaluations.length === 0) {
     return (
-      <div className="text-[11px] text-white/50">
+      <div className="text-meta text-white/50">
         <span className="text-white/40">评测</span> 暂无精确匹配
       </div>
     )
   }
   const versions = [...new Set(evaluations.map((e) => e.version))]
   return (
-    <div className="text-[11px] text-white/50 space-y-0.5">
+    <div className="text-meta text-white/50 space-y-0.5">
       <div className="flex items-baseline gap-2 flex-wrap">
         <span className="text-white/40">评测</span>
         {versions.length === 1 && versions[0] !== '' && <span>({versions[0]})</span>}

@@ -73,7 +73,7 @@ export default function ModelIconBody({
                       {m.name}
                     </span>
                     {m.stage === 'retired' && (
-                      <span className="shrink-0 rounded-full bg-white/15 px-1.5 text-[10px] leading-4 text-white/55">
+                      <span className="shrink-0 rounded-full bg-white/15 px-1.5 text-meta leading-4 text-white/55">
                         已退役
                       </span>
                     )}
