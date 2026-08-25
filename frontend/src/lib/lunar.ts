@@ -11,6 +11,10 @@ const COMMON = new Set([
 export interface DayAlmanac {
   /** 农历全称,如「丙午年七月十二」;闰月带「闰」前缀 */
   lunarText: string
+  /** 农历年数字(如 2026),生肖轮 title 算本命年用 */
+  lunarYear: number
+  /** 当年生肖单字(如「马」),与 lunarText 干支同口径(正月初一界) */
+  yearShengXiao: string
   /** 当天节气名(如「处暑」),非节气日为 undefined */
   term?: string
   /** 宜,白名单优选后取前 3 */
@@ -36,6 +40,8 @@ export function getAlmanac(date: Date): DayAlmanac {
   const term = lunar.getJieQi()
   return {
     lunarText: `${lunar.getYearInGanZhi()}年${lunar.getMonthInChinese()}月${lunar.getDayInChinese()}`,
+    lunarYear: lunar.getYear(),
+    yearShengXiao: lunar.getYearShengXiao(),
     term: term || undefined,
     yi: pick(fullYi),
     ji: pick(fullJi),
