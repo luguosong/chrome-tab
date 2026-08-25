@@ -19,7 +19,7 @@ import { pageTransitionFrame } from '../lib/pageTransition'
  * - 横向滚动 + snap-x mandatory，每页宽度 = 容器宽度
  * - 左右玻璃箭头、常驻 PageTabs 页签条(切换/重排/管理,见 PageTabs)
  * - 滚轮纵向 → 翻页(阻止页面内滚动,见 CONTEXT.md「页面」:固定画布;例外——
- *   跨格大 tile 的滚动主体内部优先,滚到边后链式翻页,见 wheel 守卫)
+ *   跨格大 tile 的滚动主体内部优先消化滚轮、到边即停,不链式翻页,见 wheel 守卫)
  * - 键盘 ←/→ 翻页
  * - 滚轮/方向键越界时首尾环形相接(首页↑→末页,末页↓→首页):相邻环形经克隆位
  *   连续滑动(修订 ADR-0008),多步越界瞬间跳切;跨页拖拽不环形
@@ -266,24 +266,22 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    // target 起的祖先链(不含走马灯容器自身)里有「纵向可滚且未到该方向边」的元素
-    // (大 tile 版本榜/热点流/收集箱)→ 放行原生滚动,滚到边后继续滚才链式翻页
-    // (scroll chaining 肌肉记忆)。preventDefault 会取消整个冒泡路径的原生滚动,
-    // 故必须在祖先监听里让路,而不是 tile 侧 stopPropagation 硬切。
-    const inScrollableTile = (target: EventTarget | null, down: boolean): boolean => {
+    // target 起的祖先链(不含走马灯容器自身)里有「纵向可滚」的元素(大 tile 版本榜/
+    // 热点流/收集箱)→ 一律放行原生滚动:滚轮归滚动主体彻底消化,到边即停,不链式翻页
+    // ——浏览器滚动链在 h-screen overflow-hidden 画布上无纵向可滚祖先,自然终止;想翻页
+    // 把指针移到 tile 外。preventDefault 会取消整个冒泡路径的原生滚动,故必须在祖先
+    // 监听里让路,而不是 tile 侧 stopPropagation 硬切。
+    const inScrollableTile = (target: EventTarget | null): boolean => {
       for (let n = target as Element | null; n && n !== el; n = n.parentElement) {
         if (/(auto|scroll)/.test(getComputedStyle(n).overflowY) && n.scrollHeight > n.clientHeight) {
-          const atEdge = down
-            ? n.scrollTop + n.clientHeight >= n.scrollHeight - 1
-            : n.scrollTop <= 1
-          if (!atEdge) return true
+          return true
         }
       }
       return false
     }
     const onWheel = (e: WheelEvent) => {
       if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return // 横向交给原生
-      if (inScrollableTile(e.target, e.deltaY > 0)) return
+      if (inScrollableTile(e.target)) return
       e.preventDefault()
       const now = Date.now()
       if (now - lastWheel.current < 400) return
