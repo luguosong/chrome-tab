@@ -57,6 +57,7 @@ export const PROVIDER_LABELS: Record<ModelProviderId, string> = {
   zhipu: '智谱',
   anthropic: 'Anthropic',
   xai: 'xAI',
+  deepseek: 'DeepSeek',
 }
 
 /**

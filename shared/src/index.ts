@@ -52,9 +52,9 @@ export type VideoBlogger = {
  * Anthropic release notes 日期标题到日;xAI 发布流仅月份标题,事件锚定当月 1 日),
  * 24h 红点窗口按北京时间零点锚定在前端推导(见 frontend lib/modelTracking.ts)。
  * issues/01 贯通智谱文本首片;issues/02 补齐智谱八类全量档案;issues/04 接入
- * Anthropic;issues/05 接入 xAI;ModelProviderId 随后续厂家票扩。
+ * Anthropic;issues/05 接入 xAI;issues/07 接入 DeepSeek;ModelProviderId 随后续厂家票扩。
  */
-export type ModelProviderId = 'zhipu' | 'anthropic' | 'xai'
+export type ModelProviderId = 'zhipu' | 'anthropic' | 'xai' | 'deepseek'
 
 /** 模型种类(CONTEXT.md「模型种类」,八类;与发布阶段/开放方式正交)。 */
 export type ModelKind =

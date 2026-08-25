@@ -34,11 +34,12 @@ describe('模型追踪:展示语汇', () => {
     expect(PROVIDER_LABELS.zhipu).toBe('智谱')
     expect(PROVIDER_LABELS.anthropic).toBe('Anthropic')
     expect(PROVIDER_LABELS.xai).toBe('xAI')
+    expect(PROVIDER_LABELS.deepseek).toBe('DeepSeek') // issues/07
   })
 
   it('厂家 tab 覆盖:PROVIDER_LABELS 键集即「全部」之外的 tab 集(issues/04 双厂家 + issues/05 xAI)', () => {
     // ModelModal 的 TABS 自 PROVIDER_LABELS 派生:键集扩即 tab 随动(「全部」+ 三厂家)
-    expect(Object.keys(PROVIDER_LABELS).sort()).toEqual(['anthropic', 'xai', 'zhipu'])
+    expect(Object.keys(PROVIDER_LABELS).sort()).toEqual(['anthropic', 'deepseek', 'xai', 'zhipu'])
   })
 })
 

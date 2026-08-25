@@ -19,6 +19,7 @@ import type { AuthEnv } from './auth'
 import { ZHIPU_BASELINE } from './zhipuBaseline'
 import { ANTHROPIC_BASELINE } from './anthropicBaseline'
 import { XAI_BASELINE } from './xaiBaseline'
+import { DEEPSEEK_BASELINE, DEEPSEEK_UPDATES_URL, matchDeepSeekEvent, parseDeepSeekUpdates } from './deepseekBaseline'
 
 /**
  * 模型追踪(CONTEXT.md「模型追踪/跟踪模型/模型档案」;ADR-0025):全局单例图标的
@@ -28,7 +29,7 @@ import { XAI_BASELINE } from './xaiBaseline'
  * 代码内人工核验基线**,部署即幂等 upsert 刷新;**模型动态来自各厂家主发布源确定性
  * 解析**(智谱新品发布 Markdown 的 `<Update label description>` 块、Anthropic
  * release notes 的 `### 日期` 段内条目、xAI 发布流的 `## 月份`/`### 条目` 段——仅月
- * 份粒度、事件锚定当月 1 日;按模型+类型+日期+信源去重);解析器
+ * 份粒度、事件锚定当月 1 日、DeepSeek API Change Log 的 HTML `Date:` 段内 h3 小节);按模型+类型+日期+信源去重);解析器
  * **不认识**的更新块(基线外型号,含智谱平台托管的第三方模型、Anthropic 仅限受邀
  * 项目的 Mythos 系列)只作待核验线索跳过——待基线人工核验后纳入,这是「跟踪厂家」
  * 的定义性约束(不开放任意厂家/信源配置,理由见 ADR-0025)。
@@ -104,10 +105,10 @@ export interface BaselineModel {
   events?: Array<Omit<ModelEvent, 'id'>>
 }
 
-export { ZHIPU_BASELINE, ANTHROPIC_BASELINE, XAI_BASELINE }
+export { ZHIPU_BASELINE, ANTHROPIC_BASELINE, XAI_BASELINE, DEEPSEEK_BASELINE }
 
 /** 全部厂家基线(init 幂等 upsert 的单一遍历源;新厂家票 = 基线文件 + 追加于此)。 */
-const ALL_BASELINES: BaselineModel[] = [...ZHIPU_BASELINE, ...ANTHROPIC_BASELINE, ...XAI_BASELINE]
+const ALL_BASELINES: BaselineModel[] = [...ZHIPU_BASELINE, ...ANTHROPIC_BASELINE, ...XAI_BASELINE, ...DEEPSEEK_BASELINE]
 
 // ---- Anthropic release notes 解析(研究 §3:主发布源;页面混有 SDK/平台功能条目,
 //  须按明确模型名/ID 过滤——与智谱同用双条件归属)----
@@ -269,7 +270,7 @@ export function matchXaiEvent(e: XaiReleaseEntry): Array<{ officialId: string; e
  * 或「.」后跟单词字符——版本号下一段)。「4.8.」这类英文句尾句点不算延续(Anthropic
  * 条目为英文句子,「Claude Opus 4.8. See…」须命中);中文不算边界内字符。
  */
-function aliasIn(alias: string, description: string): boolean {
+export function aliasIn(alias: string, description: string): boolean {
   const re = new RegExp(`(?<![\\w.-])${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-]|\\.\\w)`)
   return re.test(description)
 }
@@ -457,6 +458,16 @@ export class ModelTrackingService {
     void this.pollZhipu().catch((e) => console.error('模型追踪(智谱)取数失败:', e))
     void this.pollAnthropic().catch((e) => console.error('模型追踪(Anthropic)取数失败:', e))
     void this.pollXai().catch((e) => console.error('模型追踪(xAI)取数失败:', e))
+    void this.pollDeepSeek().catch((e) => console.error('模型追踪(DeepSeek)取数失败:', e))
+  }
+
+  /** DeepSeek 一轮:Change Log HTML 日期段 h3 小节 → 标题匹配基线(解析器/匹配器随
+   *  基线收在 deepseekBaseline.ts;匹配器可为多命中,flatMap 展开;零小节 = 上游改版)。 */
+  async pollDeepSeek(): Promise<void> {
+    await this.pollOne('deepseek', DEEPSEEK_UPDATES_URL, (html) => {
+      const sections = parseDeepSeekUpdates(html)
+      return sections.length === 0 ? null : sections.flatMap(matchDeepSeekEvent)
+    })
   }
 
   /**

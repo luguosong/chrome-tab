@@ -22,6 +22,7 @@ import {
   parseZhipuReleases,
   type ModelTrackingDeps,
 } from './modelTracking'
+import { DEEPSEEK_BASELINE, DEEPSEEK_UPDATES_URL, matchDeepSeekEvent, parseDeepSeekUpdates } from './deepseekBaseline'
 
 /**
  * 模型追踪自动检查(issues/01:单例/占格、持久化、陈旧降级 + 鉴权;issues/02:八类
@@ -135,13 +136,47 @@ Grok Speech to Speech API is generally available.
 `
 
 /**
+ * DeepSeek API Change Log 快照节选(2026-08-25 实抓口径:`<h2 id="date-…">Date:` 日期
+ * 段 + `<h3 id="…">` 小节)。噪音齐备:页首非日期 h2 段(含其内 h3)、别名标题段
+ * (deepseek-chat)、家族段(DeepSeek-V4)、非模型段(New API Features)、实体标题
+ * (&amp;)、Vision-Exp 节正文提及 V4-Flash、锚点零宽字符——正是标题词边界归属要过滤的形态。
+ */
+const DEEPSEEK_HTML = `<html><body>
+<h2>On this page</h2><h3>Model Details</h3>
+<h2 class="anchor" id="date-2026-08-21">Date: 2026-08-21</h2>
+<h3 class="anchor" id="deepseek-v4-flash-vision-exp-release">DeepSeek-V4-Flash-Vision-Exp Release<a href="#x" class="hash-link">​</a></h3>
+<p>In terms of pure-text capabilities, DeepSeek-V4-Flash-Vision-Exp is on par with the official DeepSeek-V4-Flash.</p>
+<h2 class="anchor" id="date-2026-08-13">Date: 2026-08-13</h2>
+<h3 class="anchor" id="deepseek-v4-pro-update">DeepSeek-V4-Pro Update<a href="#x">​</a></h3>
+<p>The GA release of DeepSeek-V4-Pro has been rolled out on the APP, Web, and API.</p>
+<h2 class="anchor" id="date-2026-04-24">Date: 2026-04-24</h2>
+<h3 class="anchor" id="deepseek-v4">DeepSeek-V4</h3>
+<p>The DeepSeek API now supports V4-Pro and V4-Flash.</p>
+<h2 class="anchor" id="date-2025-12-01">Date: 2025-12-01</h2>
+<h3 class="anchor" id="deepseek-v32">DeepSeek-V3.2</h3>
+<h3 class="anchor" id="deepseek-v32-speciale">DeepSeek-V3.2-Speciale</h3>
+<h2 class="anchor" id="date-2025-03-24">Date: 2025-03-24</h2>
+<h3 class="anchor" id="deepseek-chat">deepseek-chat</h3>
+<p>The deepseek-chat model has been upgraded to DeepSeek-V3-0324.</p>
+<h2 class="anchor" id="date-2024-09-05">Date: 2024-09-05</h2>
+<h3 class="anchor" id="deepseek-coder--deepseek-chat-upgraded-to-deepseek-v25-model">deepseek-coder &amp; deepseek-chat Upgraded to DeepSeek V2.5 Model</h3>
+<h2 class="anchor" id="date-2024-07-25">Date: 2024-07-25</h2>
+<h3 class="anchor" id="new-api-features">New API Features</h3>
+</body></html>`
+
+/**
  * 按 URL 分发页面。单字符串 = 智谱页内容 + Anthropic/xAI 页固定夹具(既有单厂家
  * 用例下三轮询都成功且行为确定);Record 原样分发,未列出的 URL 抛错。
  */
 function makeDeps(md: string | Record<string, string>): ModelTrackingDeps {
   const pages: Record<string, string> =
     typeof md === 'string'
-      ? { [ZHIPU_RELEASES_URL]: md, [ANTHROPIC_RELEASES_URL]: ANTHROPIC_MD, [XAI_RELEASES_URL]: XAI_MD }
+      ? {
+          [ZHIPU_RELEASES_URL]: md,
+          [ANTHROPIC_RELEASES_URL]: ANTHROPIC_MD,
+          [XAI_RELEASES_URL]: XAI_MD,
+          [DEEPSEEK_UPDATES_URL]: DEEPSEEK_HTML,
+        }
       : md
   return {
     fetchText: async (url) => {
@@ -169,7 +204,8 @@ async function byId(svc: ModelTrackingService, officialId: string) {
 }
 
 /** 三厂家基线总行数(init 入档的期望值)。 */
-const TOTAL_BASELINE = ZHIPU_BASELINE.length + ANTHROPIC_BASELINE.length + XAI_BASELINE.length
+const TOTAL_BASELINE =
+  ZHIPU_BASELINE.length + ANTHROPIC_BASELINE.length + XAI_BASELINE.length + DEEPSEEK_BASELINE.length
 
 describe('模型追踪:图标类型接线(单例/占格)', () => {
   it('MODEL 进单例枚举与跨格表(3×2=6 格,对齐前端注册表)', () => {
@@ -284,13 +320,14 @@ describe('模型追踪:基线自身(issues/02 八类全量)', () => {
     expect([...ids].some((id) => id.endsWith('-250414'))).toBe(false)
   })
 
-  it('已退役模型入档且 stage=retired、排序沉底(智谱 2 条 + Anthropic 6 条 + xAI 1 条)', async () => {
+  it('已退役模型入档且 stage=retired、排序沉底(智谱 2 条 + Anthropic 6 条 + xAI 1 条 + DeepSeek 8 条)', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
     const a = await svc.archive()
     const retired = a.models.filter((m) => m.stage === 'retired')
     expect(retired.map((m) => m.officialId).sort()).toEqual([
       'claude-3-5-haiku', 'claude-3-7-sonnet', 'claude-3-haiku', 'claude-opus-4', 'claude-opus-4-1', 'claude-sonnet-4',
+      'deepseek-coder-v2', 'deepseek-r1', 'deepseek-v2', 'deepseek-v2.5', 'deepseek-v3', 'deepseek-v3.1', 'deepseek-v3.2', 'deepseek-v3.2-speciale',
       'glm-4-0520', 'glm-z1',
       'grok-code-fast-1',
     ])
@@ -510,7 +547,7 @@ describe('模型追踪:路由', () => {
     expect(res.status).toBe(200)
     const json = (await res.json()) as { models: unknown[]; sources: unknown[] }
     expect(json.models).toHaveLength(TOTAL_BASELINE)
-    expect(json.sources).toHaveLength(3)
+    expect(json.sources).toHaveLength(4)
   })
 })
 
@@ -804,5 +841,159 @@ describe('模型追踪:xAI 基线信源一致性(评审修正)', () => {
         }
       }
     }
+  })
+})
+
+describe('模型追踪:DeepSeek Change Log 解析(纯函数;issues/07)', () => {
+  it('提取日期段 h3 小节:日期/标题/锚点;页首非日期 h2 段(含其内 h3)整体跳过;实体还原', () => {
+    const sections = parseDeepSeekUpdates(DEEPSEEK_HTML)
+    expect(sections).toHaveLength(8)
+    expect(sections[0]).toEqual({
+      date: '2026-08-21',
+      title: 'DeepSeek-V4-Flash-Vision-Exp Release',
+      anchorUrl: 'https://api-docs.deepseek.com/updates/#deepseek-v4-flash-vision-exp-release',
+    })
+    // 2024-09-05 实抓标题含 &amp; → 还原为 &(锚点尾边界:不误吞 -model)
+    const merged = sections.find((s) => s.title.includes('V2.5 Model'))!
+    expect(merged.title).toBe('deepseek-coder & deepseek-chat Upgraded to DeepSeek V2.5 Model')
+    expect(merged.anchorUrl).toBe('https://api-docs.deepseek.com/updates/#deepseek-coder--deepseek-chat-upgraded-to-deepseek-v25-model')
+  })
+
+  it('畸形日期段跳过,空文返回空数组', () => {
+    expect(parseDeepSeekUpdates('')).toEqual([])
+    expect(parseDeepSeekUpdates('<h2 id="x">Date: 2026-13-01</h2><h3 id="a">T</h3>')).toEqual([])
+  })
+
+  it('标题词边界归属:模型名小节归其行;家族段/别名标题段/非模型段跳过(正文提及不作证据)', () => {
+    const sections = parseDeepSeekUpdates(DEEPSEEK_HTML)
+    const byAnchor = (a: string) => sections.find((s) => s.anchorUrl.endsWith(a))!
+    expect(matchDeepSeekEvent(byAnchor('deepseek-v4-pro-update'))).toEqual([
+      {
+        officialId: 'deepseek-v4-pro',
+        event: {
+          kind: 'updated',
+          occurredOn: '2026-08-13',
+          title: 'DeepSeek-V4-Pro Update',
+          sourceUrl: 'https://api-docs.deepseek.com/updates/#deepseek-v4-pro-update',
+        },
+      },
+    ])
+    expect(matchDeepSeekEvent(byAnchor('deepseek-v4-flash-vision-exp-release')).map((h) => h.officialId)).toEqual(['deepseek-v4-flash-vision-exp'])
+    // Vision-Exp 节正文提及「on par with DeepSeek-V4-Flash」——标题才作归属证据(否则误记 V4-Flash)
+    expect(matchDeepSeekEvent(byAnchor('deepseek-v4'))).toEqual([]) // 家族段:非基线 alias,待核验线索
+    expect(matchDeepSeekEvent(byAnchor('deepseek-chat'))).toEqual([]) // 别名标题段:史实由基线事件承载
+    expect(matchDeepSeekEvent(byAnchor('new-api-features'))).toEqual([]) // 平台功能段
+  })
+
+  it('多命中:家族式双提标题同时归属两行(同 xAI 合并条目口径,不漏记半边)', () => {
+    const hits = matchDeepSeekEvent({ date: '2026-09-01', title: 'DeepSeek-V4-Pro and DeepSeek-V4-Flash Update', anchorUrl: 'https://x/#c' })
+    expect(hits.map((h) => h.officialId).sort()).toEqual(['deepseek-v4-flash', 'deepseek-v4-pro'])
+  })
+
+  it('词边界防误认领:「DeepSeek-V4-Flash」不认领 Vision-Exp 小节;「DeepSeek-V3.2」不认领 Speciale', () => {
+    expect(
+      matchDeepSeekEvent({ date: '2026-08-21', title: 'DeepSeek-V4-Flash-Vision-Exp Release', anchorUrl: 'https://x/#a' }).map((h) => h.officialId),
+    ).not.toContain('deepseek-v4-flash')
+    expect(
+      matchDeepSeekEvent({ date: '2025-12-01', title: 'DeepSeek-V3.2-Speciale', anchorUrl: 'https://x/#b' }).map((h) => h.officialId),
+    ).not.toContain('deepseek-v3.2')
+  })
+})
+
+describe('模型追踪:DeepSeek 基线与服务(issues/07)', () => {
+  it('基线形状:officialId 唯一;别名 ID(deepseek-chat/reasoner/coder)永不立行;种类不越研究核验范围(预告排除)', () => {
+    const ids = DEEPSEEK_BASELINE.map((b) => b.officialId)
+    expect(new Set(ids).size).toBe(DEEPSEEK_BASELINE.length)
+    for (const alias of ['deepseek-chat', 'deepseek-reasoner', 'deepseek-coder']) {
+      expect(ids).not.toContain(alias)
+    }
+    // 研究矩阵:DeepSeek 未见视频/音频/向量/重排/审核专用模型——出现即伪造
+    for (const b of DEEPSEEK_BASELINE) {
+      expect(b.kind === 'text' || b.kind === 'multimodal_understanding').toBe(true)
+    }
+    // 预告排除:非退役行必有现行渠道(纯论文/预告无渠道不立行)
+    for (const b of DEEPSEEK_BASELINE) {
+      if (b.stage !== 'retired') expect(b.availability.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('原 ID 升级留史:V4-Pro 一行三动态(权重→API→GA 原地升级),不覆盖不重复;init 幂等不翻倍', async () => {
+    const { db } = openDb(':memory:')
+    await makeService(db, makeDeps(''))
+    await makeService(db, makeDeps('')) // 二轮 init(重启口径)
+    const pro = await byId(new ModelTrackingService(db, makeDeps('')), 'deepseek-v4-pro')
+    expect(pro!.events.map((e) => e.kind)).toEqual(['updated', 'api_available', 'weights_available']) // 日期倒序
+    expect(pro!.events.map((e) => e.occurredOn)).toEqual(['2026-08-13', '2026-04-24', '2026-04-22'])
+  })
+
+  it('开放权重归属:Janus-Pro 单一主种类、summary 保留文生图能力事实、仅开放权重渠道(不标 API);V4 双系权重在档', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, makeDeps(''))
+    const janus = (await byId(svc, 'janus-pro'))!
+    expect(janus.kind).toBe('multimodal_understanding')
+    expect(janus.availability).toEqual(['open_weights'])
+    expect(janus.summary).toContain('文生图')
+    expect(janus.events.map((e) => e.kind)).toEqual(['weights_available'])
+    expect((await byId(svc, 'deepseek-v4-pro'))!.availability).toContain('open_weights')
+    expect((await byId(svc, 'deepseek-v4-flash'))!.availability).toContain('open_weights')
+  })
+
+  it('实验阶段:V4-Flash-Vision-Exp stage=experimental 且多模态理解种类;日期快照(0731/0813)归并不另立', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, makeDeps(''))
+    const vision = (await byId(svc, 'deepseek-v4-flash-vision-exp'))!
+    expect(vision.kind).toBe('multimodal_understanding')
+    expect(vision.stage).toBe('experimental')
+    const ids = new Set((await svc.archive()).models.map((m) => m.officialId))
+    expect(ids.has('deepseek-v4-flash-0731')).toBe(false)
+    expect(ids.has('deepseek-v4-pro-0813')).toBe(false)
+  })
+
+  it('退役沉底与官方披露:历史八代 retired 且权重渠道保留;官方卡片参数量结构化,未披露为 null', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, makeDeps(''))
+    const a = await svc.archive()
+    const retired = a.models.filter((m) => m.provider === 'deepseek' && m.stage === 'retired')
+    expect(retired.map((m) => m.officialId).sort()).toEqual([
+      'deepseek-coder-v2', 'deepseek-r1', 'deepseek-v2', 'deepseek-v2.5', 'deepseek-v3', 'deepseek-v3.1', 'deepseek-v3.2', 'deepseek-v3.2-speciale',
+    ])
+    for (const id of ['deepseek-v2', 'deepseek-v3', 'deepseek-r1', 'deepseek-v3.1', 'deepseek-v3.2', 'deepseek-v2.5', 'deepseek-coder-v2']) {
+      expect((await byId(svc, id))!.availability).toContain('open_weights')
+    }
+    expect((await byId(svc, 'deepseek-v3'))!.trainingParams).toEqual({ total: '671B', active: '37B' })
+    expect((await byId(svc, 'deepseek-r1'))!.trainingParams).toEqual({ total: '671B', active: '37B' })
+    expect((await byId(svc, 'deepseek-v2'))!.trainingParams).toEqual({ total: '236B', active: '21B' })
+    expect((await byId(svc, 'deepseek-coder-v2'))!.trainingParams).toEqual({ total: '236B', active: '21B' })
+    expect((await byId(svc, 'deepseek-v4-pro'))!.trainingParams).toBeNull()
+    expect((await byId(svc, 'deepseek-v3.2'))!.trainingParams).toBeNull() // 卡片未单独披露,不以同架构推算补空
+    expect((await byId(svc, 'janus-pro'))!.trainingParams).toBeNull() // 1B/7B 双规格不混记
+  })
+
+  it('陈旧降级:DeepSeek 源失败只标记 deepseek 陈旧、档案保留且他厂不受牵连;零小节 = 上游改版同口径', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, makeDeps(ZHIPU_MD)) // 单字符串:智谱页实文,DeepSeek 页用固定夹具
+    await svc.pollDeepSeek()
+    const failing = new ModelTrackingService(db, failingDeps())
+    await expect(failing.pollDeepSeek()).rejects.toThrow('HTTP 503')
+    let a = await failing.archive()
+    expect(a.sources.find((s) => s.provider === 'deepseek')!.stale).toBe(true)
+    expect((await byId(failing, 'deepseek-v4-pro'))!.events.length).toBeGreaterThan(0) // 档案保留
+    expect(a.sources.find((s) => s.provider === 'zhipu')!.stale).toBe(false)
+    const drifty = new ModelTrackingService(db, makeDeps({ [DEEPSEEK_UPDATES_URL]: '<html>redesigned</html>' }))
+    await expect(drifty.pollDeepSeek()).rejects.toThrow('疑似上游改版')
+    a = await drifty.archive()
+    expect(a.models.filter((m) => m.provider === 'deepseek')).toHaveLength(DEEPSEEK_BASELINE.length)
+  })
+
+  it('同公告去重:基线事件已占 (模型,日期,锚点) 键,poll 不补 updated 重复行;新公告自动入库', async () => {
+    const { db } = openDb(':memory:')
+    const md = `${DEEPSEEK_HTML}<h2 id="date-2026-09-09">Date: 2026-09-09</h2><h3 id="deepseek-v4-pro-price">DeepSeek-V4-Pro Price Cut</h3>\n`
+    const svc = await makeService(db, makeDeps({ [DEEPSEEK_UPDATES_URL]: md }))
+    await svc.pollDeepSeek()
+    await svc.pollDeepSeek() // 两轮幂等
+    const pro = (await byId(svc, 'deepseek-v4-pro'))!
+    expect(pro.events).toHaveLength(4) // 权重/API/GA 三条基线 + 1 条新公告
+    expect(pro.events.find((e) => e.occurredOn === '2026-08-13')!.kind).toBe('updated') // GA 公告未被覆盖
+    expect(pro.events[0]).toMatchObject({ kind: 'updated', occurredOn: '2026-09-09', title: 'DeepSeek-V4-Pro Price Cut' })
   })
 })
