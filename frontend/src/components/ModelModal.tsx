@@ -10,6 +10,7 @@ import {
   PROVIDER_LABELS,
   STAGE_LABELS,
   benchmarkLabel,
+  compareModelsByLatestEvent,
   formatModelPricing,
   formatEvaluationScore,
   isFreshModelEvent,
@@ -122,7 +123,11 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
               </div>
             )}
             <ModelList
-              models={data.models.filter((m) => tab === 'all' || m.provider === tab)}
+              // filter 返回新数组,直接原位排(不动 React Query 缓存)——最新动态优先,
+              // 防「全部」被单一厂家的入库序垄断(2026-08-25 智谱 44 模型连排数屏)
+              models={data.models
+                .filter((m) => tab === 'all' || m.provider === tab)
+                .sort(compareModelsByLatestEvent)}
               evaluationStatus={data.evaluations}
               expandedId={expandedId}
               onToggle={(id) => setExpandedId((cur) => (cur === id ? null : id))}
