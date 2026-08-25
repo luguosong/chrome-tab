@@ -145,7 +145,7 @@ export const STOCK_DEF: IconTypeDefinition = {
   refresh: { kind: 'quotes' },
   detail: 'modal',
   editor: [
-    { name: 'symbol', label: '符号', placeholder: '符号 如 usAAPL' },
+    { name: 'symbol', label: '符号', placeholder: '搜索或输代码,如 茅台 / usAAPL' },
     { name: 'name', label: '名称', placeholder: '名称' },
   ],
   summarize: (data, live) => {

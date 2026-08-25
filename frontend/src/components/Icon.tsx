@@ -8,6 +8,7 @@ import ChangelogIconBody from './ChangelogIcon'
 import AiHotIconBody from './AiHotIcon'
 import TodoIconBody from './TodoIcon'
 import LocationPicker from './LocationPicker'
+import SymbolPicker from './SymbolPicker'
 import Tile from './Tile'
 import type { Icon as IconModel } from '../lib/types'
 import { useEditMode } from '../context/EditModeContext'
@@ -393,7 +394,18 @@ function EditForm({
         onPointerDown={(e) => e.stopPropagation()}
       >
         {fields.map((f) =>
-          f.name === 'location' ? (
+          f.name === 'symbol' ? (
+            <SymbolPicker
+              key={f.name}
+              value={String(values['symbol'] ?? '')}
+              onText={(v) => setField('symbol', v)}
+              onPick={(c) => {
+                setField('symbol', c.symbol)
+                setField('name', c.name) // 规范名自动填,换候选覆盖;name 框仍可手改
+              }}
+              placeholder={f.placeholder}
+            />
+          ) : f.name === 'location' ? (
             <LocationPicker
               key={f.name}
               value={values[f.name] ? (values[f.name] as WeatherLocation) : null}

@@ -6,6 +6,7 @@ import { ApiError } from '../api/client'
 import { canAdd, listTypes, type IconTypeDefinition } from '../lib/iconTypeRegistry'
 import { buildIconData } from '../lib/iconData'
 import LocationPicker from './LocationPicker'
+import SymbolPicker from './SymbolPicker'
 import IconPicker from './IconPicker'
 import type { WeatherLocation } from '../lib/weather'
 import type { IconTypeId } from '../lib/types'
@@ -154,7 +155,18 @@ function TypeCard({
       </div>
 
       {def.editor.map((f) =>
-        f.name === 'location' ? (
+        f.name === 'symbol' ? (
+          <SymbolPicker
+            key={f.name}
+            value={String(values['symbol'] ?? '')}
+            onText={(v) => setField('symbol', v)}
+            onPick={(c) => {
+              setField('symbol', c.symbol)
+              setField('name', c.name) // 规范名自动填,换候选覆盖;name 框仍可手改
+            }}
+            placeholder={f.placeholder}
+          />
+        ) : f.name === 'location' ? (
           <LocationPicker
             key={f.name}
             value={values[f.name] ? (values[f.name] as WeatherLocation) : null}
