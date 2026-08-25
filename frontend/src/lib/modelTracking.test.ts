@@ -1,15 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { TrackedModel } from 'chrome-tab-shared'
 import {
   AVAILABILITY_LABELS,
   benchmarkLabel,
-  compareModelsByLatestEvent,
   formatEvaluationScore,
   EVENT_KIND_LABELS,
   MODEL_KIND_LABELS,
   PROVIDER_LABELS,
   STAGE_LABELS,
-  formatModelLimits,
   formatModelPricing,
   isFreshModelEvent,
   modelEventAnchorMs,
@@ -74,76 +71,7 @@ describe('模型追踪:24h 红点窗口', () => {
   })
 })
 
-/** 排序测试的最小模型工厂(events[0] 为最新动态,archive() 保证倒序)。 */
-const mkModel = (id: number, over: Partial<TrackedModel> = {}): TrackedModel => ({
-  id,
-  provider: 'zhipu',
-  officialId: `m${id}`,
-  name: `M${id}`,
-  kind: 'text',
-  stage: 'ga',
-  availability: ['api'],
-  summary: null,
-  sources: [],
-  pricing: null,
-  limits: null,
-  trainingParams: null,
-  evaluations: [],
-  events: [],
-  ...over,
-})
-
-describe('模型追踪:列表排序(全部 tab 与块内列表共用)', () => {
-  it('最新动态优先——id 序垫底但昨天有动态的模型,排在 id 序靠前但无动态的智谱模型之前', () => {
-    // 线上症状:智谱 44 个按入库 id 连排最前,其余厂家被压数屏之后(2026-08-25)
-    const zhipuOld = mkModel(1) // 无动态,id 最小
-    const openaiFresh = mkModel(100, {
-      provider: 'openai',
-      events: [{ id: 1, kind: 'updated', occurredOn: '2026-08-24', title: 't', sourceUrl: 'u' }],
-    })
-    expect([zhipuOld, openaiFresh].sort(compareModelsByLatestEvent)[0]).toBe(openaiFresh)
-  })
-
-  it('动态日期降序;同日按 id 升序稳定', () => {
-    const a = mkModel(10, { events: [{ id: 1, kind: 'updated', occurredOn: '2026-08-01', title: 't', sourceUrl: 'u' }] })
-    const b = mkModel(2, { events: [{ id: 1, kind: 'updated', occurredOn: '2026-08-25', title: 't', sourceUrl: 'u' }] })
-    const c = mkModel(3, { events: [{ id: 1, kind: 'updated', occurredOn: '2026-08-25', title: 't', sourceUrl: 'u' }] })
-    expect([a, b, c].sort(compareModelsByLatestEvent).map((m) => m.id)).toEqual([2, 3, 10])
-  })
-
-  it('退役模型沉底(CONTEXT.md「可用在前、已退役在后」),退役内部仍按动态降序', () => {
-    const retiredFresh = mkModel(5, {
-      stage: 'retired',
-      events: [{ id: 1, kind: 'retired', occurredOn: '2026-08-25', title: 't', sourceUrl: 'u' }],
-    })
-    const retiredStale = mkModel(6, {
-      stage: 'retired',
-      events: [{ id: 1, kind: 'retired', occurredOn: '2025-01-01', title: 't', sourceUrl: 'u' }],
-    })
-    const active = mkModel(1)
-    expect([retiredStale, retiredFresh, active].sort(compareModelsByLatestEvent).map((m) => m.id)).toEqual([
-      1,
-      5,
-      6,
-    ])
-  })
-})
-
 describe('模型追踪:详情缺省值(issues/02)', () => {
-  it('限额单行摘要:标签+原文值,作用域括注;null → null(显示「未知」)', () => {
-    expect(
-      formatModelLimits([
-        { label: '上下文窗口', text: '1M', scope: null },
-        { label: '最大输出', text: '128K', scope: null },
-      ]),
-    ).toBe('上下文窗口 1M · 最大输出 128K')
-    expect(
-      formatModelLimits([{ label: '上下文窗口', text: '8K(预计 20 轮)', scope: '音频通话' }]),
-    ).toBe('上下文窗口 8K(预计 20 轮)(音频通话)')
-    expect(formatModelLimits(null)).toBeNull()
-    expect(formatModelLimits([])).toBeNull()
-  })
-
   it('价格展示:地区作用域 + 逐条原文(作用域括注);null → null(显示「官方未披露」)', () => {
     expect(
       formatModelPricing({

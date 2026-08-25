@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { ModelEvaluationsStatus, ModelProviderId, TrackedModel } from 'chrome-tab-shared'
 import { useModelArchive } from '../hooks/useModelArchive'
 import { timeAgo } from '../lib/timeAgo'
@@ -10,8 +10,6 @@ import {
   PROVIDER_LABELS,
   STAGE_LABELS,
   benchmarkLabel,
-  compareModelsByLatestEvent,
-  formatModelLimits,
   formatModelPricing,
   formatEvaluationScore,
   isFreshModelEvent,
@@ -20,11 +18,11 @@ import {
 
 /**
  * 模型追踪详情 Modal(见 CONTEXT.md「模型追踪」,ADR-0022「更多」标头唯一入口):
- * 「全部」+ 各「跟踪厂家」tab(首片仅智谱,tab 随厂家票扩);模型行在**当前 Modal 内
- * 就地展开**(基本资料/动态时间线/原始信源,不套第二层 Modal),24h 新动态行首红点
- * (时间驱动,无已读概念)。信源失败保留最后成功结果并标记陈旧(CONTEXT.md「模型
- * 档案」)——头部给一行陈旧提示。容器:fixed 遮罩 + 居中玻璃面板;Esc/点遮罩关闭,
- * tab 为 TodoModal 同款下划线式。
+ * 「全部」+ 各「跟踪厂家」tab;模型行在**当前 Modal 内就地展开**(摘要 + 限额/训练
+ * 参数/价格/评测四张规格卡——值按语义着色,动态时间线与信源全宽,不套第二层 Modal),
+ * 24h 新动态行首红点(时间驱动,无已读概念)。信源失败保留最后成功结果并标记陈旧
+ * (CONTEXT.md「模型档案」)——头部给一行陈旧提示。容器:fixed 遮罩 + 居中玻璃面板;
+ * Esc/点遮罩关闭,tab 为 TodoModal 同款下划线式。
  */
 /** tab 维度 = 全部 + 各跟踪厂家(自 PROVIDER_LABELS 派生,厂家票扩 shared 时 tab 随动)。 */
 type Tab = 'all' | ModelProviderId
@@ -124,11 +122,7 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
               </div>
             )}
             <ModelList
-              // filter 返回新数组,直接原位排(不动 React Query 缓存)——最新动态优先,
-              // 防「全部」被单一厂家的入库序垄断(2026-08-25 智谱 44 模型连排数屏)
-              models={data.models
-                .filter((m) => tab === 'all' || m.provider === tab)
-                .sort(compareModelsByLatestEvent)}
+              models={data.models.filter((m) => tab === 'all' || m.provider === tab)}
               evaluationStatus={data.evaluations}
               expandedId={expandedId}
               onToggle={(id) => setExpandedId((cur) => (cur === id ? null : id))}
@@ -205,38 +199,59 @@ function ModelList({
                 {m.summary && (
                   <p className="text-sm text-white/65 leading-relaxed">{m.summary}</p>
                 )}
-                {/* 详情资料行(issues/02):限额/训练参数量/价格,未披露的维度显示「未知」/「官方未披露」 */}
-                <div className="space-y-0.5 text-meta text-white/50">
-                  <div>
-                    <span className="text-white/40">限额</span>{' '}
-                    {formatModelLimits(m.limits) ?? '未知(官方未披露)'}
-                  </div>
-                  <div>
-                    <span className="text-white/40">训练参数</span>{' '}
-                    {m.trainingParams
-                      ? m.trainingParams.active
-                        ? `${m.trainingParams.total}(激活 ${m.trainingParams.active})`
-                        : m.trainingParams.total
-                      : '未知(官方未披露)'}
-                  </div>
+                {/* 规格卡网格(issues/02):限额/参数/价格/评测各归一卡,值按语义着色
+                    (钱=amber、技术边界=cyan、规模=violet、成绩=emerald;accent 蓝留给
+                    交互链接,不与值色混)。未披露维度整卡占位——四卡位置恒定,便于扫读。 */}
+                <div className="grid grid-cols-2 gap-1.5">
+                  <SpecCard label="限额" empty={m.limits && m.limits.length > 0 ? null : '官方未披露'}>
+                    {(m.limits ?? []).map((l) => (
+                      <div key={`${l.label}|${l.scope}`}>
+                        <span className="text-white/55">{l.label}</span>{' '}
+                        <span className="font-mono text-cyan-300">{l.text}</span>
+                        {l.scope && <span className="text-white/40">({l.scope})</span>}
+                      </div>
+                    ))}
+                  </SpecCard>
+                  <SpecCard label="训练参数" empty={m.trainingParams ? null : '官方未披露'}>
+                    {m.trainingParams && (
+                      <>
+                        <div>
+                          <span className="text-white/55">总参数</span>{' '}
+                          <span className="font-mono text-violet-300">{m.trainingParams.total}</span>
+                        </div>
+                        {m.trainingParams.active && (
+                          <div>
+                            <span className="text-white/55">激活</span>{' '}
+                            <span className="font-mono text-violet-300">
+                              {m.trainingParams.active}
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </SpecCard>
                   {(() => {
                     const pricing = formatModelPricing(m.pricing)
                     return (
-                      <div>
-                        <span className="text-white/40">价格</span>{' '}
-                        {pricing ? (
-                          <>
-                            <span className="text-white/40">({pricing.region})</span>{' '}
-                            {pricing.lines.join('；')}
-                          </>
-                        ) : (
-                          '官方未披露'
-                        )}
-                      </div>
+                      <SpecCard
+                        label={pricing ? `价格(${pricing.region})` : '价格'}
+                        empty={pricing ? null : '官方未披露'}
+                        className="col-span-2"
+                      >
+                        {pricing?.lines.map((line) => (
+                          <div key={line} className="font-mono text-amber-300">
+                            {line}
+                          </div>
+                        ))}
+                      </SpecCard>
                     )
                   })()}
+                  <EvaluationCard
+                    evaluations={m.evaluations}
+                    status={evaluationStatus}
+                    className="col-span-2"
+                  />
                 </div>
-                <EvaluationSection evaluations={m.evaluations} status={evaluationStatus} />
                 <div className="text-meta text-white/50 flex items-center gap-2 flex-wrap">
                   <span className="text-white/40">信源</span>
                   {m.sources.map((s) => (
@@ -252,11 +267,11 @@ function ModelList({
                   ))}
                 </div>
                 {m.events.length > 0 ? (
-                  <ul className="space-y-1 border-t border-white/10 pt-1.5">
+                  <ul className="space-y-1.5 border-t border-white/10 pt-2">
                     {m.events.map((e) => (
                       <li key={e.id} className="flex items-baseline gap-2 text-xs">
                         <span className="shrink-0 font-mono text-white/40">{e.occurredOn}</span>
-                        <span className="shrink-0 text-white/50">{EVENT_KIND_LABELS[e.kind]}</span>
+                        <span className="shrink-0 text-white/60">{EVENT_KIND_LABELS[e.kind]}</span>
                         <a
                           href={e.sourceUrl}
                           target="_blank"
@@ -282,37 +297,67 @@ function ModelList({
 }
 
 /**
- * 评测区(CONTEXT.md「评测结果」,issues/08):每行 = Benchmark + 原始分数 + 快照日期,
- * 链接回评测方模型页;标头挂 Artificial Analysis 归因(免费 API 使用条款要求)。不生成
- * 跨 Benchmark 综合分;未配置 Key 明确显示「未配置」;评测源陈旧只提示评测自身,不牵连
- * 厂家档案。评测方口径的版本名与模型名不一致时括注展示(可回链核验)。
+ * 规格卡(展开区卡片归类的卡壳):白系卡面 + 灰标签,值色由调用方 children 决定。
+ * empty 非空时渲染占位文案(卡保留——四卡位置恒定,同类信息总在同一处)。
  */
-function EvaluationSection({
+function SpecCard({
+  label,
+  children,
+  empty,
+  className = '',
+}: {
+  label: string
+  children?: ReactNode
+  empty: string | null
+  className?: string
+}) {
+  return (
+    <div className={`rounded-lg border border-white/10 bg-white/[0.05] px-2.5 py-2 ${className}`}>
+      <div className="text-meta mb-1 text-white/45">{label}</div>
+      {empty !== null ? (
+        <div className="text-meta text-white/35">{empty}</div>
+      ) : (
+        <div className="space-y-0.5 text-meta">{children}</div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 评测卡(CONTEXT.md「评测结果」,issues/08):每行 = Benchmark + 原始分数 + 快照日期,
+ * 链接回评测方模型页;卡头挂 Artificial Analysis 归因(免费 API 使用条款要求)。不生成
+ * 跨 Benchmark 综合分;未配置 Key / 暂无精确匹配为轻量单行(不套卡,空态不占卡片重量);
+ * 评测源陈旧只提示评测自身,不牵连厂家档案。评测方口径的版本名与模型名不一致时括注
+ * 展示(可回链核验)。
+ */
+function EvaluationCard({
   evaluations,
   status,
+  className = '',
 }: {
   evaluations: TrackedModel['evaluations']
   status: ModelEvaluationsStatus
+  className?: string
 }) {
   if (!status.configured) {
     return (
-      <div className="text-meta text-white/50">
-        <span className="text-white/40">评测</span> 未配置({EVALUATION_ATTRIBUTION.label} Key)
+      <div className={`${className} text-meta text-white/50`}>
+        评测:未配置({EVALUATION_ATTRIBUTION.label} Key)
       </div>
     )
   }
   if (evaluations.length === 0) {
     return (
-      <div className="text-meta text-white/50">
-        <span className="text-white/40">评测</span> 暂无精确匹配
-      </div>
+      <div className={`${className} text-meta text-white/50`}>评测:暂无精确匹配</div>
     )
   }
   const versions = [...new Set(evaluations.map((e) => e.version))]
   return (
-    <div className="text-meta text-white/50 space-y-0.5">
-      <div className="flex items-baseline gap-2 flex-wrap">
-        <span className="text-white/40">评测</span>
+    <div
+      className={`rounded-lg border border-white/10 bg-white/[0.05] px-2.5 py-2 ${className}`}
+    >
+      <div className="text-meta mb-1 flex items-baseline gap-2 flex-wrap text-white/45">
+        <span>评测</span>
         {versions.length === 1 && versions[0] !== '' && <span>({versions[0]})</span>}
         <a
           href={EVALUATION_ATTRIBUTION.url}
@@ -324,7 +369,7 @@ function EvaluationSection({
         </a>
         {status.stale && <span className="text-white/40">(同步失败,展示最近快照)</span>}
       </div>
-      <ul className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+      <ul className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-meta">
         {evaluations.map((e) => (
           <li key={e.benchmark} className="min-w-0 flex items-baseline gap-1.5">
             <a
@@ -334,8 +379,10 @@ function EvaluationSection({
               title={`${e.evaluator} · ${e.version} · ${e.date}`}
               className="min-w-0 truncate hover:text-accent"
             >
-              <span className="text-white/70">{benchmarkLabel(e.benchmark)}</span>{' '}
-              {formatEvaluationScore(e.benchmark, e.score)}
+              <span className="text-white/60">{benchmarkLabel(e.benchmark)}</span>{' '}
+              <span className="font-mono text-emerald-300">
+                {formatEvaluationScore(e.benchmark, e.score)}
+              </span>
             </a>
             <span className="shrink-0 text-white/30">{e.date.slice(5)}</span>
           </li>
