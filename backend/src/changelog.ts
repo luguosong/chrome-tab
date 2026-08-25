@@ -322,7 +322,7 @@ export function extractContent(resp: unknown): string | null {
 
 /**
  * 译制模型候选链(2026-08-25):free 优先,free 全不可用落到付费 coding-glm-5.3。
- * 候选失效 = 403/404(模型被禁/不存在)、400 no_available_channel(渠道没了)或超时(挂死);其他错误(401 key/网络/5xx)换模型无益,直接抛。
+ * 候选失效 = 403/404(模型被禁/不存在)、429/5xx(限流/网关错)、400 no_available_channel(渠道没了)、超时(挂死)或 200 但响应无 content(空补全);其他错误(401 key/网络)换模型无益,直接抛。
  * CHANGELOG_LLM_MODEL 支持逗号分隔列表覆盖;Key 沿用 AIHUBMIX_API_KEY。
  */
 export const DEFAULT_LLM_MODELS =
@@ -333,13 +333,16 @@ export function modelCandidates(env: NodeJS.ProcessEnv = process.env): string[] 
   return (env.CHANGELOG_LLM_MODEL?.trim() || DEFAULT_LLM_MODELS).split(',').map((m) => m.trim()).filter(Boolean)
 }
 
-/** 网关对该候选「没戏了,换下一个」的判定:模型被禁/不存在/无渠道/超时(fetchText 的
+/** 网关对该候选「没戏了,换下一个」的判定:模型被禁/不存在(403/404)、限流/网关错(429/5xx,
+ *  换候选=换渠道可能绕开)、无渠道(400 no_available_channel)、超时(fetchText 的
  *  AbortSignal.timeout 抛 TimeoutError——挂死的 free 模型换下一个,不再单点拖满上限)。 */
 function isCandidateExhausted(e: unknown): boolean {
   const err = e as { status?: number; body?: string; name?: string }
   return (
     err?.status === 403 ||
     err?.status === 404 ||
+    err?.status === 429 ||
+    (err?.status ?? 0) >= 500 ||
     err?.name === 'TimeoutError' ||
     /no_available_channel/.test(err?.body ?? '')
   )
@@ -395,6 +398,10 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
       let lastErr: unknown
       for (const [i, model] of models.entries()) {
         onPhase?.(model, i + 1, models.length)
+        const startedAt = Date.now()
+        // 每次尝试一行结果日志(线上排障:模型/序号/耗时/status+body/走向,全部收容器 stdout)
+        const log = (outcome: string, extra = '') =>
+          console.warn(`[changelog-translate] ${source} 候选 ${i + 1}/${models.length} ${model} ${outcome}(${Date.now() - startedAt}ms)${extra}`)
         try {
           const resp = await fetchText(`${LLM_BASE_URL}/chat/completions`, 60_000, {
             method: 'POST',
@@ -407,11 +414,28 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
               ],
             }),
           })
-          return extractContent(JSON.parse(resp))
+          // 200 但拿不到译文(空补全/内容过滤/非 JSON 响应体)也按候选失效换下一个——
+          // 2026-08-25 线上即此形态静默失败:后台有 200 调用记录、无后续候选、译文缺位。
+          let content: string | null = null
+          try {
+            content = extractContent(JSON.parse(resp))
+          } catch {
+            content = null
+          }
+          if (content == null) {
+            lastErr = new Error(`HTTP 200 但响应无 content:${resp.slice(0, 200)}`)
+            log(`失败: ${lastErr}`, ',换下一候选')
+            continue
+          }
+          log(`成功: ${content.length} 字符`)
+          return content
         } catch (e) {
-          if (!isCandidateExhausted(e)) throw e
+          if (!isCandidateExhausted(e)) {
+            log(`失败: ${e}`, ',换模型无益,放弃本次译制')
+            throw e
+          }
           lastErr = e
-          console.warn(`模型 ${model} 不可用(${(e as { status?: number }).status}),试下一候选`)
+          log(`失败: ${e} ${(e as { body?: string }).body ?? ''}`, ',换下一候选')
         }
       }
       throw lastErr

@@ -497,7 +497,7 @@ describe('modelCandidates(free 优先,CHANGELOG_LLM_MODEL 逗号分隔覆盖)', 
   })
 })
 
-describe('translate 候选链(候选失效=403/404/no_available_channel 换下一个,其余直接抛)', () => {
+describe('translate 候选链(候选失效=403/404/429/5xx/no_available_channel/超时/200空content 换下一个,401等直接抛)', () => {
   const realFetch = globalThis.fetch
   afterEach(() => {
     globalThis.fetch = realFetch
@@ -541,6 +541,22 @@ describe('translate 候选链(候选失效=403/404/no_available_channel 换下�
     process.env.AIHUBMIX_API_KEY = 'k'
     process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
     const models = mockFetchSeq([{ timeout: true }, OK])
+    await expect(prodChangelogDeps().translate('块')).resolves.toBe('译文')
+    expect(models).toEqual(['m1', 'm2'])
+  })
+
+  it('200 但响应无 content(free 模型空补全/畸形)→ 换下一候选,不整体静默失败', async () => {
+    process.env.AIHUBMIX_API_KEY = 'k'
+    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
+    const models = mockFetchSeq([{ status: 200, body: { choices: [{ message: { content: null } }] } }, OK])
+    await expect(prodChangelogDeps().translate('块')).resolves.toBe('译文')
+    expect(models).toEqual(['m1', 'm2'])
+  })
+
+  it('5xx(网关/上游错误)→ 换下一候选', async () => {
+    process.env.AIHUBMIX_API_KEY = 'k'
+    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
+    const models = mockFetchSeq([{ status: 502, body: 'bad gateway' }, OK])
     await expect(prodChangelogDeps().translate('块')).resolves.toBe('译文')
     expect(models).toEqual(['m1', 'm2'])
   })
