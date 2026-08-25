@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { getAlmanac } from '../lib/lunar'
 import { getCountdowns } from '../lib/countdown'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
@@ -40,6 +40,49 @@ export default function Clock() {
   const { clockFont, clock24h, importantDates } = useLayoutSettings()
   const [editing, setEditing] = useState(false)
   const [now, setNow] = useState(() => new Date())
+  // 弹层显隐:JS hover-intent 而非 group-hover——时钟与弹层间的 8px 视觉间隙
+  // (mt-2 margin)在 DOM 上不属于本组件任何元素,慢速穿越时 CSS :hover 断链、
+  // 弹层即收,弹层内的可点内容(编辑钮)不可达。onMouseLeave 后 250ms 宽限,
+  // 指针进弹层(absolute 后代算入「根+后代」整体)即取消收起;宽限到期再补
+  // 几何判定——指针仍在「根盒∪弹层盒」外接矩形内(慢速仍在 gap/弹层途中)则
+  // 续期等待,真正离开才收。收起态仍 pointer-events-none,拦截行为与纯 CSS
+  // 版零差异(不引入常驻命中区)。
+  const [panelOpen, setPanelOpen] = useState(false)
+  const hideTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const pointer = useRef({ x: -1, y: -1 })
+  const inHoverZone = () => {
+    const r = rootRef.current?.getBoundingClientRect()
+    const p = panelRef.current?.getBoundingClientRect()
+    if (!r || !p) return false
+    const { x, y } = pointer.current
+    return (
+      x >= Math.min(r.left, p.left) && x <= Math.max(r.right, p.right) &&
+      y >= Math.min(r.top, p.top) && y <= Math.max(r.bottom, p.bottom)
+    )
+  }
+  const enterPanel = () => {
+    clearTimeout(hideTimer.current)
+    setPanelOpen(true)
+  }
+  const leavePanel = () => {
+    clearTimeout(hideTimer.current)
+    hideTimer.current = setTimeout(function tick() {
+      if (inHoverZone()) hideTimer.current = setTimeout(tick, 150)
+      else setPanelOpen(false)
+    }, 250)
+  }
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      pointer.current = { x: e.clientX, y: e.clientY }
+    }
+    window.addEventListener('mousemove', onMove)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      clearTimeout(hideTimer.current)
+    }
+  }, [])
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 10_000) // 10s：分钟级精度足够
     return () => clearInterval(t)
@@ -56,7 +99,12 @@ export default function Clock() {
   // 倒计时同按天重算(CONTEXT.md「倒计时」);importantDates 引用随配置刷新
   const countdowns = useMemo(() => getCountdowns(now, importantDates), [dayKey, importantDates]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div className="group relative select-none text-white">
+    <div
+      ref={rootRef}
+      className="relative select-none text-white"
+      onMouseEnter={enterPanel}
+      onMouseLeave={leavePanel}
+    >
       {/* 常显三行:text-shadow 收在内层,不随弹层继承 */}
       <div style={{ textShadow: '0 2px 12px rgba(0,0,0,0.45), 0 0 1px rgba(255,255,255,0.25)' }}>
         <div
@@ -74,9 +122,16 @@ export default function Clock() {
         </small>
       </div>
 
-      {/* hover 展层:生肖轮 + 宜忌。opacity-0 时 pointer-events-none,不挡下方图标;
-          显形后恢复,生肖 title(本命年)可触发。过渡 200ms 轻于 Modal pop-in 档。 */}
-      <div className="absolute top-full left-0 z-10 mt-2 w-max max-w-[70vw] rounded-2xl glass-panel glass-panel-readable px-3 py-2 text-xs font-light text-white/90 opacity-0 translate-y-1 pointer-events-none transition duration-200 group-hover:opacity-100 group-hover:translate-y-0 group-hover:pointer-events-auto">
+      {/* hover 展层:生肖轮 + 宜忌。收起态 pointer-events-none 不挡下方图标;
+          显隐由 panelOpen(hover-intent,见上)驱动,过渡 200ms 轻于 Modal pop-in 档。 */}
+      <div
+        ref={panelRef}
+        className={`absolute top-full left-0 z-10 mt-2 w-max max-w-[70vw] rounded-2xl glass-panel glass-panel-readable px-3 py-2 text-xs font-light text-white/90 transition duration-200 ${
+          panelOpen
+            ? 'opacity-100 translate-y-0 pointer-events-auto'
+            : 'opacity-0 translate-y-1 pointer-events-none'
+        }`}
+      >
         {/* 倒计时分区(CONTEXT.md「倒计时」):弹层最顶部——实用信息先于命理趣味。
             空窗隐藏列表但保留一行入口,否则第一条无处可加;「编辑」开 CountdownEditModal。 */}
         <div className="pb-1.5 mb-1.5 border-b border-white/10 space-y-0.5">
