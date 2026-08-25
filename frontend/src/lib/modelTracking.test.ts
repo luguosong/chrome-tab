@@ -121,8 +121,9 @@ describe('评测展示语汇(issues/08)', () => {
   it('Benchmark 标签:已知 key 用展示名,未知 key 兜底可读化(评测方命名演进不漏显示)', () => {
     expect(benchmarkLabel('mmlu_pro')).toBe('MMLU-Pro')
     expect(benchmarkLabel('text_to_video_elo')).toBe('文生视频 Elo')
-    expect(benchmarkLabel('terminal_bench_v2_1')).toBe('Terminal Bench V2 1')
-    expect(benchmarkLabel('τ3-banking')).toBe('Τ3 Banking')
+    expect(benchmarkLabel('tau_banking')).toBe('τ³-Banking')
+    // 兜底为 best-effort:短词按缩写全大写(如 lcr→LCR),'new' 亦然——可接受
+    expect(benchmarkLabel('some_new_bench')).toBe('Some NEW Bench')
   })
 
   it('evaluated 动态有展示名(Record 键完整性由 tsc 保障)', () => {

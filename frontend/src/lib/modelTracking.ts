@@ -112,7 +112,7 @@ export function formatModelPricing(pricing: ModelPricing | null): { region: stri
  */
 export const EVALUATION_ATTRIBUTION = { label: 'Artificial Analysis', url: 'https://artificialanalysis.ai/' }
 
-/** 常见 Benchmark 展示名(后端透传 AA 原始 key;未收录 key 走 prettifyEvaluationKey 兜底)。 */
+/** 常见 Benchmark 展示名(后端透传 AA 原始 key;2026-08-25 线上实测校准,未收录 key 走 prettifyEvaluationKey 兜底)。 */
 export const BENCHMARK_LABELS: Record<string, string> = {
   artificial_analysis_intelligence_index: 'AA 智能指数',
   artificial_analysis_coding_index: 'AA 编程指数',
@@ -124,10 +124,13 @@ export const BENCHMARK_LABELS: Record<string, string> = {
   scicode: 'SciCode',
   math_500: 'MATH-500',
   aime: 'AIME',
-  gdpval_aa: 'GDPval-AA',
-  critpt: 'CritPt',
-  aa_omniscience_index: 'AA-Omniscience',
-  aa_lcr: 'AA-LCR',
+  aime_25: 'AIME 2025',
+  lcr: 'AA-LCR',
+  ifbench: 'IFBench',
+  tau2: 'τ²',
+  tau_banking: 'τ³-Banking',
+  terminalbench_hard: 'Terminal-Bench Hard',
+  terminalbench_v2_1: 'Terminal-Bench v2.1',
   text_to_image_elo: '文生图 Elo',
   image_editing_elo: '图像编辑 Elo',
   text_to_speech_elo: '语音合成 Elo',
@@ -149,8 +152,8 @@ export function benchmarkLabel(benchmark: string): string {
 }
 
 /**
- * 比例型基准名单(原始分为 0–1 准确率,转百分比展示)。**按 key 判定而非数值区间**:
- * 指数类正值可能恰落 0–1(如 AA-Omniscience 0.5 是 -100..100 指数,须显 0.5 非假 50%)。
+ * 比例型基准名单(原始分为 0–1 准确率,转百分比展示;2026-08-25 线上实测比例型全集)。
+ * **按 key 判定而非数值区间**:指数类正值可能恰落 0–1(须显 0.5 非假 50%)。
  * AA 基准集演进时未收录的比例型 key 显示原始值——诚实但不百分比化,不猜。
  */
 export const RATIO_BENCHMARKS = new Set([
@@ -161,8 +164,13 @@ export const RATIO_BENCHMARKS = new Set([
   'scicode',
   'math_500',
   'aime',
-  'critpt',
-  'gdpval_aa',
+  'aime_25',
+  'lcr',
+  'ifbench',
+  'tau2',
+  'tau_banking',
+  'terminalbench_hard',
+  'terminalbench_v2_1',
 ])
 
 /**
