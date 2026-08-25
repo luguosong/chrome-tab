@@ -6,6 +6,7 @@ import type {
   ModelPricing,
   ModelProviderId,
   ReleaseStage,
+  TrackedModel,
 } from 'chrome-tab-shared'
 
 /**
@@ -84,6 +85,24 @@ export function isFreshModelEvent(occurredOn: string, nowMs = Date.now()): boole
 export function modelEventIso(occurredOn: string): string | null {
   const ms = modelEventAnchorMs(occurredOn)
   return ms === null ? null : new Date(ms).toISOString()
+}
+
+/**
+ * 模型列表展示排序(详情 Modal「全部」tab 与块内列表共用):可用模型按最新动态日期
+ * 降序、退役沉底(CONTEXT.md「可用在前、已退役在后」),同日按 id 升序稳定。排序键对齐
+ * 产品语汇(红点/鲜度/最近动态行皆以动态为轴)——修复 2026-08-25 线上症状:按入库 id
+ * 排序使智谱 44 模型连排数屏,其余厂家在「全部」与块内 slice(0,30) 中不可见。
+ * events[0] 即最新动态(archive() 按 occurred_on 倒序返回);sort 原位排序,调用方
+ * 须传拷贝(filter 返回的新数组可直接排)。
+ */
+export function compareModelsByLatestEvent(a: TrackedModel, b: TrackedModel): number {
+  const ra = a.stage === 'retired' ? 1 : 0
+  const rb = b.stage === 'retired' ? 1 : 0
+  if (ra !== rb) return ra - rb
+  const da = a.events[0]?.occurredOn ?? ''
+  const db = b.events[0]?.occurredOn ?? ''
+  if (da !== db) return da < db ? 1 : -1
+  return a.id - b.id
 }
 
 /**
