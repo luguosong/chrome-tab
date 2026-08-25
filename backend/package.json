@@ -15,9 +15,10 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
-    "chrome-tab-shared": "workspace:*",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^13.0.3",
+    "chrome-tab-shared": "workspace:*",
+    "fast-xml-parser": "^5.11.0",
     "hono": "^4.13.3",
     "kysely": "^0.29.5",
     "node-cron": "^4.6.0",

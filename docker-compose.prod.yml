@@ -40,10 +40,14 @@ services:
       QWEATHER_API_HOST: ${QWEATHER_API_HOST}
       # 滴答清单「待办」(CONTEXT.md):API 口令,同 bing/virxact 先例国内直连
       DIDA365_TOKEN: ${DIDA365_TOKEN}
+      # 视频更新(CONTEXT.md「视频更新」,ADR-0024):两键均可缺省——无 key 走 RSS 降级、
+      # 无 Cookie 的 B站博主标红待自愈。YouTube RSS/API 走代理,B站三域直连(勿代理,风控敏感)
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+      BILIBILI_COOKIE: ${BILIBILI_COOKIE}
       # Node24 原生 fetch 默认忽略代理变量,须开此开关(译制/拉原文走 mihomo,qweather/npm 直连)
       NODE_USE_ENV_PROXY: "1"
       HTTPS_PROXY: http://mihomo:7890
-      NO_PROXY: localhost,127.0.0.1,.qweatherapi.com,registry.npmjs.org,.bing.com,.virxact.com,.dida365.com
+      NO_PROXY: localhost,127.0.0.1,.qweatherapi.com,registry.npmjs.org,.bing.com,.virxact.com,.dida365.com,.bilibili.com,.biliapi.net,.biliapi.com,.hdslb.com
     volumes:
       - ./backend/data:/app/backend/data
     expose:

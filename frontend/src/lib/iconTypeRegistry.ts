@@ -33,8 +33,8 @@ export type EditorField =
 
 /** 刷新配置(spec §刷新策略):hook key + 间隔(ms)。0 = 不刷新。 */
 export type RefreshConfig = {
-  /** 'quotes' = useQuotes 轮询(60s); 'changelog' = useChangelog staleTime(1h); 'weather' = useWeather(后端缓存 10/30/5min); 'aihot' = useAiHot 自持(后端缓存 300s,单例不入集中层); 'todo' = useTodo 自持(后端缓存 60s,单例不入集中层); 'none' = 不刷新。 */
-  kind: 'quotes' | 'changelog' | 'weather' | 'aihot' | 'todo' | 'none'
+  /** 'quotes' = useQuotes 轮询(60s); 'changelog' = useChangelog staleTime(1h); 'weather' = useWeather(后端缓存 10/30/5min); 'aihot' = useAiHot 自持(后端缓存 300s,单例不入集中层); 'todo' = useTodo 自持(后端缓存 60s,单例不入集中层); 'video' = useVideoFeed 自持(后端 1h 轮询预取,前端 staleTime 5min,单例不入集中层); 'none' = 不刷新。 */
+  kind: 'quotes' | 'changelog' | 'weather' | 'aihot' | 'todo' | 'video' | 'none'
 }
 
 /** 实时摘要数据(见 summarize 注释:ADR-0001 契约字段,当前无网格消费方)。 */
@@ -244,6 +244,24 @@ export const TODO_DEF: IconTypeDefinition = {
   summarize: () => null, // 网格渲染走专属 TodoIconBody,契约字段无消费方(同 nav/aihot)
 }
 
+/** 视频更新:扩展类型,单例(博主注册表是账号级后端数据、无可绑实例参数,见 CONTEXT.md「视频更新」)。
+ *  data 无字段;3×2 大 tile(块内全分类混合视频流,一行一条:24h 红点 + 博主名·相对时间 +
+ *  标题截断 + 平台标记,点行外跳原平台),详情 Modal(全部/未分类/各分类/管理 tab,ADR-0022
+ *  「更多」标头唯一入口)。数据 = 后端持久化 + 1h 轮询预取(ADR-0023)、取数路线 ADR-0024;
+ *  前端只读、hook 自持轮询(同 aihot/todo 先例,不入集中层)。 */
+export const VIDEO_DEF: IconTypeDefinition = {
+  id: 'video',
+  label: '视频更新',
+  kind: 'extension',
+  singleton: true,
+  refresh: { kind: 'video' },
+  detail: 'modal',
+  size: { w: 3, h: 2 },
+  detailEntry: 'header',
+  editor: [],
+  summarize: () => null, // 网格渲染走专属 VideoIconBody,契约字段无消费方(同 nav/aihot/todo)
+}
+
 /**
  * 分组(ADR-0011):iOS 文件夹式收纳容器(块内成员 favicon 3×2 迷你预览,ADR-0015)。
  * kind='group' 不属于 base/extension 任一分区,
@@ -269,4 +287,5 @@ register('changelog', CHANGELOG_DEF)
 register('weather', WEATHER_DEF)
 register('aihot', AIHOT_DEF)
 register('todo', TODO_DEF)
+register('video', VIDEO_DEF)
 register('group', GROUP_DEF)

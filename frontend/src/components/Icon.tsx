@@ -7,6 +7,7 @@ import WeatherIconBody from './WeatherIcon'
 import ChangelogIconBody from './ChangelogIcon'
 import AiHotIconBody from './AiHotIcon'
 import TodoIconBody from './TodoIcon'
+import VideoIconBody from './VideoIcon'
 import LocationPicker from './LocationPicker'
 import SymbolPicker from './SymbolPicker'
 import Tile from './Tile'
@@ -168,6 +169,8 @@ export default function Icon({
         <AiHotIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
       ) : icon.type === 'todo' ? (
         <TodoIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
+      ) : icon.type === 'video' ? (
+        <VideoIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
       ) : (
         <>
           {/* nav:裸 favicon 直出(ADR-0015 注记 2026-08-23c,回归 ADR-0013):Tile bare

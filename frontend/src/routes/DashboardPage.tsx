@@ -39,6 +39,7 @@ import StockModal from '../components/StockModal'
 import WeatherModal from '../components/WeatherModal'
 import AiHotModal from '../components/AiHotModal'
 import TodoModal from '../components/TodoModal'
+import VideoModal from '../components/VideoModal'
 import ChangelogModal from '../components/ChangelogModal'
 import ControlDrawer from '../components/ControlDrawer'
 import { get } from '../lib/iconTypeRegistry'
@@ -579,6 +580,8 @@ function Dashboard() {
                     <AiHotModal icon={detail} onClose={() => setDetail(null)} />
                   ) : detail.type === 'todo' ? (
                     <TodoModal onClose={() => setDetail(null)} />
+                  ) : detail.type === 'video' ? (
+                    <VideoModal onClose={() => setDetail(null)} />
                   ) : detail.type === 'changelog' ? (
                     <ChangelogModal
                       source={changelogSourceOf(detail.data)}

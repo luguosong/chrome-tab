@@ -8,6 +8,7 @@ import { dailyBackup } from './backup'
 import { ChangelogService, prodChangelogDeps, startChangelogScheduler, type ChangelogServices } from './changelog'
 import { openDb } from './db'
 import { bootstrap } from './seed'
+import { VideoUpdatesService, prodVideoDeps, startVideoUpdatesScheduler } from './videoUpdates'
 
 const dbPath = process.env.DB_PATH ?? 'data/newtab.db'
 mkdirSync(dirname(dbPath), { recursive: true })
@@ -29,6 +30,7 @@ const changelog = Object.fromEntries(
   ]),
 ) as ChangelogServices
 // 和风天气(ADR-0009):Key/个人专用主机走环境变量、不入库;缺省未配置 → 端点 500
+const videoUpdatesService = new VideoUpdatesService(db, prodVideoDeps())
 const app = createApp({
   db,
   cookieSecure,
@@ -39,12 +41,16 @@ const app = createApp({
   },
   // 滴答清单「待办」(CONTEXT.md):API 口令 env 注入,不入前端
   dida: { token: process.env.DIDA365_TOKEN ?? '' },
+  // 视频更新(CONTEXT.md「视频更新」):凭据 env 注入,两键均可缺省(降级见 videoUpdates.ts)
+  videoUpdates: videoUpdatesService,
 })
 
 const port = Number(process.env.PORT ?? 8080)
 serve({ fetch: app.fetch, port }, (info) => console.log(`backend listening on :${info.port}`))
 // ADR-0017:启动先恢复快照再异步预热,此后每 6h 定时刷新(逐源,ADR-0020)
 startChangelogScheduler(Object.values(changelog))
+// 视频更新 1h 轮询(spec:非整点错开整点请求高峰;库即真相,无启动预热步骤)
+startVideoUpdatesScheduler(videoUpdatesService)
 
 // 每日 03:17(UTC):WAL checkpoint + 过期 session 清理 + VACUUM INTO 备份(票 09;恢复 = 拷回文件)
 schedule('17 3 * * *', async () => {

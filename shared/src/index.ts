@@ -6,6 +6,46 @@
 /** 搜索引擎 id(与后端 LayoutLimits 校验白名单一致)。 */
 export type SearchEngineId = 'google' | 'bing' | 'baidu'
 
+/**
+ * 视频更新 wire 契约(CONTEXT.md「视频更新/博主/分类」;数据落 SQLite、后端轮询预取,
+ * ADR-0023/0024)。publishedAt 为 unix 秒(跨平台统一口径,B站 created 原生、YouTube ISO 转换);
+ * 可空字段对应降级口径(无 key 时 YouTube 缺时长头像,存量不回补)。
+ */
+export type VideoPlatform = 'youtube' | 'bilibili'
+
+export type VideoFeedItem = {
+  id: number
+  title: string
+  url: string
+  thumbnailUrl: string | null
+  durationSeconds: number | null
+  publishedAt: number
+  bloggerId: number
+  bloggerName: string
+  platform: VideoPlatform
+  categoryId: number | null
+}
+
+export type VideoCategory = { id: number; name: string; sortOrder: number }
+
+/** GET /api/video-updates/categories 信封:列表恒带各分类博主数(管理 tab 与 tab 显隐用)。 */
+export type VideoCategoriesResponse = {
+  categories: Array<VideoCategory & { bloggerCount: number }>
+  uncategorizedCount: number
+}
+
+export type VideoBlogger = {
+  id: number
+  platform: VideoPlatform
+  platformUserId: string
+  name: string
+  avatarUrl: string | null
+  /** null = 未分类(虚拟桶,非实体)。 */
+  categoryId: number | null
+  /** 连续 24 轮取数失败标红「取数失败」,不自动删;成功即回 ok。 */
+  status: 'ok' | 'failing'
+}
+
 export * from './changelogSources'
 
 /**

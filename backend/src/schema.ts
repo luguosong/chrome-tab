@@ -82,6 +82,47 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at  TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+-- 视频更新(CONTEXT.md「视频更新/博主/分类」;ADR-0023 持久化轮询):博主注册表与
+-- 视频是账号级数据(user_id 同 pages 口径),不塞图标 data。published_at 为 unix 秒;
+-- 裁剪(每博主保最新 50)由应用层在入库事务内做,无 DB 默认依赖(同全局惯例)。
+CREATE TABLE IF NOT EXISTS video_categories (
+    id          INTEGER PRIMARY KEY,
+    user_id     INTEGER NOT NULL,
+    name        TEXT NOT NULL,
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_video_category_user ON video_categories (user_id);
+CREATE TABLE IF NOT EXISTS video_bloggers (
+    id                INTEGER PRIMARY KEY,
+    user_id           INTEGER NOT NULL,
+    platform          TEXT NOT NULL,
+    platform_user_id  TEXT NOT NULL,
+    name              TEXT NOT NULL,
+    avatar_url        TEXT,
+    category_id       INTEGER REFERENCES video_categories(id) ON DELETE SET NULL,
+    fail_streak       INTEGER NOT NULL DEFAULT 0,
+    status            TEXT NOT NULL DEFAULT 'ok',
+    created_at        TEXT NOT NULL,
+    UNIQUE (user_id, platform, platform_user_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_video_blogger_user ON video_bloggers (user_id);
+CREATE TABLE IF NOT EXISTS videos (
+    id                INTEGER PRIMARY KEY,
+    blogger_id        INTEGER NOT NULL,
+    platform_video_id TEXT NOT NULL,
+    title             TEXT NOT NULL,
+    url               TEXT NOT NULL,
+    thumbnail_url     TEXT,
+    duration_seconds  INTEGER,
+    published_at      INTEGER NOT NULL,
+    created_at        TEXT NOT NULL,
+    UNIQUE (blogger_id, platform_video_id),
+    FOREIGN KEY (blogger_id) REFERENCES video_bloggers(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_videos_blogger_pub ON videos (blogger_id, published_at DESC);
 `
 
 /** openDb 打开连接后即执行;幂等(IF NOT EXISTS)。 */
@@ -160,6 +201,39 @@ export interface SessionsTable {
   expires_at: string
 }
 
+export interface VideoCategoriesTable {
+  id: Generated<number>
+  user_id: number
+  name: string
+  sort_order: number
+  created_at: string
+}
+
+export interface VideoBloggersTable {
+  id: Generated<number>
+  user_id: number
+  platform: string
+  platform_user_id: string
+  name: string
+  avatar_url: string | null
+  category_id: number | null
+  fail_streak: number
+  status: string
+  created_at: string
+}
+
+export interface VideosTable {
+  id: Generated<number>
+  blogger_id: number
+  platform_video_id: string
+  title: string
+  url: string
+  thumbnail_url: string | null
+  duration_seconds: number | null
+  published_at: number
+  created_at: string
+}
+
 export interface SchemaDatabase {
   users: UsersTable
   pages: PagesTable
@@ -169,4 +243,7 @@ export interface SchemaDatabase {
   changelog_translations: ChangelogTranslationsTable
   changelog_snapshots: ChangelogSnapshotsTable
   sessions: SessionsTable
+  video_categories: VideoCategoriesTable
+  video_bloggers: VideoBloggersTable
+  videos: VideosTable
 }
