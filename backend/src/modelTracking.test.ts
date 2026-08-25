@@ -794,3 +794,15 @@ describe('模型追踪:xAI 档案服务(轮询/厂家隔离)', () => {
     expect(a.models).toHaveLength(TOTAL_BASELINE)
   })
 })
+
+describe('模型追踪:xAI 基线信源一致性(评审修正)', () => {
+  it('发布流口径的基线事件信源 = 轮询 URL(同公告去重键可对上,封堵 .md 分裂复发)', () => {
+    for (const b of XAI_BASELINE) {
+      for (const ev of b.events ?? []) {
+        if (ev.sourceUrl.includes('docs.x.ai/developers/release-notes')) {
+          expect(ev.sourceUrl).toBe(XAI_RELEASES_URL)
+        }
+      }
+    }
+  })
+})

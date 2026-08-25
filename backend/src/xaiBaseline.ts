@@ -6,7 +6,7 @@ import type { BaselineModel } from './modelTracking'
  * - 模型清单/价格/上下文/速率限额:模型目录 docs.x.ai/developers/models(Text API /
  *   Imagine / Voice 三张价格表即收录边界;表外无目录行的不臆造)与各模型文档页
  *   /developers/models/<id>(别名清单、Batch 支持度、区域均出自该页)
- * - 动态(上线月份):官方发布流 /developers/release-notes(仅月份标题粒度);首 发
+ * - 动态(上线月份):官方发布流 /developers/release-notes(仅月份标题粒度);首发
  *   精确日期取回链的官方发布文章 x.ai/news 的 datePublished
  * - Voice 能力明细(TTS/STT/S2S):Voice API 总览 /developers/model-capabilities/audio/voice
  * 归属与研究结论(research/sources.md §3/§4/§5):Grok 文本模型均「text, image → text」,
