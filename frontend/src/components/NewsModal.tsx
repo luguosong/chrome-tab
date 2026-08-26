@@ -58,8 +58,9 @@ export default function NewsModal({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* tab 按钮不可加 -mb-px 压线:overflow-x-auto 会把 overflow-y 计算为 auto,1px 溢出即冒垂直滚动条。
-            横向滚动条走 no-scrollbar(PageTabs 同款):雾胶囊轨道须 pb 让位,会把下划线推离分隔线,tab 行用不得 */}
-        <div role="tablist" aria-label="新闻视图" className="flex gap-4 border-b border-white/10 mb-3 overflow-x-auto no-scrollbar">
+            横条走 modal-scroll 雾胶囊(与面板同语汇,占位 8px 随行盒长高、下划线与分隔线同盒不脱开)——
+            17 个 tab 常态溢出,横滚是主交互,藏条(eee92a5f 曾走 no-scrollbar)会失去拖拽与可滚提示 */}
+        <div role="tablist" aria-label="新闻视图" className="flex gap-4 border-b border-white/10 mb-3 overflow-x-auto modal-scroll">
           {tabs.map(({ key, label }) => (
             <button
               key={key}
