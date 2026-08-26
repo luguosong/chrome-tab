@@ -1,7 +1,6 @@
 import { useVideoFeed } from '../hooks/useVideoUpdates'
-import { tileFont } from '../lib/iconLayout'
+import { ICON_SCALE, tileFont } from '../lib/iconLayout'
 import { timeAgo } from '../lib/timeAgo'
-import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import type { Icon } from '../lib/types'
 import BigTile from './BigTile'
 
@@ -30,8 +29,7 @@ export default function VideoIconBody({
 }) {
   void icon // 单例无实例参数(data 无字段);保留形参对齐其它 body 的接口
   const { data } = useVideoFeed()
-  const { iconScale } = useLayoutSettings()
-  const fontSize = tileFont(iconScale, 'secondary')
+  const fontSize = tileFont(ICON_SCALE, 'secondary')
   const videos = data ?? []
   const fresh = videos[0] ? new Date(videos[0].publishedAt * 1000).toISOString() : null
 

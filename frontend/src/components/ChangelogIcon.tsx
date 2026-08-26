@@ -1,8 +1,7 @@
 import { changelogSourceOf, getChangelogSource } from 'chrome-tab-shared'
 import { useChangelog } from '../hooks/useChangelog'
 import { timeAgo } from '../lib/timeAgo'
-import { tileFont } from '../lib/iconLayout'
-import { useLayoutSettings } from '../context/LayoutSettingsContext'
+import { ICON_SCALE, tileFont } from '../lib/iconLayout'
 import type { Icon } from '../lib/types'
 import BigTile from './BigTile'
 
@@ -36,12 +35,11 @@ export default function ChangelogIconBody({
   // data.source 读侧兜底:存量 data=null 图标归默认源(ADR-0020)
   const source = changelogSourceOf(icon.data)
   const { data } = useChangelog(source)
-  const { iconScale } = useLayoutSettings()
   const versions = data?.versions ?? []
   const times = data?.releaseTimes ?? {}
   const latest = versions[0]
   const fresh = latest ? (times[latest.title] ?? data?.releasedAt ?? null) : null
-  const fontSize = tileFont(iconScale, 'secondary')
+  const fontSize = tileFont(ICON_SCALE, 'secondary')
   const sourceDef = getChangelogSource(source)
 
   return (

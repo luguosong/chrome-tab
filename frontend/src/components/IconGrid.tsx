@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { useDroppable } from '@dnd-kit/core'
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable'
 import type { Icon, Page } from '../lib/types'
-import { GRID_COLUMNS, iconCellGeometry, labelBlockPx } from '../lib/iconLayout'
+import { GRID_COLUMNS, iconCellGeometry, labelBlockPx, ICON_SCALE } from '../lib/iconLayout'
 import { DEFAULT_PAGE_CAPACITY, cellsUsed } from '../lib/iconCapacity'
 import { useEditMode } from '../context/EditModeContext'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
@@ -34,7 +34,7 @@ export default function IconGrid({
   onOpenGroup?: (icon: Icon) => void
 }) {
   const { editing } = useEditMode()
-  const { gridWidth, gridGap, gridGapY, iconScale, labelVisible, labelSize } = useLayoutSettings()
+  const { gridWidth, gridGap, gridGapY, labelVisible, labelSize } = useLayoutSettings()
   // 剩余格数角标(spec user story 42):容量取 DEFAULT_PAGE_CAPACITY(与后端最终校验一致),
   // 纯函数 cellsUsed 累加本页图标格数(跨格类型按 w×h 计,ADR-0021;icons 已按 pageId 过滤)。
   const remaining = DEFAULT_PAGE_CAPACITY - cellsUsed(icons)
@@ -59,7 +59,7 @@ export default function IconGrid({
   // edge 不直接进 style:它经 rowH 驱动 Tile 块(TileFrame,Tile.tsx 私有)的 flex
   // 填充高度,块再被 maxHeight(标称)与 maxWidth min(标称,100%) 双向钳制
   const { rowH } = iconCellGeometry({
-    iconScale,
+    iconScale: ICON_SCALE,
     labelBlock: labelBlockPx(labelVisible, labelSize),
     gapY: gridGapY,
     usedRows,

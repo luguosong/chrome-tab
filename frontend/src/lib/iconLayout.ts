@@ -9,14 +9,20 @@ export const GRID_ROWS = 9
 
 /**
  * favicon 基准边长(ADR-0014 遗产,ADR-0016 单档化;上调史见 ADR-0016 注记 2026-08-23b/c):
- * 56px——用户要求默认档再放大(23b 的 48 仍偏小)。注意 iconScale 默认 1.5(前后端
- * LayoutLimits),默认视觉 = 56×1.5 = 84px;上调对所有 scale 档位同比生效。
- * 只随 iconScale 同比缩放,gridGap 不参与推导。
+ * 56px——用户要求默认档再放大(23b 的 48 仍偏小)。
+ * 视觉 = 56 × ICON_SCALE;只随 ICON_SCALE 同比缩放,gridGap 不参与推导。
  */
 export const FAV_BASE_PX = 56
 
-/** 裸 favicon 类型(nav / 分组)的 favicon 边长 = 基准 × iconScale。 */
-export function faviconPx(iconScale = 1): number {
+/**
+ * 图标缩放系数:图标整体大小(favicon 基准、块内边距、小组件字号)的唯一来源。
+ * 曾是用户设置(ADR-0016),2026-08-26 撤除调节入口、钉死于代码(ADR-0033)——
+ * 要调整就改这一处常量。
+ */
+export const ICON_SCALE = 1
+
+/** 裸 favicon 类型(nav / 分组)的 favicon 边长 = 基准 × ICON_SCALE。 */
+export function faviconPx(iconScale = ICON_SCALE): number {
   return FAV_BASE_PX * iconScale
 }
 
@@ -56,7 +62,7 @@ export const TILE_FONT_TIERS = {
 export type TileFontTier = keyof typeof TILE_FONT_TIERS
 
 /** 档位字号 CSS 值:max(12px 可读下限, min(px 档 × iconScale, cqw 档))。
- *  外层 max 防 iconScale 缩小档(<1.0 合法区间)把次行压到 12px 以下——
+ *  外层 max 防缩放系数 <1 把次行压到 12px 以下——
  *  cqw 只钳上限救不了下限,labelSize 在后端有 10px 下限而此前本公式没有。 */
 export function tileFont(iconScale: number, tier: TileFontTier): string {
   const { px, cqw } = TILE_FONT_TIERS[tier]
@@ -64,15 +70,15 @@ export function tileFont(iconScale: number, tier: TileFontTier): string {
 }
 
 /**
- * 单档图标几何(ADR-0016 修订:iconScale 是图标大小的唯一调节,必须真实生效)。
+ * 单档图标几何(ADR-0016 修订引入;缩放系数现为代码常量 ICON_SCALE,ADR-0033)。
  *
  * 旧行为的 bug:网格行轨道 = repeat(8, 1fr) 平分固定画布,图标本体被「画布高/8 − 名称行」
  * 钳死——矮视口下钳制值低于一切标称边长,iconScale 拉满也不动(见 scripts/scale-repro.mjs)。
  * 新模型:行高由图标推导(仅实际占用的行参与分高),图标边长 = min(标称, 轨道宽, 行可用高):
- *   - 标称 = FAV_BASE_PX × iconScale(用户唯一大小调节)
+ *   - 标称 = FAV_BASE_PX × iconScale(调用方传 ICON_SCALE,ADR-0033)
  *   - 轨道宽上限:防重叠(用户要求「整体宽度最小时图标不要重叠」)——预留分组块
  *     2×GROUP_PAD_PX,使分组最宽块也不侵入相邻画格
- *   - 行可用高:usedRows 行铺进画布 gridH 后每行分到的高度(满 8 行的矮视口才压缩,
+ *   - 行可用高:usedRows 行铺进画布 gridH 后每行分到的高度(满 9 行的矮视口才压缩,
  *     稀疏页放行标称值;压缩全体一致,整齐的本质是一致性)
  *
  * 测量缺失(trackW/gridH ≤ 0,首帧 ResizeObserver 未回报)时退化为只按标称,
@@ -89,7 +95,7 @@ export function iconCellGeometry({
   iconScale: number
   labelBlock: number
   gapY: number
-  /** 页面实际占用的行数(ceil(顶层图标数 / 8)),≥1。 */
+  /** 页面实际占用的行数(ceil(顶层图标数 / GRID_COLUMNS)),≥1。 */
   usedRows: number
   /** 列轨道像素宽(grid 元素实测)。 */
   trackW: number

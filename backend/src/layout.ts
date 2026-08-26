@@ -14,7 +14,6 @@ export const LAYOUT_DEFAULTS = {
   gridWidth: 1024,
   gridGap: 8,
   gridGapY: 8,
-  iconScale: 1.5,
   panelFog: 36,
   searchBarWidth: 576,
   searchBarVisible: true,
@@ -35,7 +34,7 @@ type Widen<T> = {
 }
 type LayoutWire = Widen<typeof LAYOUT_DEFAULTS>
 
-/** layout_settings 行(0/1 整数)→ 14 字段 wire(布尔);无行时返回 defaults()。 */
+/** layout_settings 行(0/1 整数)→ 13 字段 wire(布尔);无行时返回 defaults()。 */
 export async function readLayout(db: Db, userId: number): Promise<LayoutWire> {
   const row = await db.selectFrom('layout_settings').selectAll().where('user_id', '=', userId).executeTakeFirst()
   if (!row) return { ...LAYOUT_DEFAULTS }
@@ -43,7 +42,6 @@ export async function readLayout(db: Db, userId: number): Promise<LayoutWire> {
     gridWidth: row.grid_width,
     gridGap: row.grid_gap,
     gridGapY: row.grid_gap_y,
-    iconScale: row.icon_scale,
     panelFog: row.panel_fog,
     searchBarWidth: row.search_bar_width,
     searchBarVisible: !!row.search_bar_visible,
@@ -58,14 +56,13 @@ export async function readLayout(db: Db, userId: number): Promise<LayoutWire> {
   }
 }
 
-/** 校验 + upsert(可空字段补默认);返回 14 字段 wire。调用方负责事务与 bump。 */
+/** 校验 + upsert(可空字段补默认);返回 13 字段 wire。调用方负责事务与 bump。 */
 export async function updateLayout(db: Db, userId: number, body: Record<string, unknown>): Promise<LayoutWire> {
   // gridWidth 下限 768(ADR-0021 随 9×9 扩容上调,原 640):9 列轨道下图标不缩过旧 8 列
   // 最小档——「网格最小宽度变大,1×1 图标视觉不变」的容量侧配套。
   const gridWidth = reqInt(body, 'gridWidth', 768, 1536)
   const gridGap = reqInt(body, 'gridGap', 0, 24)
   const gridGapY = optInt(body, 'gridGapY', 0, 32, LAYOUT_DEFAULTS.gridGapY)
-  const iconScale = reqScale(body)
   const panelFog = optInt(body, 'panelFog', 0, 60, LAYOUT_DEFAULTS.panelFog)
   const searchBarWidth = optInt(body, 'searchBarWidth', 320, 1024, LAYOUT_DEFAULTS.searchBarWidth)
   const searchBarVisible = optBool(body, 'searchBarVisible', true)
@@ -82,7 +79,6 @@ export async function updateLayout(db: Db, userId: number, body: Record<string, 
     grid_width: gridWidth,
     grid_gap: gridGap,
     grid_gap_y: gridGapY,
-    icon_scale: iconScale,
     panel_fog: panelFog,
     search_bar_width: searchBarWidth,
     search_bar_visible: searchBarVisible ? 1 : 0,
@@ -131,13 +127,6 @@ function reqInt(b: Record<string, unknown>, key: string, min: number, max: numbe
 function optInt(b: Record<string, unknown>, key: string, min: number, max: number, def: number): number {
   if (b[key] === undefined || b[key] === null) return def
   return reqInt(b, key, min, max)
-}
-
-function reqScale(b: Record<string, unknown>): number {
-  const v = b.iconScale
-  if (typeof v !== 'number') throw new BadRequest('iconScale: must not be null')
-  if (v < 0.75 || v > 2.0) throw new BadRequest('iconScale: 必须在 0.75~2.0 之间')
-  return v
 }
 
 function optBool(b: Record<string, unknown>, key: string, def: boolean): boolean {

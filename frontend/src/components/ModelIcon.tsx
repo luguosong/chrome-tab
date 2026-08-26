@@ -1,6 +1,6 @@
 import type { TrackedModel } from 'chrome-tab-shared'
 import { useModelArchive } from '../hooks/useModelArchive'
-import { tileFont } from '../lib/iconLayout'
+import { ICON_SCALE, tileFont } from '../lib/iconLayout'
 import {
   AVAILABILITY_LABELS,
   MODEL_KIND_COLOR_CLASSES,
@@ -12,7 +12,6 @@ import {
   isFreshModelEvent,
   modelEventIso,
 } from '../lib/modelTracking'
-import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import type { Icon } from '../lib/types'
 import BigTile from './BigTile'
 
@@ -39,8 +38,7 @@ export default function ModelIconBody({
 }) {
   void icon // 单例无实例参数(data 无字段);保留形参对齐其它 body 的接口
   const { data } = useModelArchive()
-  const { iconScale } = useLayoutSettings()
-  const fontSize = tileFont(iconScale, 'secondary')
+  const fontSize = tileFont(ICON_SCALE, 'secondary')
   // 展示序 = 上线发布时间优先(退役沉底,2026-08-26 轴改):slice(30) 截断前先排,否则
   // 入库 id 序让单一厂家(智谱 44 个)占满截断窗,其余厂家在块内永不可见
   const models = [...(data?.models ?? [])].sort(compareModelsByRelease)

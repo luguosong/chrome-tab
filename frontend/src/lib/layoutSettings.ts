@@ -2,14 +2,13 @@ import type { LayoutSettings } from './types'
 
 /**
  * 布局设置数值边界与默认值,镜像后端 LayoutLimits(见 layoutsetting/LayoutLimits.java)。
- * 默认值=扩展前硬编码:max-w-5xl(1024px)、gap-2(8px)、scale 1.0、暗色页板 0.36、
+ * 默认值=扩展前硬编码:max-w-5xl(1024px)、gap-2(8px)、暗色页板 0.36、
  * 搜索框 max-w-xl(576px)、时钟 text-5xl(48px)、名称 text-xs(12px)。
  */
 export const LAYOUT_LIMITS = {
   gridWidth: { min: 768, max: 1536, step: 16, default: 1024 },
   gridGap: { min: 0, max: 24, step: 1, default: 8 },
   gridGapY: { min: 0, max: 32, step: 1, default: 8 },
-  iconScale: { min: 0.75, max: 2, step: 0.05, default: 1.5 },
   panelFog: { min: 0, max: 60, step: 1, default: 36 },
   searchBarWidth: { min: 320, max: 1024, step: 16, default: 576 },
   clockFont: { min: 28, max: 72, step: 2, default: 48 },
@@ -20,7 +19,6 @@ export const DEFAULT_LAYOUT_SETTINGS: LayoutSettings = {
   gridWidth: LAYOUT_LIMITS.gridWidth.default,
   gridGap: LAYOUT_LIMITS.gridGap.default,
   gridGapY: LAYOUT_LIMITS.gridGapY.default,
-  iconScale: LAYOUT_LIMITS.iconScale.default,
   panelFog: LAYOUT_LIMITS.panelFog.default,
   searchBarWidth: LAYOUT_LIMITS.searchBarWidth.default,
   searchBarVisible: true,
@@ -47,7 +45,6 @@ export function withDefaults(
     ),
     gridGap: s?.gridGap ?? DEFAULT_LAYOUT_SETTINGS.gridGap,
     gridGapY: s?.gridGapY ?? DEFAULT_LAYOUT_SETTINGS.gridGapY,
-    iconScale: s?.iconScale ?? DEFAULT_LAYOUT_SETTINGS.iconScale,
     panelFog: s?.panelFog ?? DEFAULT_LAYOUT_SETTINGS.panelFog,
     searchBarWidth: s?.searchBarWidth ?? DEFAULT_LAYOUT_SETTINGS.searchBarWidth,
     searchBarVisible: s?.searchBarVisible ?? true,

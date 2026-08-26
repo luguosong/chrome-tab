@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTodo } from '../hooks/useTodo'
-import { tileFont } from '../lib/iconLayout'
-import { useLayoutSettings } from '../context/LayoutSettingsContext'
+import { ICON_SCALE, tileFont } from '../lib/iconLayout'
 import type { Icon } from '../lib/types'
 import type { TodoTask } from '../lib/todo'
 import BigTile from './BigTile'
@@ -55,8 +54,7 @@ export default function TodoIconBody({
 }) {
   void icon // 单例无实例参数(data 无字段);保留形参对齐其它 body 的接口
   const { data } = useTodo()
-  const { iconScale } = useLayoutSettings()
-  const fontSize = tileFont(iconScale, 'secondary')
+  const fontSize = tileFont(ICON_SCALE, 'secondary')
   const inbox = data?.inbox ?? []
   const [detail, setDetail] = useState<TodoTask | null>(null)
 

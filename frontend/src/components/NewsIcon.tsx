@@ -1,8 +1,7 @@
 import { newsSourceLabel } from 'chrome-tab-shared'
 import { useNewsFeed } from '../hooks/useNews'
-import { tileFont } from '../lib/iconLayout'
+import { ICON_SCALE, tileFont } from '../lib/iconLayout'
 import { timeAgo } from '../lib/timeAgo'
-import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import type { Icon } from '../lib/types'
 import BigTile from './BigTile'
 
@@ -30,8 +29,7 @@ export default function NewsIconBody({
 }) {
   void icon // 单例无实例参数(data 无字段);保留形参对齐其它 body 的接口
   const { data, isError } = useNewsFeed()
-  const { iconScale } = useLayoutSettings()
-  const fontSize = tileFont(iconScale, 'secondary')
+  const fontSize = tileFont(ICON_SCALE, 'secondary')
   const items = data?.items ?? []
   const sources = data?.sources ?? []
   const fresh =

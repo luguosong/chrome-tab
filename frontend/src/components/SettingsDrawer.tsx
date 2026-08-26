@@ -59,16 +59,6 @@ export function SettingsPane({
         onChange={(v) => onApply('gridGapY', v)}
         onCommit={onCommit}
       />
-      <Slider
-        label="图标缩放"
-        unit="×"
-        value={draft.iconScale}
-        min={LAYOUT_LIMITS.iconScale.min}
-        max={LAYOUT_LIMITS.iconScale.max}
-        step={LAYOUT_LIMITS.iconScale.step}
-        onChange={(v) => onApply('iconScale', v)}
-        onCommit={onCommit}
-      />
 
       <Section>背景</Section>
       <Slider

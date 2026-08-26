@@ -50,7 +50,7 @@ export async function fetchConfigOnce(): Promise<Config> {
 }
 
 /**
- * 布局设置写:PUT /api/layout-settings,body 为整份「布局草稿」(14 字段)。
+ * 布局设置写:PUT /api/layout-settings,body 为整份「布局草稿」(13 字段)。
  * 成功后 invalidate 聚合查询拉回权威值(跨设备共享语义)。实时预览由
  * useLayoutDraft 乐观写 ['config'] 缓存实现,本 hook 仅负责持久化。
  *

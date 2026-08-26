@@ -39,9 +39,9 @@ describe('GET /api/config', () => {
     expect(json.icons.find((i) => i.type === 'CHANGELOG')!.data).toEqual({ source: 'claude-code' })
     expect(json.icons.find((i) => i.type === 'NAV')!.data).toEqual({ name: 'GitHub', url: 'https://github.com' })
     expect(json.icons.filter((i) => i.type === 'STOCK')).toHaveLength(13)
-    // 无行 → defaults()(14 字段全量)
+    // 无行 → defaults()(13 字段全量)
     expect(json.layoutSettings).toEqual({
-      gridWidth: 1024, gridGap: 8, gridGapY: 8, iconScale: 1.5, panelFog: 36,
+      gridWidth: 1024, gridGap: 8, gridGapY: 8, panelFog: 36,
       searchBarWidth: 576, searchBarVisible: true, searchEngine: 'google',
       clockVisible: true, clockFont: 48, clock24h: true,
       labelVisible: true, labelSize: 12, labelColor: '#ffffff',
@@ -68,7 +68,7 @@ describe('PUT /api/layout-settings', () => {
     await new Promise((r) => setTimeout(r, 5))
     const res = await req('PUT', '/api/layout-settings', {
       body: {
-        gridWidth: 1280, gridGap: 12, gridGapY: 16, iconScale: 1.75, panelFog: 20,
+        gridWidth: 1280, gridGap: 12, gridGapY: 16, panelFog: 20,
         searchBarWidth: 800, searchBarVisible: false, searchEngine: 'bing',
         clockVisible: false, clockFont: 60, clock24h: false,
         labelVisible: false, labelSize: 14, labelColor: '#aAbBcC',
@@ -77,7 +77,7 @@ describe('PUT /api/layout-settings', () => {
     })
     expect(res.status).toBe(200)
     await expect(res.json()).resolves.toEqual({
-      gridWidth: 1280, gridGap: 12, gridGapY: 16, iconScale: 1.75, panelFog: 20,
+      gridWidth: 1280, gridGap: 12, gridGapY: 16, panelFog: 20,
       searchBarWidth: 800, searchBarVisible: false, searchEngine: 'bing',
       clockVisible: false, clockFont: 60, clock24h: false,
       labelVisible: false, labelSize: 14, labelColor: '#aAbBcC',
@@ -88,11 +88,11 @@ describe('PUT /api/layout-settings', () => {
     expect((after.layoutSettings as { gridWidth: number }).gridWidth).toBe(1280)
   })
 
-  it('宽松请求:只带旧三字段成功,缺省补默认(双向兼容)', async () => {
+  it('宽松请求:部分字段成功缺省补默认;已撤除字段(iconScale,ADR-0033)静默忽略', async () => {
     const res = await req('PUT', '/api/layout-settings', { body: { gridWidth: 800, gridGap: 4, iconScale: 1.0 }, cookie })
     expect(res.status).toBe(200)
     await expect(res.json()).resolves.toEqual({
-      gridWidth: 800, gridGap: 4, gridGapY: 8, iconScale: 1.0, panelFog: 36,
+      gridWidth: 800, gridGap: 4, gridGapY: 8, panelFog: 36,
       searchBarWidth: 576, searchBarVisible: true, searchEngine: 'google',
       clockVisible: true, clockFont: 48, clock24h: true,
       labelVisible: true, labelSize: 12, labelColor: '#ffffff',
@@ -101,7 +101,7 @@ describe('PUT /api/layout-settings', () => {
   })
 
   it('importantDates:合法列表往返、缺省补 []、非法条目 400(ADR-0026)', async () => {
-    const base = { gridWidth: 1024, gridGap: 8, iconScale: 1.5 }
+    const base = { gridWidth: 1024, gridGap: 8 }
     const dates = [
       { id: 'a1', name: '生日', date: '1990-08-15', calendar: 'lunar', repeat: 'annual' },
       { id: 'b2', name: '交房', date: '2027-03-01', calendar: 'solar', repeat: 'once' },
@@ -130,15 +130,14 @@ describe('PUT /api/layout-settings', () => {
 
   it('400:必填缺失/超范围/非法枚举/坏色值', async () => {
     for (const body of [
-      { gridGap: 8, iconScale: 1.5 },                          // 缺 gridWidth
-      { gridWidth: 600, gridGap: 8, iconScale: 1.5 },          // 低于 768(ADR-0021 随 9×9 上调)
-      { gridWidth: 1024, gridGap: 30, iconScale: 1.5 },        // gap 超 24
-      { gridWidth: 1024, gridGap: 8, iconScale: 2.5 },         // scale 超 2.0
-      { gridWidth: 1024, gridGap: 8, iconScale: 1.5, gridGapY: 40 },      // 超 32
-      { gridWidth: 1024, gridGap: 8, iconScale: 1.5, clockFont: 80 },     // 超 72
-      { gridWidth: 1024, gridGap: 8, iconScale: 1.5, searchEngine: 'duckduckgo' },
-      { gridWidth: 1024, gridGap: 8, iconScale: 1.5, labelColor: '#fff' },
-      { gridWidth: 'x', gridGap: 8, iconScale: 1.5 },
+      { gridGap: 8 },                          // 缺 gridWidth
+      { gridWidth: 600, gridGap: 8 },          // 低于 768(ADR-0021 随 9×9 上调)
+      { gridWidth: 1024, gridGap: 30 },        // gap 超 24
+      { gridWidth: 1024, gridGap: 8, gridGapY: 40 },      // 超 32
+      { gridWidth: 1024, gridGap: 8, clockFont: 80 },     // 超 72
+      { gridWidth: 1024, gridGap: 8, searchEngine: 'duckduckgo' },
+      { gridWidth: 1024, gridGap: 8, labelColor: '#fff' },
+      { gridWidth: 'x', gridGap: 8 },
     ]) {
       await expectError(await req('PUT', '/api/layout-settings', { body, cookie }), 400)
     }
@@ -185,17 +184,16 @@ describe('PUT /api/config(全量替换)', () => {
   })
 
   it('layoutSettings null = 保留现有布局行(替换不动 layout)', async () => {
-    await req('PUT', '/api/layout-settings', { body: { gridWidth: 768, gridGap: 0, iconScale: 0.75 }, cookie })
+    await req('PUT', '/api/layout-settings', { body: { gridWidth: 768, gridGap: 0 }, cookie })
     const res = await req('PUT', '/api/config', { body: { ...blob(), layoutSettings: null }, cookie })
     expect(res.status).toBe(200)
-    const json = (await res.json()) as { layoutSettings: { gridWidth: number; iconScale: number } }
+    const json = (await res.json()) as { layoutSettings: { gridWidth: number } }
     expect(json.layoutSettings.gridWidth).toBe(768)
-    expect(json.layoutSettings.iconScale).toBe(0.75)
   })
 
   it('layoutSettings 随 blob 覆盖', async () => {
     const res = await req('PUT', '/api/config', {
-      body: { ...blob(), layoutSettings: { gridWidth: 1536, gridGap: 24, iconScale: 2.0 } },
+      body: { ...blob(), layoutSettings: { gridWidth: 1536, gridGap: 24 } },
       cookie,
     })
     expect(res.status).toBe(200)

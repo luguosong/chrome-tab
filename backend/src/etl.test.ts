@@ -50,9 +50,10 @@ describe('runEtl', () => {
     expect(unwrap(sqlite, 'users')).toEqual(source.users)
     expect(unwrap(sqlite, 'pages')).toEqual(source.pages)
     expect(unwrap(sqlite, 'icons')).toEqual(source.icons)
-    // important_dates 是 ETL 后加的列(ADR-0026):旧库无、不迁,灌入后 NULL(读侧兜底 [])
+    // important_dates 是 ETL 后加的列(ADR-0026):旧库无、不迁,灌入后 NULL(读侧兜底 []);
+    // icon_scale 已删列(ADR-0033):源行多余字段不落库(源 fixture 保留它,证明旧源兼容)
     expect(unwrap(sqlite, 'layout_settings')).toEqual(
-      source.layout_settings.map((r) => ({ ...r, important_dates: null })),
+      source.layout_settings.map(({ icon_scale, ...r }) => ({ ...r, important_dates: null })),
     )
     expect(unwrap(sqlite, 'config_version')).toEqual(source.config_version)
     expect(unwrap(sqlite, 'changelog_translations')).toEqual(source.changelog_translations)

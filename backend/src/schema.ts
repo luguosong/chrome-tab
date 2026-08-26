@@ -46,7 +46,6 @@ CREATE TABLE IF NOT EXISTS layout_settings (
     grid_width        INTEGER NOT NULL,
     grid_gap          INTEGER NOT NULL,
     grid_gap_y        INTEGER NOT NULL DEFAULT 8,
-    icon_scale        REAL    NOT NULL,
     panel_fog         INTEGER NOT NULL DEFAULT 36,
     search_bar_width  INTEGER NOT NULL DEFAULT 576,
     search_bar_visible INTEGER NOT NULL DEFAULT 1,
@@ -238,6 +237,8 @@ export function migrate(sqlite: SqliteConnection) {
   })
   // 「重要日子」寄放布局设置(ADR-0026):存量行 NULL,读侧兜底 []。
   addMissingColumns(sqlite, 'layout_settings', { important_dates: 'TEXT' })
+  // iconScale 撤除用户调节(ADR-0033):存量列删除;新库 DDL 无此列,天然 no-op。
+  dropLegacyColumns(sqlite, 'layout_settings', ['icon_scale'])
 }
 
 /**
@@ -249,6 +250,15 @@ function addMissingColumns(sqlite: SqliteConnection, table: string, defs: Record
   const have = new Set((sqlite.pragma(`table_info(${table})`) as { name: string }[]).map((c) => c.name))
   for (const [col, ddl] of Object.entries(defs)) {
     if (!have.has(col)) sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`)
+  }
+}
+
+/** 增量删列(ADR-0033 首例):addMissingColumns 的镜像——列在才删,幂等。
+ *  SQLite ≥3.35 原生 DROP COLUMN(免表重建),better-sqlite3 自带版本满足。 */
+function dropLegacyColumns(sqlite: SqliteConnection, table: string, cols: string[]) {
+  const have = new Set((sqlite.pragma(`table_info(${table})`) as { name: string }[]).map((c) => c.name))
+  for (const col of cols) {
+    if (have.has(col)) sqlite.exec(`ALTER TABLE ${table} DROP COLUMN ${col}`)
   }
 }
 
@@ -286,7 +296,6 @@ export interface LayoutSettingsTable {
   grid_width: number
   grid_gap: number
   grid_gap_y: number
-  icon_scale: number
   panel_fog: number
   search_bar_width: number
   search_bar_visible: number

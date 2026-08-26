@@ -1,6 +1,5 @@
-import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import { DEFAULT_TRENDING_QUERY, useTrending } from '../hooks/useTrending'
-import { tileFont } from '../lib/iconLayout'
+import { ICON_SCALE, tileFont } from '../lib/iconLayout'
 import type { Icon } from '../lib/types'
 import BigTile from './BigTile'
 
@@ -26,8 +25,7 @@ export default function TrendingIconBody({
 }) {
   void icon // 单例无实例参数(data 无字段);保留形参对齐其它 body 的接口
   const { data, isError } = useTrending(DEFAULT_TRENDING_QUERY)
-  const { iconScale } = useLayoutSettings()
-  const fontSize = tileFont(iconScale, 'secondary')
+  const fontSize = tileFont(ICON_SCALE, 'secondary')
   const repos = data?.repos ?? []
 
   return (

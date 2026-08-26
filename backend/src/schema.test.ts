@@ -38,7 +38,6 @@ const LAYOUT_SETTINGS: Col[] = [
   ['grid_width', 'INTEGER', 1, null, 0],
   ['grid_gap', 'INTEGER', 1, null, 0],
   ['grid_gap_y', 'INTEGER', 1, '8', 0],
-  ['icon_scale', 'REAL', 1, null, 0],
   ['panel_fog', 'INTEGER', 1, '36', 0],
   ['search_bar_width', 'INTEGER', 1, '576', 0],
   ['search_bar_visible', 'INTEGER', 1, '1', 0],
@@ -277,5 +276,19 @@ describe('schema:建表幂等', () => {
     expect(cols(sqlite, 'model_archive').map((c) => c[0]).sort()).toEqual(MODEL_ARCHIVE.map((c) => c[0]).sort())
     const row = sqlite.prepare('SELECT pricing, limits, training_params FROM model_archive').get() as Record<string, unknown>
     expect(row).toEqual({ pricing: null, limits: null, training_params: null })
+  })
+
+  it('增量删列:ADR-0033 旧库(含 icon_scale)migrate 后删列且数据保留', () => {
+    // 新库 DDL 已无该列;复刻旧库 = 手工加回(SQLite ADD COLUMN 的 NOT NULL 须带 DEFAULT)
+    const sqlite = fresh()
+    sqlite.exec('ALTER TABLE layout_settings ADD COLUMN icon_scale REAL NOT NULL DEFAULT 1')
+    sqlite.exec(`
+      INSERT INTO users (id, username, password, created_at) VALUES (1, 'u', 'p', '2026-01-01 00:00:00');
+      INSERT INTO layout_settings (user_id, grid_width, grid_gap, icon_scale) VALUES (1, 1136, 24, 1);
+    `)
+    migrate(sqlite)
+    expect(cols(sqlite, 'layout_settings')).toEqual(LAYOUT_SETTINGS)
+    const row = sqlite.prepare('SELECT grid_width, grid_gap FROM layout_settings WHERE user_id = 1').get() as Record<string, unknown>
+    expect(row).toEqual({ grid_width: 1136, grid_gap: 24 })
   })
 })

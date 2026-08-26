@@ -19,7 +19,8 @@ export const ETL_TABLES = [
   {
     name: 'layout_settings',
     pk: 'user_id',
-    columns: ['user_id', 'grid_width', 'grid_gap', 'grid_gap_y', 'icon_scale', 'panel_fog', 'search_bar_width', 'search_bar_visible', 'search_engine', 'clock_visible', 'clock_font', 'clock_24h', 'label_visible', 'label_size', 'label_color'],
+    // icon_scale 已删列(ADR-0033):旧源行多出的该字段被列清单忽略,不落库
+    columns: ['user_id', 'grid_width', 'grid_gap', 'grid_gap_y', 'panel_fog', 'search_bar_width', 'search_bar_visible', 'search_engine', 'clock_visible', 'clock_font', 'clock_24h', 'label_visible', 'label_size', 'label_color'],
   },
   { name: 'config_version', pk: 'user_id', columns: ['user_id', 'updated_at'] },
   { name: 'changelog_translations', pk: 'block_hash', columns: ['block_hash', 'translated', 'created_at'] },

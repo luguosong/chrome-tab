@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 import { timeAgo } from '../lib/timeAgo'
-import { faviconPx, ghostWidth3Cols, tileFont } from '../lib/iconLayout'
-import { useLayoutSettings } from '../context/LayoutSettingsContext'
+import { ICON_SCALE, faviconPx, ghostWidth3Cols, tileFont } from '../lib/iconLayout'
 import MoreButton from './MoreButton'
 
 /**
@@ -40,8 +39,7 @@ export default function BigTile({
   /** 主体(滚动榜单等);null = 空态/取数失败降级 ···(重试入口在 Modal)。 */
   children: ReactNode
 }) {
-  const { iconScale } = useLayoutSettings()
-  const fontSize = tileFont(iconScale, 'secondary')
+  const fontSize = tileFont(ICON_SCALE, 'secondary')
   return (
     <div
       // 滚动/列表都在块内,圆角处裁切;select-none:块内无选中诉求
@@ -49,8 +47,8 @@ export default function BigTile({
       style={
         overlay
           ? {
-              width: ghostWidth3Cols(faviconPx(iconScale)),
-              height: faviconPx(iconScale) * 2 + 56,
+              width: ghostWidth3Cols(faviconPx(ICON_SCALE)),
+              height: faviconPx(ICON_SCALE) * 2 + 56,
               flex: 'none',
             }
           : undefined
@@ -64,12 +62,12 @@ export default function BigTile({
             rel="noreferrer"
             title={titleLinkHint}
             className="truncate text-white/90 hover:text-accent hover:underline underline-offset-4 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
-            style={{ fontSize: tileFont(iconScale, 'primary') }}
+            style={{ fontSize: tileFont(ICON_SCALE, 'primary') }}
           >
             {title}
           </a>
         ) : (
-          <span className="truncate text-white/90" style={{ fontSize: tileFont(iconScale, 'primary') }}>
+          <span className="truncate text-white/90" style={{ fontSize: tileFont(ICON_SCALE, 'primary') }}>
             {title}
           </span>
         )}

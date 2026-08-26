@@ -219,7 +219,7 @@ export type ImportantDate = {
 
 /**
  * 布局设置(见 CONTEXT.md「布局设置」,五组):按用户持久化、跨设备共享。
- * 网格组与 8×8=64 格容量正交——只改像素几何,不改格子数。
+ * 网格组与 9×9=81 格容量正交——只改像素几何,不改格子数。
  */
 export type LayoutSettings = {
   /** 网格 max-width 上限(px),面板内居中。 */
@@ -228,8 +228,6 @@ export type LayoutSettings = {
   gridGap: number
   /** 竖向间距(px,行 gap;固定画布不滚动,上限比横向宽)。 */
   gridGapY: number
-  /** favicon 像素+内边距+小组件字号的同比系数,图标整体大小的唯一调节(默认 1.5,ADR-0016)。 */
-  iconScale: number
   /** 页板雾化浓度(%,暗色底 alpha×100;0=面板全透,blur 不变)。 */
   panelFog: number
   /** 搜索栏最大宽度(px)。 */

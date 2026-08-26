@@ -1,8 +1,7 @@
 import { useAiHotDaily } from '../hooks/useAiHot'
 import { extractString } from '../lib/iconData'
-import { tileFont } from '../lib/iconLayout'
+import { ICON_SCALE, tileFont } from '../lib/iconLayout'
 import { useEditMode } from '../context/EditModeContext'
-import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import type { Icon } from '../lib/types'
 import BigTile from './BigTile'
 
@@ -31,11 +30,10 @@ export default function AiHotIconBody({
 }) {
   const { data } = useAiHotDaily()
   const { editing } = useEditMode()
-  const { iconScale } = useLayoutSettings()
   const name = extractString(icon.data, 'name') || 'AI 热点'
   const sections = (data?.sections ?? []).filter((s) => s.items.length > 0)
   const fresh = data?.date ? `${data.date}T08:00:00+08:00` : null
-  const fontSize = tileFont(iconScale, 'secondary')
+  const fontSize = tileFont(ICON_SCALE, 'secondary')
 
   return (
     <BigTile

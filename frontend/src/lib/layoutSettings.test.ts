@@ -19,14 +19,10 @@ describe('withDefaults', () => {
   })
 
   it('fills expanded fields (old server payload / old backup) with defaults', () => {
-    // 旧后端/旧备份只带三字段的 blob:新字段全部补默认
-    expect(withDefaults({ gridWidth: 1024, gridGap: 8, iconScale: 1.5 })).toEqual(
-      DEFAULT_LAYOUT_SETTINGS,
-    )
-  })
-
-  it('iconScale 默认 1.5、上限 2.0(ADR-0016 整体放大)', () => {
-    expect(DEFAULT_LAYOUT_SETTINGS.iconScale).toBe(1.5)
+    // 旧后端/旧备份的 blob:缺的字段补默认;已撤除字段(iconScale,ADR-0033)被丢弃。
+    // 经变量传入绕开字面量超额属性检查——旧备份就是带着这个多余键来的。
+    const legacyBlob = { gridWidth: 1024, gridGap: 8, iconScale: 1.5 }
+    expect(withDefaults(legacyBlob)).toEqual(DEFAULT_LAYOUT_SETTINGS)
   })
 
   it('keeps provided expanded fields (0 雾化、false 显隐都是合法值)', () => {

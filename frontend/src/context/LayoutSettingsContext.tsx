@@ -4,8 +4,8 @@ import type { LayoutSettings } from '../lib/types'
 
 /**
  * 布局设置上下文(见 CONTEXT.md「布局设置」)。Dashboard 据聚合接口的 layoutSettings
- * (叠加 SettingsDrawer 的乐观预览)注入,IconGrid(宽/间距)与 Icon(缩放)消费。
- * value 缺省时 withDefaults 兜底默认值(1024/8/1.0)。
+ * (叠加 SettingsDrawer 的乐观预览)注入;消费方按字段取用(网格宽/间距、搜索宽度、
+ * 时钟字号、名称行可见/字号/颜色等)。value 缺省时 withDefaults 兜底默认值。
  */
 const LayoutSettingsContext = createContext<LayoutSettings>(DEFAULT_LAYOUT_SETTINGS)
 

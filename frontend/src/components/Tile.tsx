@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
-import { faviconPx, ghostWidth3Cols, labelBlockPx, LABEL_LINE_HEIGHT, tileFont, type TileFontTier } from '../lib/iconLayout'
+import { ICON_SCALE, faviconPx, ghostWidth3Cols, labelBlockPx, LABEL_LINE_HEIGHT, tileFont, type TileFontTier } from '../lib/iconLayout'
 
 /**
  * 「上块下字」外壳(ADR-0016 注记 b/c/d 的结构,e 起收拢为本深 module):
@@ -9,8 +9,8 @@ import { faviconPx, ghostWidth3Cols, labelBlockPx, LABEL_LINE_HEIGHT, tileFont, 
  * 「上块下字」的实现名即 Tile(领域概念仍是 CONTEXT.md「图标」,Tile 仅指本外壳)。
  *
  * interface 极小:Tile(块内 children + label + overlay)、TilePrimary/TileSecondary
- * (主/次行字号档,ADR-0016 注记 e 全类型统一)。iconScale 自持消费(内部
- * useLayoutSettings),body 不再接触缩放;字号档唯一来源 lib/iconLayout 的
+ * (主/次行字号档,ADR-0016 注记 e 全类型统一)。缩放系数是代码常量 ICON_SCALE
+ * (ADR-0033,撤除用户调节);字号档唯一来源 lib/iconLayout 的
  * TILE_FONT_TIERS——调字号只改一处。
  */
 
@@ -112,11 +112,10 @@ function TileFrame({
 type TileTextProps = { className?: string; style?: CSSProperties; children: ReactNode }
 
 function TileText({ tier, className = '', style, children }: TileTextProps & { tier: TileFontTier }) {
-  const { iconScale } = useLayoutSettings()
   return (
     <span
       className={`leading-none max-w-full truncate ${className}`}
-      style={{ fontSize: tileFont(iconScale, tier), ...style }}
+      style={{ fontSize: tileFont(ICON_SCALE, tier), ...style }}
     >
       {children}
     </span>
@@ -157,11 +156,10 @@ export default function Tile({
   fill?: boolean
   children: ReactNode
 }) {
-  const { iconScale } = useLayoutSettings()
   return (
     <>
       <TileFrame
-        favPx={faviconPx(iconScale)}
+        favPx={faviconPx(ICON_SCALE)}
         padPx={padPx}
         bare={bare}
         fill={fill}
