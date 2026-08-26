@@ -47,10 +47,13 @@ services:
       # 模型追踪评测(issues/08,CONTEXT.md「评测结果」):Artificial Analysis 免费 API Key,
       # 可缺省——未配置时评测区显示「未配置」,不影响模型档案;走代理(不在 NO_PROXY)
       ARTIFICIALANALYSIS_API_KEY: ${ARTIFICIALANALYSIS_API_KEY}
-      # Node24 原生 fetch 默认忽略代理变量,须开此开关(译制/拉原文走 mihomo,qweather/npm 直连)
+      # Node24 原生 fetch 默认忽略代理变量,须开此开关(译制/拉原文走 mihomo,qweather/npm 直连)。
+      # 新闻国内源(ADR-0027)须直连:走境外代理访问国内 CDN 延迟尖刺叠 10s 超时 → 首取连轮
+      # 失败、条目池空(2026-08-26 cls/wallstreetcn 空 tab 事故)。github/hackernews/producthunt
+      # 是 GFW 敏感境外源,留在代理侧;新增源须同步此清单(sources.test.ts 部署契约把关)
       NODE_USE_ENV_PROXY: "1"
       HTTPS_PROXY: http://mihomo:7890
-      NO_PROXY: localhost,127.0.0.1,.qweatherapi.com,registry.npmjs.org,.bing.com,.virxact.com,.dida365.com,.bilibili.com,.biliapi.net,.biliapi.com,.hdslb.com
+      NO_PROXY: localhost,127.0.0.1,.qweatherapi.com,registry.npmjs.org,.bing.com,.virxact.com,.dida365.com,.bilibili.com,.biliapi.net,.biliapi.com,.hdslb.com,.cls.cn,.wallstcn.com,.weibo.com,.baidu.com,.36kr.com,.ithome.com,.thepaper.cn,.v2ex.com,.zhihu.com,.sspai.com,.solidot.org,.cankaoxiaoxi.com,.zaochenbao.com
     volumes:
       - ./backend/data:/app/backend/data
     expose:

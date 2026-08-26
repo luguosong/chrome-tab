@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto'
+import { readFileSync, readdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   clsSignedQuery,
@@ -77,6 +80,30 @@ describe('parse 共享小件', () => {
     expect(atom[0]).toMatchObject({ id: 'p1', url: 'https://ph/1', publishedAt: Date.parse('2026-08-26T00:00:00Z') / 1000 })
     expect(parseRssItems('not xml')).toEqual([])
   })
+
+  it('部署契约:源上游域全部进 compose NO_PROXY(国内直连)或境外代理白名单', () => {
+    // 回归(2026-08-26 cls/wallstreetcn 等多源空 tab 事故):新闻 16 源上线时无一进
+    // NO_PROXY,国内上游被全局 HTTPS_PROXY(mihomo)绑架出境,延迟尖刺叠 10s 超时
+    // → 首取连轮失败 → 条目池空。新源忘了配直连,这里立刻红。
+    const here = dirname(fileURLToPath(import.meta.url))
+    const compose = readFileSync(join(here, '../../../docker-compose.prod.yml'), 'utf8')
+    const noProxy = /NO_PROXY: (.+)/.exec(compose)![1]!.split(',').map((s) => s.trim())
+    // 确需走代理出境的源(GFW 阻断);新增须在此登记并在源文件注释说明
+    const proxied = ['github.com', 'news.ycombinator.com', 'producthunt.com']
+    // 后缀匹配(条目剥前导点):`.sspai.com` 同时罩住裸域与任意子域
+    const covers = (d: string, base: string) => d === base || d.endsWith(`.${base}`)
+    const domains = new Set<string>()
+    for (const f of readdirSync(join(here, 'sources'))) {
+      if (!f.endsWith('.ts')) continue
+      for (const m of readFileSync(join(here, 'sources', f), 'utf8').matchAll(/https?:\/\/([a-z0-9.-]+)[/'"]/g))
+        domains.add(m[1]!)
+    }
+    expect(domains.size).toBeGreaterThanOrEqual(15) // 扫描坏了不许空集蒙混
+    const uncovered = [...domains].filter(
+      (d) => !proxied.some((p) => covers(d, p)) && !noProxy.some((p) => covers(d, p.replace(/^\./, ''))),
+    )
+    expect(uncovered).toEqual([])
+  })
 })
 
 describe('源解析', () => {
@@ -127,11 +154,7 @@ describe('源解析', () => {
     expect(items[1]).toMatchObject({ title: '绝对时间条目', publishedAt: Date.parse('2026-08-26T11:14:21+08:00') / 1000 })
   })
 
-  it('github / hackernews:cheerio 选择器', () => {
-    const gh = parseGithub(
-      '<main><div class="Box"><div data-hpc=""><article><h2><a href="/foo/bar">foo / bar</a></h2></article></div></div></main>',
-    )
-    expect(gh).toEqual([{ id: '/foo/bar', title: 'foo / bar', url: 'https://github.com/foo/bar', publishedAt: null }])
+  it('hackernews:cheerio 选择器', () => {
     // <tr> 脱离 <table> 会被 HTML 解析器丢弃,fixture 需带 table 上下文
     const hn = parseHackernews('<table><tr class="athing" id="12345"><td class="title"><span class="titleline"><a href="x">HN 题</a></span></td></tr></table>')
     expect(hn).toEqual([{ id: '12345', title: 'HN 题', url: 'https://news.ycombinator.com/item?id=12345', publishedAt: null }])

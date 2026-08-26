@@ -22,12 +22,16 @@ const zhihuJson = (n: number) =>
 function makeDeps() {
   let zhihuCalls = 0
   let zhihuFails = false
+  let zhihuFailNext = 0
   let zhihuCount = 60
   const deps: NewsDeps = {
     fetchText: async (url: string) => {
       if (url.includes('zhihu.com')) {
         zhihuCalls++
-        if (zhihuFails) throw new Error('upstream boom')
+        if (zhihuFails || zhihuFailNext > 0) {
+          zhihuFailNext--
+          throw new Error('upstream boom')
+        }
         return zhihuJson(zhihuCount)
       }
       if (url.includes('top.baidu.com')) {
@@ -43,6 +47,7 @@ function makeDeps() {
     deps,
     calls: () => zhihuCalls,
     failZhihu: (v: boolean) => (zhihuFails = v),
+    failZhihuNext: (n: number) => (zhihuFailNext = n),
     setZhihuCount: (n: number) => (zhihuCount = n),
   }
 }
@@ -121,6 +126,33 @@ describe('新闻路由与调度', () => {
     await service.idle()
     feed = (await (await req('GET', '/api/news/feed', { cookie })).json()) as NewsFeedResponse
     expect(feed.sources[0]).toMatchObject({ id: 'zhihu', status: 'ok' })
+  })
+
+  it('首取失败池空时立即补试:补试成功不空窗,双败只计一轮 streak', async () => {
+    // 回归(2026-08-26 代理绑架事故的稳定性面):勾选首取若遇瞬时抖动,用户会空 tab
+    // 干等下一轮 cron(30min)——池空时补试一次把瞬时失败率平方化
+    const fake = makeDeps()
+    let service!: NewsService
+    const { login, req } = await setupApp(undefined, (db) => (service = new NewsService(db, fake.deps)))
+    const cookie = await login()
+    // 首抓失败、补试成功:2 次上游调用,feed 有条目、状态 ok
+    fake.failZhihuNext(1)
+    await req('PUT', '/api/news/sources', { cookie, body: { sources: ['zhihu'] } })
+    await service.idle()
+    expect(fake.calls()).toBe(2)
+    let feed = (await (await req('GET', '/api/news/feed', { cookie })).json()) as NewsFeedResponse
+    expect(feed.items.length).toBe(50)
+    expect(feed.sources[0]).toMatchObject({ id: 'zhihu', status: 'ok' })
+    // 双败:补试也失败不再三试(3 次封顶 → 这里 2 次),streak 只 +1(同一轮口径)
+    const db = (service as unknown as { db: Db }).db
+    await db.deleteFrom('news_items').execute() // 清池模拟「首取双败」
+    await db.deleteFrom('news_sources').execute()
+    fake.failZhihuNext(2)
+    await req('PUT', '/api/news/sources', { cookie, body: { sources: ['zhihu'] } })
+    await service.idle()
+    expect(fake.calls()).toBe(4)
+    const row = (await db.selectFrom('news_sources').selectAll().where('source', '=', 'zhihu').execute())[0]!
+    expect(row.fail_streak).toBe(1)
   })
 
   it('空结果视为失败;差集替换不清保留源状态、不重抓保留源', async () => {

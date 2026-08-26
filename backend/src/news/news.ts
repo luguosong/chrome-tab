@@ -131,8 +131,12 @@ export class NewsService {
     }
   }
 
-  /** 单源一轮:抓取 → 入库裁剪 → 同步该源全部勾选用户状态行;失败按 streak 口径标记。 */
-  private async pollSource(source: string) {
+  /**
+   * 单源一轮:抓取 → 入库裁剪 → 同步该源全部勾选用户状态行;失败按 streak 口径标记。
+   * 条目池空(= 勾选首取)时失败立即补试一次:瞬时抖动不至于让新勾源空 tab 干等下一
+   * 轮 cron(30min);池非空的常规轮不补试,不放大上游请求(cron 下轮即天然重试)。
+   */
+  private async pollSource(source: string, retried = false): Promise<void> {
     const getter = NEWS_GETTERS[source as NewsSourceId]
     if (!getter) return
     try {
@@ -148,6 +152,15 @@ export class NewsService {
         .where('enabled', '=', 1)
         .execute()
     } catch (e) {
+      if (!retried) {
+        const pool = await this.db
+          .selectFrom('news_items')
+          .select('id')
+          .where('source', '=', source)
+          .limit(1)
+          .execute()
+        if (pool.length === 0) return this.pollSource(source, true)
+      }
       await this.db
         .updateTable('news_sources')
         .set({
