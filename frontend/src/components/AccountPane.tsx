@@ -1,8 +1,10 @@
 import { useAuth } from '../context/AuthContext'
+import { BackupRestore } from './BackupRestore'
 
 /**
  * 账号面板:ControlDrawer 的「账号」tab 内容,承接原顶栏的用户信息与登出
  * (顶栏极简化为单个 ⚙ 圆钮后,账号身份的唯一呈现处)。
+ * 上下两段:身份区(头像/用户名/登出)+ 数据区(备份与恢复,发丝线分隔)。
  *
  * Me 仅含 username,不虚构邮箱/头像字段;头像圈取用户名首字符。
  * 头像投影收敛为体系轻投影(对齐 .glass-segment-thumb 暗色值,inset 高光保留);
@@ -30,6 +32,8 @@ export function AccountPane() {
       >
         登出
       </button>
+
+      <BackupRestore />
     </div>
   )
 }

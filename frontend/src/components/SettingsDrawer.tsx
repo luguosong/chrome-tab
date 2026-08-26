@@ -1,11 +1,10 @@
 import { useId, type ReactNode } from 'react'
 import { LAYOUT_LIMITS } from '../lib/layoutSettings'
 import type { LayoutSettings } from '../lib/types'
-import { BackupRestore } from './BackupRestore'
 
 /**
  * 布局面板(见 CONTEXT.md「布局设置」,五组):ControlDrawer 的「布局」tab 内容。
- * 按 网格 / 背景 / 搜索栏 / 时钟 / 图标名称 分节,底部为备份恢复。
+ * 按 网格 / 背景 / 搜索栏 / 时钟 / 图标名称 分节(备份恢复在「账号」tab)。
  *
  * 受控组件:draft 与落库(commit)由 ControlDrawer 持有——实时预览是乐观写
  * ['config'].layoutSettings 缓存,IconGrid/Icon/Clock/SearchBox/DashboardPage 经
@@ -166,8 +165,6 @@ export function SettingsPane({
       <p className="mt-4 text-xs text-white/60 leading-relaxed">
         设置随账号保存,其它设备登录即同步。
       </p>
-
-      <BackupRestore />
     </>
   )
 }

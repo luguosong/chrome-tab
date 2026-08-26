@@ -44,7 +44,7 @@ export function BackupRestore() {
   }
 
   return (
-    <div className="mt-6 pt-4 border-t border-white/10">
+    <div className="mt-6 w-full pt-4 border-t border-white/10">
       <h3 className="mb-2 text-meta uppercase tracking-wider text-white/50">备份与恢复</h3>
       <div className="flex flex-wrap gap-2 text-xs">
         <button
