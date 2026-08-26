@@ -89,8 +89,9 @@ export default function NewsIconBody({
                   </span>
                   <span className="flex min-w-0 items-center gap-1.5">
                     {isNew && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" aria-hidden="true" />}
+                    {/* 译文主行,悬停 title 属性恒英文原文供核对(ADR-0029) */}
                     <span className="min-w-0 truncate text-white/90" style={{ fontSize }}>
-                      {n.title}
+                      {n.titleZh ?? n.title}
                     </span>
                   </span>
                 </a>

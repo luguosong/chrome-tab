@@ -18,6 +18,8 @@ export interface NewsDeps {
   fetchText: (url: string, timeoutMs: number, init?: RequestInit) => Promise<string>
   /** 二进制抓取(联合早报 gb2312 页面)。 */
   fetchBuffer: (url: string, timeoutMs: number, init?: RequestInit) => Promise<ArrayBuffer>
+  /** 英文源标题批量译制(ADR-0029;null = 该条未译成,保持英文)。测试塞假实现,同 translate 范式。 */
+  translateTitles: (titles: string[]) => Promise<(string | null)[]>
 }
 
 export type NewsGetter = (d: NewsDeps) => Promise<PortedNewsItem[]>

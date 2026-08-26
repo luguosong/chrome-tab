@@ -7,6 +7,7 @@ import type { Db } from '../db'
 import type { AuthEnv } from '../auth'
 import type { NewsDeps } from './sources/types'
 import { NEWS_GETTERS } from './sources'
+import { prodTitleTranslator, titleHash, TRANSLATED_SOURCES } from './translate'
 
 /**
  * 「新闻」(CONTEXT.md「新闻/新闻源」;ADR-0027):15 内置源、账号级勾选、cron 30min
@@ -67,11 +68,18 @@ export class NewsService {
       .orderBy(sql`coalesce(published_at, cast(strftime('%s', created_at) as integer))`, 'desc')
       .orderBy('id', 'desc')
       .execute()
+    // 标题译文拼装(ADR-0029):译文表按标题哈希独立于条目池,读侧内存 join(SQLite 无
+    // 内置 sha256,不在 SQL 侧算)。无英文源条目直接跳过——纯中文勾选(最常见配置)
+    // 不白付全量哈希 + 一次注定为空的查询(code-review)
+    const zh = items.some((r) => TRANSLATED_SOURCES.has(r.source))
+      ? await this.loadTranslations(items.map((r) => r.title))
+      : new Map<string, string>()
     return {
       items: items.map((r) => ({
         id: r.id,
         source: r.source as NewsSourceId,
         title: r.title,
+        titleZh: zh.get(titleHash(r.title)) ?? null,
         url: r.url,
         publishedAt: r.published_at ?? null,
       })) satisfies NewsItem[],
@@ -159,6 +167,8 @@ export class NewsService {
         .where('source', '=', source)
         .where('enabled', '=', 1)
         .execute()
+      // 英文源补译(ADR-0029)在状态行之后:译制是增值步骤,失败不影响取数成功语义
+      if (TRANSLATED_SOURCES.has(source)) await this.translateMissing(source)
     } catch (e) {
       if (!retried) {
         const pool = await this.db
@@ -218,6 +228,54 @@ export class NewsService {
     })
   }
 
+  /** 英文源补译(ADR-0029):扫该源池内缺译文标题 → 批量译 → 写哈希表;失败仅 warn
+   *  不写表,下一轮 pollSource(30min)自然重试。存量补译零额外机制:上线首轮扫到的
+   *  全是缺译文行,天然全量补译。整体 try:译制(含自身 DB 读写)任何失败都不冒泡进
+   *  pollSource——那里会错标 fail_streak、日志误归因「取数失败」。 */
+  private async translateMissing(source: string): Promise<void> {
+    try {
+      const titles = [
+        ...new Set(
+          (await this.db.selectFrom('news_items').select('title').where('source', '=', source).execute()).map((r) => r.title),
+        ),
+      ]
+      if (titles.length === 0) return
+      const known = await this.loadTranslations(titles)
+      // 含换行标题剔出译制集:逐行编号协议里必然配对失败,留在集合里只会每轮重发网关
+      // 计费(code-review);保持英文(宁英勿空),裁剪出窗即自然淘汰
+      const missing = titles.filter((t) => !known.has(titleHash(t)) && !t.includes('\n'))
+      if (missing.length === 0) return
+      const translated = await this.deps.translateTitles(missing)
+      const inserts = translated
+        .map((t, i) => (t == null ? null : { title_hash: titleHash(missing[i]!), translated: t, created_at: nowIso() }))
+        .filter((v): v is { title_hash: string; translated: string; created_at: string } => v != null)
+      if (inserts.length > 0) {
+        await this.db
+          .insertInto('news_translations')
+          .values(inserts)
+          .onConflict((oc) => oc.column('title_hash').doNothing())
+          .execute()
+      }
+    } catch (e) {
+      console.warn(`新闻源 ${source} 标题译制失败,保持英文:`, e)
+    }
+  }
+
+  /** 标题 → 已有译文(哈希键);in 查询按 500/批(保守低于 SQLite 参数上限)。 */
+  private async loadTranslations(titles: string[]): Promise<Map<string, string>> {
+    const map = new Map<string, string>()
+    const hashes = [...new Set(titles)].map(titleHash)
+    for (let i = 0; i < hashes.length; i += 500) {
+      const rows = await this.db
+        .selectFrom('news_translations')
+        .select(['title_hash', 'translated'])
+        .where('title_hash', 'in', hashes.slice(i, i + 500))
+        .execute()
+      for (const r of rows) map.set(r.title_hash, r.translated)
+    }
+    return map
+  }
+
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
     const run = this.tail.then(fn, fn)
     this.tail = run.catch(() => {})
@@ -244,7 +302,7 @@ export function newsRoutes(service: NewsService): Hono<AuthEnv> {
 // ---- 生产协作器与调度 ----
 
 export function prodNewsDeps(): NewsDeps {
-  return { fetchText, fetchBuffer }
+  return { fetchText, fetchBuffer, translateTitles: prodTitleTranslator() }
 }
 
 /** 30min 一轮(每小时 11/41 分,错开整点与既有调度器;库即真相,无启动预热)。 */

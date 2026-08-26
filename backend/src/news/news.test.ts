@@ -24,6 +24,15 @@ function makeDeps() {
   let zhihuFails = false
   let zhihuFailNext = 0
   let zhihuCount = 60
+  // HN fixture(表格上下文必需,sources.test.ts 同款)+ 假译制器(字典缺条 = 该条译制失败)
+  let hnTitles = ['HN 题 A', 'HN 题 B']
+  const zhMap = new Map([
+    ['HN 题 A', 'HN 题甲译'],
+    ['HN 题 B', 'HN 题乙译'],
+    ['HN 题 C', 'HN 题丙译'],
+  ])
+  let translationFails = false
+  const translationCalls: string[][] = []
   const deps: NewsDeps = {
     fetchText: async (url: string) => {
       if (url.includes('zhihu.com')) {
@@ -34,6 +43,12 @@ function makeDeps() {
         }
         return zhihuJson(zhihuCount)
       }
+      if (url.includes('news.ycombinator.com')) {
+        // item_id 用 title 本身:轮换标题集时不同题不同 id,不被 upsert 防重挡掉
+        return `<table>${hnTitles
+          .map((t) => `<tr class="athing" id="${t}"><td class="title"><span class="titleline"><a href="x">${t}</a></span></td></tr>`)
+          .join('')}</table>`
+      }
       if (url.includes('top.baidu.com')) {
         return '<html><!--s-data:{"data":{"cards":[{"content":[{"word":"百度词","rawUrl":"https://b/1"}]}]}}--></html>'
       }
@@ -42,6 +57,11 @@ function makeDeps() {
     fetchBuffer: async () => {
       throw new Error('unexpected buffer fetch')
     },
+    translateTitles: async (titles) => {
+      translationCalls.push(titles)
+      if (translationFails) throw new Error('translate boom')
+      return titles.map((t) => zhMap.get(t) ?? null)
+    },
   }
   return {
     deps,
@@ -49,6 +69,9 @@ function makeDeps() {
     failZhihu: (v: boolean) => (zhihuFails = v),
     failZhihuNext: (n: number) => (zhihuFailNext = n),
     setZhihuCount: (n: number) => (zhihuCount = n),
+    setHnTitles: (ts: string[]) => (hnTitles = ts),
+    failTranslation: (v: boolean) => (translationFails = v),
+    translationCalls,
   }
 }
 
@@ -211,5 +234,48 @@ describe('新闻路由与调度', () => {
     const feed2 = await service.feed(user2)
     expect(feed2.items.length).toBe(50)
     expect(feed2.sources[0]).toMatchObject({ id: 'zhihu', status: 'ok' })
+  })
+
+  it('英文源标题译制(ADR-0029):feed 拼 titleZh、中文源不译、哈希复用不重译', async () => {
+    const fake = makeDeps()
+    let service!: NewsService
+    const { login, req } = await setupApp(undefined, (db) => (service = new NewsService(db, fake.deps)))
+    const cookie = await login()
+    await req('PUT', '/api/news/sources', { cookie, body: { sources: ['hackernews', 'zhihu'] } })
+    await service.idle()
+    let feed = (await (await req('GET', '/api/news/feed', { cookie })).json()) as NewsFeedResponse
+    const hn = feed.items.filter((i) => i.source === 'hackernews')
+    expect(new Map(hn.map((i) => [i.title, i.titleZh] as const))).toEqual(
+      new Map([
+        ['HN 题 A', 'HN 题甲译'],
+        ['HN 题 B', 'HN 题乙译'],
+      ]),
+    )
+    // 中文源不触发译制:全部 titleZh null,译制器也只收到英文标题
+    expect(feed.items.filter((i) => i.source === 'zhihu').every((i) => i.titleZh === null)).toBe(true)
+    expect(new Set(fake.translationCalls[0])).toEqual(new Set(['HN 题 A', 'HN 题 B']))
+    // 第二轮同题:哈希命中,零译制调用
+    service.pollAllQuietly()
+    await service.idle()
+    expect(fake.translationCalls).toHaveLength(1)
+    // 新标题只译缺的那条;字典缺条(null)与译制器抛错都保持英文,已译条目不受影响
+    fake.setHnTitles(['HN 题 A', 'HN 题 B', 'HN 题 D'])
+    service.pollAllQuietly()
+    await service.idle()
+    expect(fake.translationCalls).toHaveLength(2)
+    expect(fake.translationCalls[1]).toEqual(['HN 题 D'])
+    feed = (await (await req('GET', '/api/news/feed', { cookie })).json()) as NewsFeedResponse
+    expect(feed.items.find((i) => i.title === 'HN 题 D')!.titleZh).toBeNull()
+    expect(feed.items.find((i) => i.title === 'HN 题 A')!.titleZh).toBe('HN 题甲译')
+    // 译制器整轮抛错:warn 降级,条目保持英文;直查 fail_streak 断言译制失败不污染取数计数
+    fake.failTranslation(true)
+    fake.setHnTitles(['HN 题 A', 'HN 题 B', 'HN 题 E'])
+    service.pollAllQuietly()
+    await service.idle()
+    feed = (await (await req('GET', '/api/news/feed', { cookie })).json()) as NewsFeedResponse
+    expect(feed.items.find((i) => i.title === 'HN 题 E')!.titleZh).toBeNull()
+    const db = (service as unknown as { db: Db }).db
+    const hnRow = (await db.selectFrom('news_sources').selectAll().where('source', '=', 'hackernews').execute())[0]!
+    expect(hnRow.fail_streak).toBe(0)
   })
 })

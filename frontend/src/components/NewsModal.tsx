@@ -10,7 +10,7 @@ const NEW_WINDOW_S = 24 * 60 * 60
 /**
  * 新闻详情 Modal(见 CONTEXT.md「新闻」):tab = 全部(默认,混合流)→ 各勾选源 →
  * 管理。条目行 = 标题两行截断 + 源名·相对时间(无时间条目省缺),24h 红点仅限有
- * 时间条目,整条外跳原文。管理 tab = 16 源平铺复选清单(failing 标红注记),勾选
+ * 时间条目,整条外跳原文。管理 tab = 15 源平铺复选清单(failing 标红注记),勾选
  * 即整份提交(改即保存,对齐布局设置哲学;新勾源由后端异步首取)。容器:fixed 遮罩
  * + 居中玻璃面板,Esc / 点遮罩关闭(同 VideoModal)。
  */
@@ -135,8 +135,9 @@ export default function NewsModal({ onClose }: { onClose: () => void }) {
                     {n.publishedAt !== null && Date.now() / 1000 - n.publishedAt < NEW_WINDOW_S && (
                       <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" aria-hidden="true" />
                     )}
+                    {/* 译文主行,悬停 title 属性恒英文原文供核对(ADR-0029) */}
                     <span className="text-sm text-white/90 line-clamp-2 break-all" title={n.title}>
-                      {n.title}
+                      {n.titleZh ?? n.title}
                     </span>
                   </span>
                   <span className="mt-0.5 block text-xs text-white/45">
@@ -153,7 +154,7 @@ export default function NewsModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-/** 管理 tab:16 源平铺复选清单(勾选即整份提交;failing 标红;抓取时间提示)。 */
+/** 管理 tab:15 源平铺复选清单(勾选即整份提交;failing 标红;抓取时间提示)。 */
 function ManagePane() {
   const feed = useNewsFeed()
   const setSources = useSetNewsSources()

@@ -147,7 +147,7 @@ function tableCount(sqlite: DatabaseType): number {
   return (sqlite.prepare("SELECT count(*) c FROM sqlite_master WHERE type='table'").get() as { c: number }).c
 }
 
-describe('schema:16 张表结构(research/03 骨架 + sessions + 视频更新三表 + 模型追踪三表 + 评测两表)', () => {
+describe('schema:表结构(research/03 骨架 + sessions + 视频更新三表 + 模型追踪三表 + 评测两表)', () => {
   const sqlite = fresh()
 
   it.each([
@@ -177,8 +177,8 @@ describe('schema:16 张表结构(research/03 骨架 + sessions + 视频更新三
     expect((sqlite.pragma('index_list(pages)') as { name: string }[]).map((i) => i.name)).toEqual(['idx_page_user'])
   })
 
-  it('全库恰 16 张表', () => {
-    expect(tableCount(sqlite)).toBe(18)
+  it('全库表数守护(加表时同步此数)', () => {
+    expect(tableCount(sqlite)).toBe(19)
   })
 })
 
@@ -247,7 +247,7 @@ describe('schema:建表幂等', () => {
       migrate(sqlite)
       migrate(sqlite)
     }).not.toThrow()
-    expect(tableCount(sqlite)).toBe(18)
+    expect(tableCount(sqlite)).toBe(19)
   })
 
   it('增量加列:issues/01 时期的旧库(无 pricing/limits/training_params)migrate 后补齐且数据保留', () => {

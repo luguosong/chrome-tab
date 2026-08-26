@@ -60,6 +60,8 @@ export type NewsItem = {
   id: number
   source: NewsSourceId
   title: string
+  /** 英文源标题的中文译文(ADR-0029);null = 译制中/失败/未配 Key,前端保持英文原文。 */
+  titleZh: string | null
   url: string
   /** unix 秒;null = 热榜类源上游无逐条发布时间(行内时间省缺、24h 红点不生效)。 */
   publishedAt: number | null

@@ -210,6 +210,13 @@ CREATE TABLE IF NOT EXISTS news_items (
     UNIQUE (source, item_id)
 );
 CREATE INDEX IF NOT EXISTS idx_news_items_source ON news_items (source, id DESC);
+-- 英文源标题译文(ADR-0029):主键 = 标题原文 SHA-256,跨条目跨源共享;条目池滚动
+-- 裁剪而译文永不裁——热帖回炉/跨源同题直接命中,终身只译一次。年增几万行量级无害。
+CREATE TABLE IF NOT EXISTS news_translations (
+    title_hash    TEXT PRIMARY KEY NOT NULL,
+    translated    TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+);
 `
 
 /** openDb 打开连接后即执行;幂等(IF NOT EXISTS + 增量加列)。 */
@@ -420,6 +427,12 @@ export interface NewsItemsTable {
   created_at: string
 }
 
+export interface NewsTranslationsTable {
+  title_hash: string
+  translated: string
+  created_at: string
+}
+
 export interface SchemaDatabase {
   users: UsersTable
   pages: PagesTable
@@ -439,4 +452,5 @@ export interface SchemaDatabase {
   model_evaluation_status: ModelEvaluationStatusTable
   news_sources: NewsSourcesTable
   news_items: NewsItemsTable
+  news_translations: NewsTranslationsTable
 }

@@ -49,7 +49,7 @@ export function splitBlocks(markdown: string): Blocks {
   return { prefix: markdown.slice(0, starts[0]), blocks }
 }
 
-const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex')
+export const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex')
 
 /** 版本块再切段(2026-08-26):段 = 连续整行(行是原子,不撕开),总长 ≤ maxChars;
  *  单行自身超限独占一段。动机:非流式译制耗时 ∝ 输出长度,2.1.246 块 9.2k 字符单请求
@@ -309,7 +309,7 @@ export function changelogRoutes(services: ChangelogServices): Hono<AuthEnv> {
 
 // ---- 生产协作器(Java ChangelogConfig/NpmReleaseDateService 对应物;源定义在 shared)----
 
-const LLM_BASE_URL = 'https://aihubmix.com/v1'
+export const LLM_BASE_URL = 'https://aihubmix.com/v1'
 
 /** 译制系统提示(照搬 Java,ADR-0005):确定性靠提示约束,GPT-5 系 temperature 被网关忽略。 */
 const SYSTEM_PROMPT = `你是专业技术译者。把用户给出的 CHANGELOG markdown 片段由英文译成简体中文。
@@ -346,7 +346,7 @@ export function modelCandidates(env: NodeJS.ProcessEnv = process.env): string[] 
 /** 网关对该候选「没戏了,换下一个」的判定:模型被禁/不存在(403/404)、限流/网关错(429/5xx,
  *  换候选=换渠道可能绕开)、无渠道(400 no_available_channel)、超时(fetchText 的
  *  AbortSignal.timeout 抛 TimeoutError——挂死的 free 模型换下一个,不再单点拖满上限)。 */
-function isCandidateExhausted(e: unknown): boolean {
+export function isCandidateExhausted(e: unknown): boolean {
   const err = e as { status?: number; body?: string; name?: string }
   return (
     err?.status === 403 ||
