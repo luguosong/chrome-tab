@@ -9,6 +9,7 @@ import { ChangelogService, prodChangelogDeps, startChangelogScheduler, type Chan
 import { openDb } from './db'
 import { bootstrap } from './seed'
 import { ModelTrackingService, prodModelDeps, startModelTrackingScheduler } from './modelTracking'
+import { NewsService, prodNewsDeps, startNewsScheduler } from './news/news'
 import { VideoUpdatesService, prodVideoDeps, startVideoUpdatesScheduler } from './videoUpdates'
 
 const dbPath = process.env.DB_PATH ?? 'data/newtab.db'
@@ -36,6 +37,8 @@ const videoUpdatesService = new VideoUpdatesService(db, prodVideoDeps())
 // 首轮取数异步进行——失败照陈旧口径降级,基线数据已保证 tile 即有内容
 const modelTrackingService = new ModelTrackingService(db, prodModelDeps(), process.env.ARTIFICIALANALYSIS_API_KEY ?? '')
 await modelTrackingService.init()
+// 新闻(CONTEXT.md「新闻」,ADR-0027):匿名抓取无凭据,勾选与降级口径见 news.ts
+const newsService = new NewsService(db, prodNewsDeps())
 const app = createApp({
   db,
   cookieSecure,
@@ -49,6 +52,8 @@ const app = createApp({
   // 视频更新(CONTEXT.md「视频更新」):凭据 env 注入,两键均可缺省(降级见 videoUpdates.ts)
   videoUpdates: videoUpdatesService,
   modelTracking: modelTrackingService,
+  // 新闻(CONTEXT.md「新闻」,ADR-0027):匿名抓取无凭据,勾选见 news.ts
+  news: newsService,
 })
 
 const port = Number(process.env.PORT ?? 8080)
@@ -59,6 +64,8 @@ startChangelogScheduler(Object.values(changelog))
 startVideoUpdatesScheduler(videoUpdatesService)
 // 模型追踪 6h 轮询(研究 §6;失败保留库内档案并标记陈旧,下轮即重试)
 startModelTrackingScheduler(modelTrackingService)
+// 新闻 30min 轮询(ADR-0027;勾选源才轮询,失败 48 轮标 failing 自愈口径见 news.ts)
+startNewsScheduler(newsService)
 
 // 每日 03:17(UTC):WAL checkpoint + 过期 session 清理 + VACUUM INTO 备份(票 09;恢复 = 拷回文件)
 schedule('17 3 * * *', async () => {

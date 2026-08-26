@@ -178,7 +178,7 @@ describe('schema:16 张表结构(research/03 骨架 + sessions + 视频更新三
   })
 
   it('全库恰 16 张表', () => {
-    expect(tableCount(sqlite)).toBe(16)
+    expect(tableCount(sqlite)).toBe(18)
   })
 })
 
@@ -247,7 +247,7 @@ describe('schema:建表幂等', () => {
       migrate(sqlite)
       migrate(sqlite)
     }).not.toThrow()
-    expect(tableCount(sqlite)).toBe(16)
+    expect(tableCount(sqlite)).toBe(18)
   })
 
   it('增量加列:issues/01 时期的旧库(无 pricing/limits/training_params)migrate 后补齐且数据保留', () => {

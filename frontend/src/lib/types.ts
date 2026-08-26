@@ -14,6 +14,7 @@ export type IconTypeId =
   | 'todo'
   | 'video'
   | 'model'
+  | 'news'
   | 'group'
 
 /** 走马灯一屏:图标的容器(见 CONTEXT.md「页面」)。 */

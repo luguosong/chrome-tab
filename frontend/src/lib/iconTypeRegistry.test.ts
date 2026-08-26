@@ -251,3 +251,24 @@ describe('模型追踪类型 model(单例,issues/01;CONTEXT.md「模型追踪」
     expect(canAdd('model', ['nav', 'model'])).toBe(false)
   })
 })
+
+describe('新闻类型 news(单例;CONTEXT.md「新闻」,ADR-0027)', () => {
+  it('登记为扩展、单例、detail=modal、「更多」标头唯一入口(ADR-0022)', () => {
+    expect(get('news')?.label).toBe('新闻')
+    expect(get('news')?.kind).toBe('extension')
+    expect(get('news')?.singleton).toBe(true)
+    expect(get('news')?.detail).toBe('modal')
+    expect(get('news')?.detailEntry).toBe('header')
+  })
+
+  it('固定占 3×2 跨格(ADR-0021);无实例参数(勾选是账号级后端数据,不进 data)', () => {
+    expect(get('news')?.size).toEqual({ w: 3, h: 2 })
+    expect(iconCells('news')).toBe(6)
+    expect(get('news')?.editor).toEqual([])
+  })
+
+  it('单例:不存在时允许,已存在时拒绝(新增抽屉置灰的判据)', () => {
+    expect(canAdd('news', ['nav', 'aihot'])).toBe(true)
+    expect(canAdd('news', ['nav', 'news'])).toBe(false)
+  })
+})

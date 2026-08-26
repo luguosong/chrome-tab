@@ -33,8 +33,8 @@ export type EditorField =
 
 /** 刷新配置(spec §刷新策略):hook key + 间隔(ms)。0 = 不刷新。 */
 export type RefreshConfig = {
-  /** 'quotes' = useQuotes 轮询(60s); 'changelog' = useChangelog staleTime(1h); 'weather' = useWeather(后端缓存 10/30/5min); 'aihot' = useAiHot 自持(后端缓存 300s,单例不入集中层); 'todo' = useTodo 自持(后端缓存 60s,单例不入集中层); 'video' = useVideoFeed 自持(后端 1h 轮询预取,前端 staleTime 5min,单例不入集中层); 'model' = useModelArchive 自持(后端 6h 轮询持久档案,前端 staleTime 5min,单例不入集中层); 'none' = 不刷新。 */
-  kind: 'quotes' | 'changelog' | 'weather' | 'aihot' | 'todo' | 'video' | 'model' | 'none'
+  /** 'quotes' = useQuotes 轮询(60s); 'changelog' = useChangelog staleTime(1h); 'weather' = useWeather(后端缓存 10/30/5min); 'aihot' = useAiHot 自持(后端缓存 300s,单例不入集中层); 'todo' = useTodo 自持(后端缓存 60s,单例不入集中层); 'video' = useVideoFeed 自持(后端 1h 轮询预取,前端 staleTime 5min,单例不入集中层); 'model' = useModelArchive 自持(后端 6h 轮询持久档案,前端 staleTime 5min,单例不入集中层); 'news' = useNewsFeed 自持(后端 30min 轮询预取,ADR-0027,前端 staleTime 5min,单例不入集中层); 'none' = 不刷新。 */
+  kind: 'quotes' | 'changelog' | 'weather' | 'aihot' | 'todo' | 'video' | 'model' | 'news' | 'none'
 }
 
 /** 实时摘要数据(见 summarize 注释:ADR-0001 契约字段,当前无网格消费方)。 */
@@ -280,6 +280,25 @@ export const MODEL_DEF: IconTypeDefinition = {
   summarize: () => null, // 网格渲染走专属 ModelIconBody,契约字段无消费方(同 nav/aihot/todo/video)
 }
 
+/** 新闻:扩展类型,单例(「新闻源」勾选是账号级后端数据,见 CONTEXT.md「新闻/新闻源」)。
+ *  data 无字段;3×2 大 tile(块内全源混合单列滚动流:24h 红点仅限有时间条目 + 源名·
+ *  相对时间 + 标题截断,点行外跳原文;热榜类源无逐条时间,行内时间自然省缺),详情
+ *  Modal(全部/各源/管理 tab,「管理」= 16 源平铺复选勾选),「更多」标头唯一入口
+ *  (ADR-0022)。数据 = 后端 30min 轮询预取落库(ADR-0027)、源定义移植自 newsnow
+ *  (MIT),前端只读、hook 自持(同 aihot/todo/video/model 先例)。 */
+export const NEWS_DEF: IconTypeDefinition = {
+  id: 'news',
+  label: '新闻',
+  kind: 'extension',
+  singleton: true,
+  refresh: { kind: 'news' },
+  detail: 'modal',
+  size: { w: 3, h: 2 },
+  detailEntry: 'header',
+  editor: [],
+  summarize: () => null, // 网格渲染走专属 NewsIconBody,契约字段无消费方(同 nav/aihot/todo/video/model)
+}
+
 /**
  * 分组(ADR-0011):iOS 文件夹式收纳容器(块内成员 favicon 3×2 迷你预览,ADR-0015)。
  * kind='group' 不属于 base/extension 任一分区,
@@ -307,4 +326,5 @@ register('aihot', AIHOT_DEF)
 register('todo', TODO_DEF)
 register('video', VIDEO_DEF)
 register('model', MODEL_DEF)
+register('news', NEWS_DEF)
 register('group', GROUP_DEF)

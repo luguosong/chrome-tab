@@ -72,6 +72,18 @@ export async function fetchText(url: string, timeoutMs: number, init?: RequestIn
   return res.text()
 }
 
+/** 同 fetchText 的二进制形态(新闻·联合早报 gb2312 页面,ADR-0027)。 */
+export async function fetchBuffer(url: string, timeoutMs: number, init?: RequestInit): Promise<ArrayBuffer> {
+  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+  if (!res.ok) {
+    throw Object.assign(new Error(`${init?.method ?? 'GET'} ${url} → HTTP ${res.status}`), {
+      status: res.status,
+      body: (await res.text()).slice(0, 200),
+    })
+  }
+  return res.arrayBuffer()
+}
+
 /** config_version bump(ADR-0006):upsert 当前用户版本为 now。必须在写事务末尾调用,与配置写原子。 */
 export async function touchVersion(db: Db, userId: number): Promise<void> {
   const now = new Date().toISOString()

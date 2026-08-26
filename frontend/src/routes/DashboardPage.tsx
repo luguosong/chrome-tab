@@ -41,6 +41,7 @@ import AiHotModal from '../components/AiHotModal'
 import TodoModal from '../components/TodoModal'
 import VideoModal from '../components/VideoModal'
 import ModelModal from '../components/ModelModal'
+import NewsModal from '../components/NewsModal'
 import ChangelogModal from '../components/ChangelogModal'
 import ControlDrawer from '../components/ControlDrawer'
 import { get } from '../lib/iconTypeRegistry'
@@ -586,6 +587,8 @@ function Dashboard() {
                     <VideoModal onClose={() => setDetail(null)} />
                   ) : detail.type === 'model' ? (
                     <ModelModal onClose={() => setDetail(null)} />
+                  ) : detail.type === 'news' ? (
+                    <NewsModal onClose={() => setDetail(null)} />
                   ) : detail.type === 'changelog' ? (
                     <ChangelogModal
                       source={changelogSourceOf(detail.data)}

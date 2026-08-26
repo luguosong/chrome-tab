@@ -184,6 +184,32 @@ CREATE TABLE IF NOT EXISTS model_evaluation_status (
     last_success_at TEXT,
     last_attempt_at TEXT
 );
+-- 新闻(CONTEXT.md「新闻/新闻源」;ADR-0027:源定义移植 newsnow + cron 预取落库)。
+-- news_sources = 账号级勾选注册表 + 取数状态(48 轮失败标 failing,同 video_bloggers 口径);
+-- news_items = 源级共享条目池(无 user_id,同源全部勾选用户共享;published_at NULL = 热榜
+-- 类上游无逐条时间),每源按 id 降序保留 50,入库即快照不回删。
+CREATE TABLE IF NOT EXISTS news_sources (
+    user_id        INTEGER NOT NULL,
+    source         TEXT NOT NULL,
+    enabled        INTEGER NOT NULL DEFAULT 1,
+    fail_streak    INTEGER NOT NULL DEFAULT 0,
+    status         TEXT NOT NULL DEFAULT 'ok',
+    last_success_at TEXT,
+    created_at     TEXT NOT NULL,
+    UNIQUE (user_id, source), -- 自动索引以 user_id 为前导,单列 user 索引冗余(code-review)
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS news_items (
+    id           INTEGER PRIMARY KEY,
+    source       TEXT NOT NULL,
+    item_id      TEXT NOT NULL,
+    title        TEXT NOT NULL,
+    url          TEXT NOT NULL,
+    published_at INTEGER,
+    created_at   TEXT NOT NULL,
+    UNIQUE (source, item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_news_items_source ON news_items (source, id DESC);
 `
 
 /** openDb 打开连接后即执行;幂等(IF NOT EXISTS + 增量加列)。 */
@@ -374,6 +400,26 @@ export interface ModelEvaluationStatusTable {
   last_attempt_at: string | null
 }
 
+export interface NewsSourcesTable {
+  user_id: number
+  source: string
+  enabled: number
+  fail_streak: number
+  status: string
+  last_success_at: string | null
+  created_at: string
+}
+
+export interface NewsItemsTable {
+  id: Generated<number>
+  source: string
+  item_id: string
+  title: string
+  url: string
+  published_at: number | null
+  created_at: string
+}
+
 export interface SchemaDatabase {
   users: UsersTable
   pages: PagesTable
@@ -391,4 +437,6 @@ export interface SchemaDatabase {
   model_fetch_status: ModelFetchStatusTable
   model_evaluations: ModelEvaluationsTable
   model_evaluation_status: ModelEvaluationStatusTable
+  news_sources: NewsSourcesTable
+  news_items: NewsItemsTable
 }
