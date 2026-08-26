@@ -6,6 +6,7 @@ import type { Icon } from '../lib/types'
 import type { TodoTask } from '../lib/todo'
 import BigTile from './BigTile'
 import { TodoDetailModal, TodoDetailPanel } from './TodoDetail'
+import { useCarousel } from './Carousel'
 
 /**
  * 待办图标的专属网格渲染(见 CONTEXT.md「待办」;3×2 大 tile,同「AI 热点」
@@ -22,6 +23,9 @@ const PEEK_W = 320
 const PEEK_GAP = 8
 const PEEK_MARGIN = 12
 const PEEK_MIN_H = 240
+/** 首次交互门槛:挂载后指针累计位移不足此值(px)不弹快览——刷新/开新标签页后
+ *  行常渲染到静置指针正下方,微动 1px 触发 mouseenter 即幽灵弹卡;真实移过去则远超。 */
+const PEEK_MOVE_GATE = 10
 
 /** 快览状态:任务 + 定位 + 行盒快照(收起宽限期的几何联合判定用)。 */
 type Peek = { task: TodoTask; rowRect: DOMRect; left: number; top: number; maxH: number }
@@ -67,9 +71,16 @@ export default function TodoIconBody({
   const hideTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const peekRef = useRef<HTMLDivElement>(null)
   const pointer = useRef({ x: -1, y: -1 })
+  // 首次交互门槛的累计位移(PEEK_MOVE_GATE);首帧只记基准点不累计
+  const traveled = useRef(0)
+  const lastMove = useRef<{ x: number; y: number } | null>(null)
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       pointer.current = { x: e.clientX, y: e.clientY }
+      if (lastMove.current)
+        traveled.current +=
+          Math.abs(e.clientX - lastMove.current.x) + Math.abs(e.clientY - lastMove.current.y)
+      lastMove.current = { x: e.clientX, y: e.clientY }
     }
     window.addEventListener('mousemove', onMove)
     return () => {
@@ -81,6 +92,12 @@ export default function TodoIconBody({
   useEffect(() => {
     setPeek(null)
   }, [data])
+  // 切页即收快览:卡 fixed 于视口,而键盘等非鼠标驱动的切页不触发浏览器 hover 链
+  // 重算,行滚出视口后 mouseleave 永不到来,卡就残留在已翻走的页上
+  const { active } = useCarousel()
+  useEffect(() => {
+    setPeek(null)
+  }, [active])
 
   const inHoverZone = (rowRect: DOMRect) => {
     const p = peekRef.current?.getBoundingClientRect()
@@ -137,6 +154,10 @@ export default function TodoIconBody({
                   setDetail(t)
                 }}
                 onMouseEnter={overlay ? undefined : (e) => {
+                  // 首次交互门槛:刷新后指针没真正动过(累计 <10px)不弹,压幽灵 mouseenter。
+                  // Chromium 派发 mouseenter 早于 mousemove,此处读到的必是「到达行之前」
+                  // 的累计——真实移来早已远超门槛,静置微动恰好被拦,语义自洽
+                  if (traveled.current < PEEK_MOVE_GATE) return
                   clearTimeout(hideTimer.current)
                   const r = e.currentTarget.getBoundingClientRect()
                   setPeek({ task: t, rowRect: r, ...peekPos(r) })
