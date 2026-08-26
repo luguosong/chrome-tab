@@ -15,6 +15,7 @@ import { createSiteInfoHandler } from './siteInfo'
 import { didaRoutes, type DidaConfig } from './dida'
 import { modelTrackingRoutes, type ModelTrackingService } from './modelTracking'
 import { newsRoutes, type NewsService } from './news/news'
+import { trendingRoutes, type TrendingService } from './trending'
 import { videoUpdatesRoutes, type VideoUpdatesService } from './videoUpdates'
 import { weatherRoutes, type WeatherConfig } from './weather'
 
@@ -33,6 +34,7 @@ export function createApp({
   videoUpdates,
   modelTracking,
   news,
+  trending,
 }: {
   db: Db
   cookieSecure?: boolean
@@ -42,6 +44,7 @@ export function createApp({
   videoUpdates?: VideoUpdatesService
   modelTracking?: ModelTrackingService
   news?: NewsService
+  trending?: TrendingService
 }) {
   const app = new Hono<AuthEnv>()
     .get('/healthz', async (c) => {
@@ -74,8 +77,10 @@ export function createApp({
   if (videoUpdates) app.route('/', videoUpdatesRoutes(videoUpdates))
   // 模型追踪(单例图标「模型追踪」,issues/01):全局共享持久档案 + 6h 轮询(ADR-0025)
   if (modelTracking) app.route('/', modelTrackingRoutes(modelTracking))
-  // 新闻(单例图标「新闻」,ADR-0027):16 内置源、账号级勾选、30min 轮询预取落库
+  // 新闻(单例图标「新闻」,ADR-0027):15 内置源、账号级勾选、30min 轮询预取落库
   if (news) app.route('/', newsRoutes(news))
+  // GitHub 趋势(单例图标「GitHub 趋势」,ADR-0028):默认组合 cron 保热、其余组合按需现抓(内存缓存)
+  if (trending) app.route('/', trendingRoutes(trending))
   app.get('/api/wallpaper', createWallpaperHandler())
   // 站点信息抓取(CONTEXT.md「站点信息」):新增/编辑表单自动填充用,/api/* 鉴权横切覆盖
   app.get('/api/site-info', createSiteInfoHandler())

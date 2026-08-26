@@ -22,6 +22,13 @@ describe('内置类型登记', () => {
     expect(get('nonexistent' as never)).toBeUndefined()
   })
 
+  it('trending 登记为中文词条「GitHub 趋势」的单例 3×2(CONTEXT.md 词条;_Avoid_: trending 上游端点名)', () => {
+    expect(get('trending')?.label).toBe('GitHub 趋势')
+    expect(get('trending')?.singleton).toBe(true)
+    expect(get('trending')?.size).toEqual({ w: 3, h: 2 })
+    expect(get('trending')?.detailEntry).toBe('header')
+  })
+
   it('nav editor:url 先行(自动加载触发器)+ name + 可选 icon 覆盖', () => {
     expect(get('nav')?.editor.map((f) => f.name)).toEqual(['url', 'name', 'icon'])
   })

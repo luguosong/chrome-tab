@@ -60,7 +60,18 @@ export const str = (m: Rec, k: string): string | null => {
 /**
  * 上游文本抓取(超时防挂起,ADR-0017;status/body 挂错误上供调用方分类)。
  * changelog/videoUpdates/modelTracking 三处同形,自第三处起收归共享。
+ * 统一 Chrome UA 与默认超时(news 源 2026-08-26 起,「GitHub 趋势」剥离成第二消费者后收归)。
  */
+export const CHROME_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+
+export const chromeHeaders = (extra: Record<string, string> = {}): RequestInit => ({
+  headers: { 'user-agent': CHROME_UA, ...extra },
+})
+
+/** 匿名抓取默认超时(newnow myFetch 同款)。 */
+export const FETCH_TIMEOUT = 10_000
+
 export async function fetchText(url: string, timeoutMs: number, init?: RequestInit): Promise<string> {
   const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
   if (!res.ok) {

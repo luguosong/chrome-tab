@@ -2,7 +2,6 @@ import type { NewsSourceId } from 'chrome-tab-shared'
 import baidu from './baidu'
 import cankaoxiaoxi from './cankaoxiaoxi'
 import cls from './cls'
-import github from './github'
 import hackernews from './hackernews'
 import ithome from './ithome'
 import kr36 from './36kr'
@@ -30,7 +29,6 @@ export const NEWS_GETTERS: Record<NewsSourceId, NewsGetter> = {
   '36kr': kr36,
   sspai,
   solidot,
-  github,
   hackernews,
   v2ex,
   producthunt,

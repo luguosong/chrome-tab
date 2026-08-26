@@ -19,7 +19,7 @@ export const CAPACITY_CELLS = 81
  * WEATHER 3×1=3 格(首个非 3×2 跨格),其余缺省 1 格。
  * 容量口径唯一来源——requireCapacity/dissolve/POST/move/blob 全量替换共用。
  */
-export const TYPE_SPANS: Partial<Record<IconType, number>> = { AIHOT: 6, CHANGELOG: 6, TODO: 6, VIDEO: 6, MODEL: 6, NEWS: 6, WEATHER: 3 }
+export const TYPE_SPANS: Partial<Record<IconType, number>> = { AIHOT: 6, CHANGELOG: 6, TODO: 6, VIDEO: 6, MODEL: 6, NEWS: 6, TRENDING: 6, WEATHER: 3 }
 
 /** 类型格数:未声明 = 1。 */
 export const spanOf = (type: string): number =>
@@ -32,11 +32,11 @@ const cellsOf = (rows: ReadonlyArray<{ type: string }>): number => {
   return sum
 }
 /** icon type 大写枚举 wire(config 全量替换校验复用)。 */
-export const ICON_TYPES = ['NAV', 'STOCK', 'CHANGELOG', 'WEATHER', 'AIHOT', 'TODO', 'VIDEO', 'MODEL', 'NEWS', 'GROUP'] as const
+export const ICON_TYPES = ['NAV', 'STOCK', 'CHANGELOG', 'WEATHER', 'AIHOT', 'TODO', 'VIDEO', 'MODEL', 'NEWS', 'TRENDING', 'GROUP'] as const
 type IconType = (typeof ICON_TYPES)[number]
 
 /** 单例类型(见 CONTEXT.md「单例类型」):全局仅一个实例,新增/全量替换两入口同校验。 */
-export const SINGLETON_TYPES: readonly IconType[] = ['AIHOT', 'TODO', 'VIDEO', 'MODEL', 'NEWS']
+export const SINGLETON_TYPES: readonly IconType[] = ['AIHOT', 'TODO', 'VIDEO', 'MODEL', 'NEWS', 'TRENDING']
 
 type IconRow = {
   id: number

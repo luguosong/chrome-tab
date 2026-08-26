@@ -14,7 +14,6 @@ export type NewsSourceId =
   | '36kr'
   | 'sspai'
   | 'solidot'
-  | 'github'
   | 'hackernews'
   | 'v2ex'
   | 'producthunt'
@@ -29,7 +28,8 @@ export interface NewsSourceDef {
   label: string
 }
 
-/** 16 源,顺序即「管理」平铺清单顺序(热点 → 科技 → 开发者 → 财经 → 中文外媒)。 */
+/** 15 源,顺序即「管理」平铺清单顺序(热点 → 科技 → 开发者 → 财经 → 中文外媒)。
+ *  GitHub Trending 已剥离为独立「GitHub 趋势」图标(ADR-0028),不再是新闻源。 */
 export const NEWS_SOURCES: readonly NewsSourceDef[] = [
   { id: 'zhihu', label: '知乎' },
   { id: 'weibo', label: '微博' },
@@ -39,7 +39,6 @@ export const NEWS_SOURCES: readonly NewsSourceDef[] = [
   { id: '36kr', label: '36氪' },
   { id: 'sspai', label: '少数派' },
   { id: 'solidot', label: 'Solidot' },
-  { id: 'github', label: 'GitHub Trending' },
   { id: 'hackernews', label: 'Hacker News' },
   { id: 'v2ex', label: 'V2EX' },
   { id: 'producthunt', label: 'Product Hunt' },

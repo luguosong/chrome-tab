@@ -9,7 +9,7 @@ import type { NewsDeps } from './sources/types'
 import { NEWS_GETTERS } from './sources'
 
 /**
- * 「新闻」(CONTEXT.md「新闻/新闻源」;ADR-0027):16 内置源、账号级勾选、cron 30min
+ * 「新闻」(CONTEXT.md「新闻/新闻源」;ADR-0027):15 内置源、账号级勾选、cron 30min
  * 预取落库(对齐视频更新范式 ADR-0023)。条目池按源全局共享(同源任一勾选用户触发
  * 抓取,全部受益)——轮询按 distinct source 去重抓一次,状态行按 user×source 同步。
  * 降级:连续 48 轮(30min/轮 = 1 天)失败标 failing 不删数据,成功即回 ok。
@@ -31,7 +31,15 @@ export class NewsService {
   constructor(
     private readonly db: Db,
     private readonly deps: NewsDeps,
-  ) {}
+  ) {
+    // github 源退役(剥离为独立「GitHub 趋势」图标,ADR-0028):清掉旧条目池与勾选
+    // 状态行的孤儿数据。幂等,每次启动跑一次零成本;不清也无害(feed 只读用户勾选行,
+    // VALID_SOURCES 已不含该源),留着只是脏数据。catch 防 DB 失败成 unhandled rejection。
+    this.db.deleteFrom('news_items').where('source', '=', 'github').execute()
+      .catch((e) => console.error('退役源条目清理失败:', e))
+    this.db.deleteFrom('news_sources').where('source', '=', 'github').execute()
+      .catch((e) => console.error('退役源勾选清理失败:', e))
+  }
 
   // —— 读侧(路由直调;库即真相)——
 

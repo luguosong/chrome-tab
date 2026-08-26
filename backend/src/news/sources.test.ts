@@ -13,7 +13,6 @@ import {
 } from './parse'
 import { parseBaidu } from './sources/baidu'
 import { parseCls } from './sources/cls'
-import { parseGithub } from './sources/github'
 import { parseHackernews } from './sources/hackernews'
 import { parseIthome } from './sources/ithome'
 import { parseThepaper } from './sources/thepaper'

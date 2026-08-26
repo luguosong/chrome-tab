@@ -22,12 +22,6 @@ export interface NewsDeps {
 
 export type NewsGetter = (d: NewsDeps) => Promise<PortedNewsItem[]>
 
-/** newnow myFetch 同款 UA。 */
-export const NEWS_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
-
-export const newsHeaders = (extra: Record<string, string> = {}): RequestInit => ({
-  headers: { 'user-agent': NEWS_UA, ...extra },
-})
-
-export const FETCH_TIMEOUT = 10_000
+// UA/超时/头已收归 common(「GitHub 趋势」剥离成第二消费者,2026-08-26);
+// 旧名 re-export 保 15 个源文件与 siteInfo 零改动
+export { FETCH_TIMEOUT, CHROME_UA as NEWS_UA, chromeHeaders as newsHeaders } from '../../common'

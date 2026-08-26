@@ -10,6 +10,7 @@ import { openDb } from './db'
 import { bootstrap } from './seed'
 import { ModelTrackingService, prodModelDeps, startModelTrackingScheduler } from './modelTracking'
 import { NewsService, prodNewsDeps, startNewsScheduler } from './news/news'
+import { TrendingService, prodTrendingDeps, startTrendingScheduler } from './trending'
 import { VideoUpdatesService, prodVideoDeps, startVideoUpdatesScheduler } from './videoUpdates'
 
 const dbPath = process.env.DB_PATH ?? 'data/newtab.db'
@@ -39,6 +40,8 @@ const modelTrackingService = new ModelTrackingService(db, prodModelDeps(), proce
 await modelTrackingService.init()
 // 新闻(CONTEXT.md「新闻」,ADR-0027):匿名抓取无凭据,勾选与降级口径见 news.ts
 const newsService = new NewsService(db, prodNewsDeps())
+// GitHub 趋势(CONTEXT.md「GitHub 趋势」,ADR-0028):无凭据匿名抓取,内存缓存不落库
+const trendingService = new TrendingService(prodTrendingDeps())
 const app = createApp({
   db,
   cookieSecure,
@@ -54,6 +57,8 @@ const app = createApp({
   modelTracking: modelTrackingService,
   // 新闻(CONTEXT.md「新闻」,ADR-0027):匿名抓取无凭据,勾选见 news.ts
   news: newsService,
+  // GitHub 趋势(CONTEXT.md「GitHub 趋势」,ADR-0028):匿名抓取无凭据
+  trending: trendingService,
 })
 
 const port = Number(process.env.PORT ?? 8080)
@@ -66,6 +71,8 @@ startVideoUpdatesScheduler(videoUpdatesService)
 startModelTrackingScheduler(modelTrackingService)
 // 新闻 30min 轮询(ADR-0027;勾选源才轮询,失败 48 轮标 failing 自愈口径见 news.ts)
 startNewsScheduler(newsService)
+// GitHub 趋势 1h 保热默认组合(ADR-0028;启动即预热,其余组合按需现抓)
+startTrendingScheduler(trendingService)
 
 // 每日 03:17(UTC):WAL checkpoint + 过期 session 清理 + VACUUM INTO 备份(票 09;恢复 = 拷回文件)
 schedule('17 3 * * *', async () => {

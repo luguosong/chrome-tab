@@ -33,8 +33,8 @@ export type EditorField =
 
 /** 刷新配置(spec §刷新策略):hook key + 间隔(ms)。0 = 不刷新。 */
 export type RefreshConfig = {
-  /** 'quotes' = useQuotes 轮询(60s); 'changelog' = useChangelog staleTime(1h); 'weather' = useWeather(后端缓存 10/30/5min); 'aihot' = useAiHot 自持(后端缓存 300s,单例不入集中层); 'todo' = useTodo 自持(后端缓存 60s,单例不入集中层); 'video' = useVideoFeed 自持(后端 1h 轮询预取,前端 staleTime 5min,单例不入集中层); 'model' = useModelArchive 自持(后端 6h 轮询持久档案,前端 staleTime 5min,单例不入集中层); 'news' = useNewsFeed 自持(后端 30min 轮询预取,ADR-0027,前端 staleTime 5min,单例不入集中层); 'none' = 不刷新。 */
-  kind: 'quotes' | 'changelog' | 'weather' | 'aihot' | 'todo' | 'video' | 'model' | 'news' | 'none'
+  /** 'quotes' = useQuotes 轮询(60s); 'changelog' = useChangelog staleTime(1h); 'weather' = useWeather(后端缓存 10/30/5min); 'aihot' = useAiHot 自持(后端缓存 300s,单例不入集中层); 'todo' = useTodo 自持(后端缓存 60s,单例不入集中层); 'video' = useVideoFeed 自持(后端 1h 轮询预取,前端 staleTime 5min,单例不入集中层); 'model' = useModelArchive 自持(后端 6h 轮询持久档案,前端 staleTime 5min,单例不入集中层); 'news' = useNewsFeed 自持(后端 30min 轮询预取,ADR-0027,前端 staleTime 5min,单例不入集中层); 'trending' = useTrending 自持(后端默认组合 1h 保热 + 组合现抓内存缓存,ADR-0028,前端 staleTime 5min,单例不入集中层); 'none' = 不刷新。 */
+  kind: 'quotes' | 'changelog' | 'weather' | 'aihot' | 'todo' | 'video' | 'model' | 'news' | 'trending' | 'none'
 }
 
 /** 实时摘要数据(见 summarize 注释:ADR-0001 契约字段,当前无网格消费方)。 */
@@ -299,6 +299,25 @@ export const NEWS_DEF: IconTypeDefinition = {
   summarize: () => null, // 网格渲染走专属 NewsIconBody,契约字段无消费方(同 nav/aihot/todo/video/model)
 }
 
+/** GitHub 趋势:扩展类型,单例(见 CONTEXT.md「GitHub 趋势」——默认视图全局一份,实例无可绑参数)。
+ *  data 无字段;3×2 大 tile(块内 Today 趋势单列滚动榜:语言色点 + repo 名 + 周期内
+ *  star 增量,点行外跳仓库页),详情 Modal(口语/编程语言/周期三行胶囊正交筛选,组合
+ *  切换即按需现拉),「更多」标头唯一入口(ADR-0022)。数据 = 后端 HTML 解析抓取
+ *  (无官方 API)、默认组合 cron 1h 保热、其余组合现抓 + 内存缓存(ADR-0028),
+ *  前端只读、hook 自持(同 aihot/todo/video/model/news 先例)。 */
+export const TRENDING_DEF: IconTypeDefinition = {
+  id: 'trending',
+  label: 'GitHub 趋势',
+  kind: 'extension',
+  singleton: true,
+  refresh: { kind: 'trending' },
+  detail: 'modal',
+  size: { w: 3, h: 2 },
+  detailEntry: 'header',
+  editor: [],
+  summarize: () => null, // 网格渲染走专属 TrendingIconBody,契约字段无消费方(同 nav/aihot/todo/video/model/news)
+}
+
 /**
  * 分组(ADR-0011):iOS 文件夹式收纳容器(块内成员 favicon 3×2 迷你预览,ADR-0015)。
  * kind='group' 不属于 base/extension 任一分区,
@@ -327,4 +346,5 @@ register('todo', TODO_DEF)
 register('video', VIDEO_DEF)
 register('model', MODEL_DEF)
 register('news', NEWS_DEF)
+register('trending', TRENDING_DEF)
 register('group', GROUP_DEF)

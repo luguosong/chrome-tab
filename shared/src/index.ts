@@ -200,6 +200,7 @@ export type ModelArchiveResponse = {
 
 export * from './changelogSources'
 export * from './newsSources'
+export * from './trending'
 
 /**
  * 重要日期条目(CONTEXT.md「重要日子」,倒计时的用户配置数据源;寄放布局设置见
