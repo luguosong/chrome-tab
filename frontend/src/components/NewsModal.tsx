@@ -80,7 +80,9 @@ export default function NewsModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <div role="tablist" aria-label="新闻视图" className="flex gap-4 border-b border-white/10 mb-3 overflow-x-auto">
+        {/* tab 按钮不可加 -mb-px 压线:overflow-x-auto 会把 overflow-y 计算为 auto,1px 溢出即冒垂直滚动条。
+            横向滚动条走 no-scrollbar(PageTabs 同款):雾胶囊轨道须 pb 让位,会把下划线推离分隔线,tab 行用不得 */}
+        <div role="tablist" aria-label="新闻视图" className="flex gap-4 border-b border-white/10 mb-3 overflow-x-auto no-scrollbar">
           {tabs.map(({ key, label }) => (
             <button
               key={key}
@@ -89,7 +91,7 @@ export default function NewsModal({ onClose }: { onClose: () => void }) {
               type="button"
               onClick={() => setTab(key)}
               className={
-                'pb-1.5 -mb-px text-sm border-b-2 whitespace-nowrap transition focus-visible:outline-2 focus-visible:outline-white/60 ' +
+                'pb-1.5 text-sm border-b-2 whitespace-nowrap transition focus-visible:outline-2 focus-visible:outline-white/60 ' +
                 (active === key
                   ? 'text-accent border-accent'
                   : 'text-white/60 border-transparent hover:text-white/85')
