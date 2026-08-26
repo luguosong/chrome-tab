@@ -1,7 +1,8 @@
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { getChangelogSource, type ChangelogSourceId } from 'chrome-tab-shared'
 import { useChangelog, useTranslateStatus, useTranslateVersions } from '../hooks/useChangelog'
 import { inline } from '../lib/changelogParser'
+import ModalShell from './ModalShell'
 
 /**
  * 更新日志详情 Modal(ADR-0022,原 ChangelogDrawer 改造:与 AiHotModal/WeatherModal
@@ -18,8 +19,8 @@ import { inline } from '../lib/changelogParser'
  *
  * 刷新失败降级(spec user story 15):query error 非空 → 显示重试按钮,点击重拉。
  *
- * 容器:fixed 居中、玻璃面板、关闭按钮;Esc / 点遮罩关闭。入场:fade-in 遮罩 + pop-in
- * 面板(reduced-motion 下不动画)。编辑态进入时由父组件(DashboardPage)onClose。
+ * 容器:ModalShell 统一壳(ADR-0031;scroll=false,版本列表自滚)。编辑态进入时
+ * 由父组件(DashboardPage)onClose。
  */
 export default function ChangelogModal({
   source,
@@ -61,42 +62,21 @@ export default function ChangelogModal({
     return translateMut.variables.filter((v) => !done.has(v))
   }, [translateMut.isPending, translateMut.data, translateMut.variables])
 
-  // Esc 关闭
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`${sourceLabel} 更新日志`}
+    <ModalShell
+      onClose={onClose}
+      ariaLabel={`${sourceLabel} 更新日志`}
+      scroll={false}
+      className="pb-4"
     >
-      {/* 遮罩:点击关闭 */}
-      <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
-
-      <div className="glass-panel glass-panel-readable relative w-full max-w-2xl rounded-3xl pb-4 animate-pop-in">
-        {/* 顶栏:标题 + 副标题 + 关闭 */}
-        <div className="flex items-start justify-between px-6 pt-4 pb-2">
+      {/* 顶栏:标题 + 副标题(关闭钮归 ModalShell 右上角) */}
+        <div className="flex items-start px-6 pt-4 pb-2">
           <div className="min-w-0">
             <h2 className="text-lg font-semibold text-white/90">{sourceLabel} 更新日志</h2>
             <p className="mt-0.5 text-xs text-white/50">
               {latest ? `共 ${versions.length} 个版本 · 最新 ${latest}` : '加载中…'}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="关闭"
-            className="ml-3 shrink-0 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
-          >
-            ×
-          </button>
         </div>
 
         {/* 失败态 + 列表 */}
@@ -222,7 +202,6 @@ export default function ChangelogModal({
             </>
           )}
         </div>
-      </div>
-    </div>
+    </ModalShell>
   )
 }

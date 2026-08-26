@@ -3,6 +3,7 @@ import { NEWS_SOURCES, newsSourceLabel } from 'chrome-tab-shared'
 import type { NewsSourceId } from 'chrome-tab-shared'
 import { useNewsFeed, useSetNewsSources } from '../hooks/useNews'
 import { timeAgo } from '../lib/timeAgo'
+import ModalShell from './ModalShell'
 
 /** 新条目红点窗口(与 NewsIconBody 同口径)。 */
 const NEW_WINDOW_S = 24 * 60 * 60
@@ -11,8 +12,8 @@ const NEW_WINDOW_S = 24 * 60 * 60
  * 新闻详情 Modal(见 CONTEXT.md「新闻」):tab = 全部(默认,混合流)→ 各勾选源 →
  * 管理。条目行 = 标题两行截断 + 源名·相对时间(无时间条目省缺),24h 红点仅限有
  * 时间条目,整条外跳原文。管理 tab = 15 源平铺复选清单(failing 标红注记),勾选
- * 即整份提交(改即保存,对齐布局设置哲学;新勾源由后端异步首取)。容器:fixed 遮罩
- * + 居中玻璃面板,Esc / 点遮罩关闭(同 VideoModal)。
+ * 即整份提交(改即保存,对齐布局设置哲学;新勾源由后端异步首取)。容器:
+ * ModalShell 统一壳(ADR-0031)。
  */
 type Tab = 'all' | `src-${NewsSourceId}` | 'manage'
 
@@ -24,14 +25,6 @@ export default function NewsModal({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     void feed.refetch()
   }, [])
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
 
   const items = feed.data?.items ?? []
   const sources = feed.data?.sources ?? []
@@ -48,25 +41,9 @@ export default function NewsModal({ onClose }: { onClose: () => void }) {
   const shown = active === 'all' ? items : items.filter((i) => `src-${i.source}` === active)
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label="新闻"
-    >
-      <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
+    <ModalShell onClose={onClose} ariaLabel="新闻" className="p-6">
 
-      <div className="glass-panel glass-panel-readable relative w-full max-w-2xl rounded-3xl p-6 max-h-[80vh] overflow-y-auto modal-scroll animate-pop-in">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="关闭"
-          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 focus-visible:outline-2 focus-visible:outline-white/60 flex items-center justify-center"
-        >
-          ×
-        </button>
-
-        <div className="mb-3 flex items-center gap-2">
+      <div className="mb-3 flex items-center gap-2">
           <h2 className="text-lg font-semibold text-white/90">新闻</h2>
           <button
             type="button"
@@ -149,8 +126,7 @@ export default function NewsModal({ onClose }: { onClose: () => void }) {
             ))}
           </ul>
         )}
-      </div>
-    </div>
+    </ModalShell>
   )
 }
 

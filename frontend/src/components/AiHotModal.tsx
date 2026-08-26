@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useAiHot, useAiHotDaily, useAiHotModelPicks } from '../hooks/useAiHot'
 import { formatDailyDate } from '../lib/aihot'
 import { timeAgo } from '../lib/timeAgo'
 import { extractString } from '../lib/iconData'
 import type { Icon } from '../lib/types'
+import ModalShell from './ModalShell'
 
 /**
  * AI 热点详情 Modal(见 CONTEXT.md「AI 热点」,与天气同范式的详情容器),三 tab:
@@ -16,9 +17,8 @@ import type { Icon } from '../lib/types'
  * 模型精选/日报面板懒挂载——切到该 tab 才挂载组件、才发请求;日报取数无轮询
  * (定稿一天一版)。
  * 数据自持 useAiHot / useAiHotModelPicks / useAiHotDaily(图标 body 与热点同
- * queryKey 去重);失败(null / isError)→ 面板内「刷新失败,重试」。容器:fixed
- * 遮罩 + 居中玻璃面板;Esc / 点遮罩关闭(同 WeatherModal;tab 为 TodoModal 同款
- * 下划线式)。
+ * queryKey 去重);失败(null / isError)→ 面板内「刷新失败,重试」。容器:
+ * ModalShell 统一壳(ADR-0031;tab 为 TodoModal 同款下划线式)。
  */
 type Tab = 'hot' | 'picks' | 'daily'
 const TABS: { key: Tab; label: string }[] = [
@@ -36,34 +36,10 @@ export default function AiHotModal({ icon, onClose }: { icon: Icon; onClose: () 
   const failed = isError || data === null
   const topics = data ?? []
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label="AI 热点"
-    >
-      <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
+    <ModalShell onClose={onClose} ariaLabel="AI 热点" width="lg" className="p-6">
 
-      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6 max-h-[80vh] overflow-y-auto modal-scroll animate-pop-in">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="关闭"
-          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center focus-visible:outline-2 focus-visible:outline-white/60"
-        >
-          ×
-        </button>
-
-        <div className="mb-3">
+      <div className="mb-3">
           <h2 className="text-lg font-semibold text-white/90">
             {extractString(icon.data, 'name') || 'AI 热点'}
           </h2>
@@ -155,8 +131,7 @@ export default function AiHotModal({ icon, onClose }: { icon: Icon; onClose: () 
         ) : (
           <DailyPanel />
         )}
-      </div>
-    </div>
+    </ModalShell>
   )
 }
 

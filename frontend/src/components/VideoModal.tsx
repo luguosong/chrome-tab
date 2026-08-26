@@ -14,6 +14,7 @@ import {
 } from '../hooks/useVideoUpdates'
 import { timeAgo } from '../lib/timeAgo'
 import ConfirmButton from './ConfirmButton'
+import ModalShell from './ModalShell'
 
 /** 新视频红点窗口(与 VideoIconBody 同口径):发布 <24h,时间驱动满窗自隐。 */
 const NEW_WINDOW_S = 24 * 60 * 60
@@ -36,7 +37,7 @@ const platformLabel = (p: string) => (p === 'youtube' ? 'YouTube' : 'B站')
  * 直连,B站 hdslb 防盗链实测自家域 Referer 必 403)+ 右下时长角标(无时长则无角标,
  * 无 key 降级口径)+ 标题两行截断 + 博主名·相对时间,整条外跳原平台。管理 tab:分类
  * 增删改排序(删 → 博主回未分类)与博主添加/归类/删除(status='failing' 标红)。
- * 容器:fixed 遮罩 + 居中玻璃面板,Esc / 点遮罩关闭(同 TodoModal)。
+ * 容器:ModalShell 统一壳(ADR-0031)。
  */
 type Tab = 'all' | 'uncategorized' | `cat-${number}` | 'manage'
 
@@ -49,14 +50,6 @@ export default function VideoModal({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     void feed.refetch()
   }, [])
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
 
   const videos = feed.data ?? []
   const categories = cats.data?.categories ?? []
@@ -78,25 +71,9 @@ export default function VideoModal({ onClose }: { onClose: () => void }) {
           : []
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label="视频更新"
-    >
-      <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
+    <ModalShell onClose={onClose} ariaLabel="视频更新" className="p-6">
 
-      <div className="glass-panel glass-panel-readable relative w-full max-w-2xl rounded-3xl p-6 max-h-[80vh] overflow-y-auto modal-scroll animate-pop-in">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="关闭"
-          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 focus-visible:outline-2 focus-visible:outline-white/60 flex items-center justify-center"
-        >
-          ×
-        </button>
-
-        <div className="mb-3 flex items-center gap-2">
+      <div className="mb-3 flex items-center gap-2">
           <h2 className="text-lg font-semibold text-white/90">视频更新</h2>
           <button
             type="button"
@@ -159,8 +136,7 @@ export default function VideoModal({ onClose }: { onClose: () => void }) {
             ))}
           </ul>
         )}
-      </div>
-    </div>
+    </ModalShell>
   )
 }
 

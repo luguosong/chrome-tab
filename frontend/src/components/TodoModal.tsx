@@ -3,6 +3,7 @@ import { ApiError } from '../api/client'
 import { useCompleteTodo, useCreateTodo, useTodo } from '../hooks/useTodo'
 import { dueLabel, isOverdue, priorityDotClass, type TodoBundle, type TodoTask } from '../lib/todo'
 import { TodoDetailModal, TodoDetailPanel } from './TodoDetail'
+import ModalShell from './ModalShell'
 
 /**
  * 待办详情 Modal(见 CONTEXT.md「待办」,3×2 迭代起为三视图):收集箱 / 当天 / 7 天
@@ -11,8 +12,9 @@ import { TodoDetailModal, TodoDetailPanel } from './TodoDetail'
  * 左右分栏(左列表右「待办详情」,Modal max-w 随之 lg→3xl;再点同条收起、切 tab/
  * 完成当前条收起;窄窗 <640px 分栏放不下,降级弹二级对话框)。底部速记输入:
  * Enter → 滴答收集箱,成功即切到收集箱 tab——「速记即入箱」闭环,刚记的条目立见。
- * 失败区分:未配置(400)给出生成口令指引,其余给重试。容器:fixed 遮罩 + 居中
- * 玻璃面板;Esc / 点遮罩关闭(同 AiHotModal;二级详情开着时 Esc 只关二级)。
+ * 失败区分:未配置(400)给出生成口令指引,其余给重试。容器:ModalShell 统一壳
+ * (ADR-0031;分栏/列表双态走 width+className);二级详情开着时 Esc 只关二级
+ * ——escStack 栈顶派发结构保证。
  */
 type TodoTab = keyof TodoBundle
 const TABS: { key: TodoTab; label: string }[] = [
@@ -36,15 +38,6 @@ export default function TodoModal({ onClose }: { onClose: () => void }) {
   // data===undefined 是首次加载中,不算失败(区别于 null,AiHotModal 同款)。
   const failed = isError || data === null
   const unconfigured = error instanceof ApiError && error.status === 400
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      // 二级详情开着时 Esc 只关二级(其自管),不带走整个 Modal
-      if (e.key === 'Escape' && !detail) onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [detail, onClose])
 
   /** 切 tab 即收起详情:选中项多半不在新列表,保留无意义。 */
   const switchTab = (key: TodoTab) => {
@@ -138,29 +131,17 @@ export default function TodoModal({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <div
-        className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-        role="dialog"
-        aria-modal="true"
-        aria-label="待办"
+      <ModalShell
+        onClose={onClose}
+        ariaLabel="待办"
+        width={selected ? '3xl' : 'lg'}
+        scroll={false}
+        className={
+          'p-6 max-h-[80vh] modal-scroll transition-[max-width] duration-300 ' +
+          // 分栏时加宽一档、整体滚动让位给左右列各自滚动;列表态纵向滚动
+          (selected ? 'overflow-hidden flex flex-col' : 'overflow-y-auto')
+        }
       >
-        <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
-
-        <div
-          className={
-            'glass-panel glass-panel-readable relative w-full rounded-3xl p-6 max-h-[80vh] modal-scroll animate-pop-in transition-[max-width] duration-300 ' +
-            // 分栏时加宽一档、整体滚动让位给左右列各自滚动
-            (selected ? 'max-w-3xl overflow-hidden flex flex-col' : 'max-w-lg overflow-y-auto')
-          }
-        >
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="关闭"
-            className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 focus-visible:outline-2 focus-visible:outline-white/60 transition-colors flex items-center justify-center"
-          >
-            ×
-          </button>
 
           <div className="mb-3">
             <div className="flex items-center gap-2">
@@ -229,8 +210,7 @@ export default function TodoModal({ onClose }: { onClose: () => void }) {
               {draftRow}
             </>
           )}
-        </div>
-      </div>
+      </ModalShell>
       {detail && <TodoDetailModal task={detail} onClose={() => setDetail(null)} />}
     </>
   )

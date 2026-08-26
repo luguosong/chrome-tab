@@ -1,7 +1,7 @@
-import { useEffect } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { dueLabel, isOverdue, priorityDotClass, type TodoTask } from '../lib/todo'
+import ModalShell from './ModalShell'
 
 /**
  * 「待办详情」(CONTEXT.md):单条待办的只读展示容器——滴答备注(上游字段名
@@ -58,30 +58,20 @@ export function TodoDetailPanel({ task }: { task: TodoTask }) {
 /**
  * 二级详情对话框(图标块点收集箱条目 / 窄窗降级):复用全站 Modal 容器语汇
  * (遮罩 fade-in + 面板 pop-in + Esc/点遮罩关闭),标题固定、正文自滚。
- * Esc 只关本层——由渲染方控制父级(待办 Modal)在二级开着时忽略 Esc。
+ * z-[70] 叠在待办 Modal 上;「Esc 只关本层」由 escStack 栈顶派发结构保证
+ * (ADR-0031),不再依赖渲染方在父级做条件特判。
  */
 export function TodoDetailModal({ task, onClose }: { task: TodoTask; onClose: () => void }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="待办详情">
-      <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
-      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6 max-h-[80vh] flex flex-col animate-pop-in">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="关闭"
-          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 focus-visible:outline-2 focus-visible:outline-white/60 transition-colors flex items-center justify-center"
-        >
-          ×
-        </button>
-        <TodoDetailPanel task={task} />
-      </div>
-    </div>
+    <ModalShell
+      onClose={onClose}
+      ariaLabel="待办详情"
+      width="lg"
+      scroll={false}
+      z={70}
+      className="p-6 max-h-[80vh] flex flex-col"
+    >
+      <TodoDetailPanel task={task} />
+    </ModalShell>
   )
 }

@@ -1,7 +1,8 @@
-import { useEffect, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { useIconData } from '../context/IconDataContext'
 import { hourHM, locationKey, weatherIconUrl, readWeatherLocation, type WeatherAir, type WeatherAlert, type WeatherDay, type WeatherHour, type WeatherNow } from '../lib/weather'
 import type { Icon } from '../lib/types'
+import ModalShell from './ModalShell'
 
 /**
  * 天气详情 Modal(见 ADR-0009)。实况 / 24 小时预报(水平滚动)/ 7 天预报 / 空气质量 / 灾害预警
@@ -10,7 +11,7 @@ import type { Icon } from '../lib/types'
  * 刷新失败降级(同 StockModal):weatherError 或 bundle 缺失(取数失败→后端 null)→ 顶部「刷新失败,重试」。
  * 数据来自 IconDataContext 集中下发的 weather(键 locationKey),点击重试 refetchWeather(批拉粒度)。
  *
- * 容器:fixed 遮罩 + 居中玻璃面板;Esc / 点遮罩关闭。
+ * 容器:ModalShell 统一壳(ADR-0031)。
  */
 export default function WeatherModal({
   icon,
@@ -31,35 +32,15 @@ export default function WeatherModal({
   const alerts = bundle?.alerts ?? []
   const name = loc?.name ?? '天气'
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const failed = weatherError || (key !== '' && bundle === null)
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`${name} 天气详情`}
+    <ModalShell
+      onClose={onClose}
+      ariaLabel={`${name} 天气详情`}
+      width="lg"
+      className="p-6"
     >
-      <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
-
-      {/* max-h + 滚动:预警/逐日多时小屏溢出(族内既有模式) */}
-      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6 max-h-[80vh] overflow-y-auto modal-scroll animate-pop-in">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="关闭"
-          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
-        >
-          ×
-        </button>
 
         {/* 标题:城市 + 行政区划 */}
         <div className="mb-4">
@@ -132,8 +113,7 @@ export default function WeatherModal({
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </ModalShell>
   )
 }
 

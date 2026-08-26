@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   TRENDING_LANGUAGES,
   TRENDING_SINCE_LABELS,
@@ -7,6 +7,7 @@ import {
 } from 'chrome-tab-shared'
 import { timeAgo } from '../lib/timeAgo'
 import { useTrending } from '../hooks/useTrending'
+import ModalShell from './ModalShell'
 
 /**
  * GitHub 趋势详情 Modal(见 CONTEXT.md「GitHub 趋势」;ADR-0022「更多」标头唯一入口):
@@ -15,7 +16,7 @@ import { useTrending } from '../hooks/useTrending'
  * queryKey:切组合自动按需现拉(后端内存缓存 1h,非默认组合首拉 ~2.4s)。
  * 行 = repo 名 + 总 star / 描述(完整换行永不省略,非中文后台译中、悬停原文)/ 语言色点·语言名 + 周期内增量,点行新开 tab。
  * 不持久化筛选状态:每次打开回到默认 Today 视图(trending 语义即「此刻什么热」)。
- * 容器:fixed 遮罩 + 居中玻璃面板;Esc/点遮罩关闭(ModelModal 同款)。
+ * 容器:ModalShell 统一壳(ADR-0031)。
  */
 
 export default function TrendingModal({ onClose }: { onClose: () => void }) {
@@ -26,34 +27,10 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
   const { data, isError, refetch, isFetching } = useTrending({ since, language, spoken })
   const repos = data?.repos ?? []
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label="GitHub 趋势"
-    >
-      <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
+    <ModalShell onClose={onClose} ariaLabel="GitHub 趋势" className="p-6">
 
-      <div className="glass-panel glass-panel-readable relative w-full max-w-2xl rounded-3xl p-6 max-h-[80vh] overflow-y-auto modal-scroll animate-pop-in">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="关闭"
-          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center focus-visible:outline-2 focus-visible:outline-white/60"
-        >
-          ×
-        </button>
-
-        <div className="mb-3">
+      <div className="mb-3">
           <h2 className="text-lg font-semibold text-white/90">GitHub 趋势</h2>
           <div className="text-xs text-white/50">
             趋势仓库(口语 × 语言 × 周期筛选)
@@ -136,8 +113,7 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
             ))}
           </ol>
         )}
-      </div>
-    </div>
+    </ModalShell>
   )
 }
 

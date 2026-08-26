@@ -1,9 +1,9 @@
-import { useEffect } from 'react'
 import { useIconData } from '../context/IconDataContext'
 import { useCompanyProfile } from '../hooks/useCompanyProfile'
 import { useFundamentals } from '../hooks/useFundamentals'
 import { useKlines } from '../hooks/useKlines'
 import KlineChart from './KlineChart'
+import ModalShell from './ModalShell'
 import { formatMarketCap, isIndexSymbol, symbolToSecid, symbolToSecucode } from '../lib/companyOverview'
 import { extractString } from '../lib/iconData'
 import type { Icon } from '../lib/types'
@@ -19,7 +19,7 @@ import type { Quote } from '../lib/quoteParser'
  * 点击重拉 quotes(关联查询,与 useQuotes 批拉粒度一致)。单 symbol null(查询成功但无该
  * symbol)显示「—」,不算失败。
  *
- * 容器:fixed 遮罩 + 居中玻璃面板;Esc / 点遮罩关闭。编辑态进入时由父组件(DashboardPage)
+ * 容器:ModalShell 统一壳(ADR-0031)。编辑态进入时由父组件(DashboardPage)
  * onClose,不在本组件重复处理。
  */
 export default function StockModal({
@@ -51,40 +51,15 @@ export default function StockModal({
   const klinesQ = useKlines(symbolToSecid(symbol))
   const klines = klinesQ.data ?? []
 
-  // Esc 关闭
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`${name} 行情详情`}
+    <ModalShell
+      onClose={onClose}
+      ariaLabel={`${name} 行情详情`}
+      width="lg"
+      scroll={false}
+      className="p-6"
     >
-      {/* 遮罩:点击关闭(fade-in 入场,与族内 Modal 统一) */}
-      <div
-        className="absolute inset-0 bg-black/50 animate-fade-in"
-        onClick={onClose}
-      />
-
-      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6 animate-pop-in">
-        {/* 关闭按钮 */}
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="关闭"
-          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
-        >
-          ×
-        </button>
-
-        {/* 标题 */}
+      {/* 标题 */}
         <div className="mb-4">
           <h2 className="text-lg font-semibold text-white/90">{name}</h2>
           <div className="text-xs text-white/50 font-mono">{code}</div>
@@ -180,8 +155,7 @@ export default function StockModal({
             )}
           </div>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   )
 }
 

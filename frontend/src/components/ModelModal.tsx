@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type {
   ModelEvaluationsStatus,
   ModelKind,
@@ -7,6 +7,7 @@ import type {
 } from 'chrome-tab-shared'
 import { useModelArchive } from '../hooks/useModelArchive'
 import { timeAgo } from '../lib/timeAgo'
+import ModalShell from './ModalShell'
 import {
   AVAILABILITY_LABELS,
   EVALUATION_ATTRIBUTION,
@@ -30,7 +31,7 @@ import {
  * Modal 内就地展开**(摘要 + 限额/训练参数/价格/评测四张规格卡——值按语义着色,
  * 动态时间线与信源全宽,不套第二层 Modal),24h 新动态行首红点(时间驱动,无已读
  * 概念)。信源失败保留最后成功结果并标记陈旧(CONTEXT.md「模型档案」)——头部给
- * 一行陈旧提示。容器:fixed 遮罩 + 居中玻璃面板;Esc/点遮罩关闭,tab 为 TodoModal
+ * 一行陈旧提示。容器:ModalShell 统一壳(ADR-0031),tab 为 TodoModal
  * 同款下划线式(过滤行用胶囊形态以区分「切视图/筛条件」两个维度)。
  */
 /** tab 维度 = 全部 + 各跟踪厂家(自 PROVIDER_LABELS 派生,厂家票扩 shared 时 tab 随动)。 */
@@ -61,36 +62,12 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
   /** 就地展开的模型行(同时只开一行,展开/收起即点击行头)。 */
   const [expandedId, setExpandedId] = useState<number | null>(null)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const staleSources = (data?.sources ?? []).filter((s) => s.stale)
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label="模型追踪"
-    >
-      <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
+    <ModalShell onClose={onClose} ariaLabel="模型追踪" className="p-6">
 
-      <div className="glass-panel glass-panel-readable relative w-full max-w-2xl rounded-3xl p-6 max-h-[80vh] overflow-y-auto modal-scroll animate-pop-in">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="关闭"
-          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center focus-visible:outline-2 focus-visible:outline-white/60"
-        >
-          ×
-        </button>
-
-        <div className="mb-3">
+      <div className="mb-3">
           <h2 className="text-lg font-semibold text-white/90">模型追踪</h2>
           <div className="text-xs text-white/50">AI 模型档案与动态(官方一手信源)</div>
         </div>
@@ -195,8 +172,7 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
             />
           </>
         )}
-      </div>
-    </div>
+    </ModalShell>
   )
 }
 

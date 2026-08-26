@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { ImportantDate } from 'chrome-tab-shared'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import { useUpdateLayoutSettings } from '../api/config'
 import ConfirmButton from './ConfirmButton'
+import ModalShell from './ModalShell'
 
 /**
  * 「重要日子」编辑 Modal(CONTEXT.md;倒计时的用户配置数据源,寄放布局设置 ADR-0026)。
@@ -73,14 +74,7 @@ export default function CountdownEditModal({ onClose }: { onClose: () => void })
   const [draft, setDraft] = useState<Draft | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
-  // Esc 关闭(姊妹 Modal 共有基线;表单态同样关——未保存即弃,无半提交状态)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  // Esc 关闭走 ModalShell 栈;表单态同样关——未保存即弃,无半提交状态
 
   async function commit(next: ImportantDate[]) {
     setErr(null)
@@ -114,17 +108,12 @@ export default function CountdownEditModal({ onClose }: { onClose: () => void })
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="重要日子">
-      <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
-      <div className="glass-panel glass-panel-readable relative w-full max-w-sm rounded-3xl p-5 max-h-[80vh] overflow-y-auto modal-scroll animate-pop-in text-sm text-white/90">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="关闭"
-          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
-        >
-          ✕
-        </button>
+    <ModalShell
+      onClose={onClose}
+      ariaLabel="重要日子"
+      width="sm"
+      className="p-5 text-sm text-white/90"
+    >
 
         {draft === null ? (
           <>
@@ -267,7 +256,6 @@ export default function CountdownEditModal({ onClose }: { onClose: () => void })
             </div>
           </>
         )}
-      </div>
-    </div>
+    </ModalShell>
   )
 }
