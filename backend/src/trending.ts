@@ -9,7 +9,7 @@ import {
   type TrendingSince,
 } from 'chrome-tab-shared'
 import type { AuthEnv } from './auth'
-import { makeBatchTranslator, sha256, type BatchTranslator } from './translate'
+import { makeBatchTranslator, makeTranslationStore, type BatchTranslator, type TranslationStore } from './translate'
 import type { Db } from './db'
 import { BadRequest, FETCH_TIMEOUT, chromeHeaders, fetchText } from './common'
 
@@ -36,7 +36,6 @@ const SPOKEN_SET = new Set(TRENDING_SPOKEN.map((l) => l.slug))
 
 const queryKey = (q: TrendingQuery) => `${q.since}|${q.language}|${q.spoken}`
 const starNumber = (s: string): number => Number(s.replace(/,/g, '')) || 0
-const nowIso = () => new Date().toISOString()
 
 /** 汉字启发式(ADR-0030):描述含汉字 → 视为中文不译(零依赖零成本);无汉字的日文假名/
  *  韩文/西里尔等照送译成中文,正合「非中文都译」。误判形态温和——最坏是含汉字的日文
@@ -117,7 +116,12 @@ type Entry = { repos: TrendingRepo[]; fetchedAt: number }
 export class TrendingService {
   private readonly cache = new Map<string, Entry>()
 
-  constructor(private readonly db: Db, private readonly deps: TrendingDeps) {}
+  /** 描述译文仓(ADR-0034):原文键 load/ensure,哈希派生与补译骨架收进 store。 */
+  private readonly translations: TranslationStore
+
+  constructor(db: Db, private readonly deps: TrendingDeps) {
+    this.translations = makeTranslationStore(db, 'trending_translations')
+  }
 
   /** 读组合:缓存未过期直接回;过期现抓(失败回落过期缓存)。抓取成功即后台补译
    * (ADR-0030 fire-and-forget)——首批响应先回原文,译文就位后靠前端既有刷新节奏
@@ -147,61 +151,28 @@ export class TrendingService {
   private async toResponse(e: Entry): Promise<TrendingResponse> {
     const descriptions = e.repos.map((r) => r.description).filter((d): d is string => d != null)
     const zh =
-      descriptions.length > 0 ? await this.loadTranslations(descriptions) : new Map<string, string>()
+      descriptions.length > 0 ? await this.translations.load(descriptions) : new Map<string, string>()
     return {
       repos: e.repos.map((r) => ({
         ...r,
-        descriptionZh: r.description ? (zh.get(sha256(r.description)) ?? null) : null,
+        descriptionZh: r.description ? (zh.get(r.description) ?? null) : null,
       })),
       fetchedAt: new Date(e.fetchedAt).toISOString(),
     }
   }
 
-  /** 非中文描述补译(ADR-0029 新闻范式移植):汉字启发式过滤 → 扫缺译 → 批量译 →
-   *  写哈希表。整体 try 吞错:译制失败不冒泡进 get——那里会误伤正常取数路径。
-   *  失败哈希未写,下次该组合缓存过期重抓(或 cron 1h)自然重试。 */
+  /** 非中文描述补译(ADR-0029 新闻范式移植):汉字启发式过滤(域过滤)→ 译文仓
+   *  ensure 收编骨架(去重/滤缺/批译/onConflict,ADR-0034)。整体 try 吞错:译制
+   *  失败不冒泡进 get——那里会误伤正常取数路径。失败哈希未写,下次该组合缓存过期
+   *  重抓(或 cron 1h)自然重试。 */
   private async translateMissingDescriptions(repos: TrendingRepo[]): Promise<void> {
     try {
-      const descriptions = [
-        ...new Set(
-          repos
-            .map((r) => r.description)
-            .filter((d): d is string => d != null)
-            .filter((d) => !HAS_HAN.test(d)),
-        ),
-      ]
+      const descriptions = repos.map((r) => r.description).filter((d): d is string => d != null)
       if (descriptions.length === 0) return
-      const known = await this.loadTranslations(descriptions)
-      const missing = descriptions.filter((d) => !known.has(sha256(d)))
-      if (missing.length === 0) return
-      const translated = await this.deps.translateDescriptions(missing)
-      const inserts = translated
-        .map((t, i) => (t == null ? null : { desc_hash: sha256(missing[i]!), translated: t, created_at: nowIso() }))
-        .filter((v): v is { desc_hash: string; translated: string; created_at: string } => v != null)
-      if (inserts.length > 0) {
-        await this.db
-          .insertInto('trending_translations')
-          .values(inserts)
-          .onConflict((oc) => oc.column('desc_hash').doNothing())
-          .execute()
-      }
+      await this.translations.ensure(descriptions, this.deps.translateDescriptions, (d) => !HAS_HAN.test(d))
     } catch (e) {
       console.warn('趋势描述译制失败,保持原文:', e)
     }
-  }
-
-  /** 描述 → 已有译文(哈希键);组合 25 条量级,单次 in 查询即足(无 news 500/批分片需求)。 */
-  private async loadTranslations(descriptions: string[]): Promise<Map<string, string>> {
-    const rows = await this.db
-      .selectFrom('trending_translations')
-      .select(['desc_hash', 'translated'])
-      .where(
-        'desc_hash',
-        'in',
-        [...new Set(descriptions)].map(sha256),
-      )
-      .execute()
-    return new Map(rows.map((r) => [r.desc_hash, r.translated] as const))
   }
 }
 

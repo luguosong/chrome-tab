@@ -1,18 +1,16 @@
-import { makeBatchTranslator, sha256, type BatchTranslator } from '../translate'
+import type { NewsSourceId } from 'chrome-tab-shared'
+import { makeBatchTranslator, type BatchTranslator } from '../translate'
 
 /**
  * 新闻英文源标题译制(ADR-0029,CONTEXT.md「新闻」+「译文表」):域特化层——
- * system prompt 与源清单;批量机制(候选链/编号协议/限流纪律)在 ../translate.ts。
- * 译文按标题 SHA-256 持久化(news_translations),同标题跨条目跨源终身只译一次;
- * 漏行/畸行返回 null 由 pollSource 轮次重试(30min 免费回路)。译制只认源清单
- * (TRANSLATED_SOURCES),否决逐条语言检测(ADR-0029)。
+ * system prompt 与源清单;批量机制(候选链/编号协议/限流纪律)与译文表存储(load/
+ * save/ensure,ADR-0034)在 ../translate.ts。译文按标题哈希持久化(news_translations),
+ * 同标题跨条目跨源终身只译一次;漏行/畸行返回 null 由 pollSource 轮次重试(30min
+ * 免费回路)。译制只认源清单(TRANSLATED_SOURCES),否决逐条语言检测(ADR-0029)。
  */
 
-/** 标题哈希(译文表主键;与 changelog_translations.block_hash 同派生,复用同实现防分叉)。 */
-export { sha256 as titleHash }
-
-/** 需要译制的英文源(按源硬编码,新英文源加一行)。 */
-export const TRANSLATED_SOURCES: ReadonlySet<string> = new Set(['hackernews', 'producthunt'])
+/** 需要译制的英文源(按源硬编码,新英文源加一行;NewsSourceId 锁拼写进编译器)。 */
+export const TRANSLATED_SOURCES: ReadonlySet<NewsSourceId> = new Set(['hackernews', 'producthunt'])
 
 /** 译制系统提示(ADR-0029 第 7 条口径:前缀/标注原样,专名/emoji/定价词原样,不扩写)。 */
 const NEWS_SYSTEM_PROMPT = `你是专业技术新闻编辑。把用户给出的编号英文标题列表逐条译成简体中文,输出同样编号的中文标题列表。

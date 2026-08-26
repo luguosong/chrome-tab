@@ -8,7 +8,13 @@ import {
 import type { Db } from './db'
 import type { AuthEnv } from './auth'
 import { fetchText } from './common'
-import { callModel, isCandidateExhausted, modelCandidates, sha256 } from './translate'
+import {
+  callModel,
+  isCandidateExhausted,
+  makeTranslationStore,
+  modelCandidates,
+  type TranslationStore,
+} from './translate'
 
 /**
  * 更新日志译制代理(ADR-0005/0016/0017,语义照搬 Java changelog 模块;多源化见 ADR-0020)。
@@ -133,13 +139,18 @@ export class ChangelogService {
     return { ...this.phase }
   }
 
+  /** 哈希译文仓(ADR-0034):原文键 load/save,哈希派生收进 store。 */
+  private readonly translations: TranslationStore
+
   constructor(
     private readonly db: Db,
     /** 本实例绑定的外源(scheduler 日志用;取数 URL 在 deps 里已按源定型)。 */
     readonly source: ChangelogSourceId,
     private readonly deps: ChangelogDeps,
     private readonly translateRecent = 5,
-  ) {}
+  ) {
+    this.translations = makeTranslationStore(db, 'changelog_translations')
+  }
 
   /** 读快照。内存空(首次部署、定时任务尚未跑成)→ 同步兜底刷新一次;仍失败则上抛 → 500。 */
   async get(): Promise<Snapshot> {
@@ -158,7 +169,7 @@ export class ChangelogService {
     const blocks = splitBlocks(row.raw_markdown)
     // releaseTimes 不落库:恢复镜像时置空表,启动紧跟的 refreshQuietly(见调度器)拉发布信息补齐,
     // 缺失窗口仅重启后数秒——省一列迁移与快照表读写。
-    this.memory = this.assemble(blocks, await this.loadTranslations(blocks), row.released_at, {})
+    this.memory = this.assemble(blocks, await this.translations.load(blocks.blocks.map((b) => b.raw)), row.released_at, {})
   }
 
   /** 定时/预热刷新:拉原文 → 只译最近 N 版中缺失的块 → 快照落库 → 换内存镜像。拉取失败上抛,由调度方决定降级。 */
@@ -171,11 +182,11 @@ export class ChangelogService {
     return this.exclusive(async () => {
       if (!this.memory) await this.doRefresh() // 冷启动兜底(锁内,不可走加锁版防自锁)
       const { blocks, releasedAt, releaseTimes } = this.memory!
-      const byHash = await this.loadTranslations(blocks)
+      const byRaw = await this.translations.load(blocks.blocks.map((b) => b.raw))
       for (const b of blocks.blocks) {
-        if (titles.includes(b.title)) await this.translateIfMissing(b, byHash)
+        if (titles.includes(b.title)) await this.translateIfMissing(b, byRaw)
       }
-      this.memory = this.assemble(blocks, byHash, releasedAt, releaseTimes)
+      this.memory = this.assemble(blocks, byRaw, releasedAt, releaseTimes)
       return this.memory
     })
   }
@@ -183,9 +194,9 @@ export class ChangelogService {
   private async doRefresh(): Promise<void> {
     const raw = await this.deps.fetchMarkdown()
     const blocks = splitBlocks(raw)
-    const byHash = await this.loadTranslations(blocks)
+    const byRaw = await this.translations.load(blocks.blocks.map((b) => b.raw))
     for (const b of blocks.blocks.slice(0, this.translateRecent)) {
-      await this.translateIfMissing(b, byHash)
+      await this.translateIfMissing(b, byRaw)
     }
     const info = await this.deps.fetchReleaseInfo()
     // 空串守卫(npm time 条目可能为空串):releasedAt 语义 = ISO 或显式 null,不透 ''
@@ -202,7 +213,7 @@ export class ChangelogService {
           .doUpdateSet({ raw_markdown: raw, released_at: releasedAt, fetched_at: fetchedAt }),
       )
       .execute()
-    this.memory = this.assemble(blocks, byHash, releasedAt, releaseTimes)
+    this.memory = this.assemble(blocks, byRaw, releasedAt, releaseTimes)
   }
 
   private exclusive<T>(fn: () => Promise<T>): Promise<T> {
@@ -213,10 +224,10 @@ export class ChangelogService {
     return run
   }
 
-  /** 译一个块:哈希命中直接返回(零 LLM);译成则入库;失败/拒绝仅 warn,不入库待下轮重试。 */
-  private async translateIfMissing(block: Block, byHash: Map<string, string>): Promise<void> {
-    const hash = sha256(block.raw)
-    if (byHash.has(hash)) return
+  /** 译一个块:已有译文(原文键)直接返回(零 LLM);译成则入库;失败/拒绝仅 warn,
+   *  不入库待下轮重试。入库经译文仓(空串守卫/onConflict 收在 store,ADR-0034)。 */
+  private async translateIfMissing(block: Block, byRaw: Map<string, string>): Promise<void> {
+    if (byRaw.has(block.raw)) return
     let translated: string | null
     try {
       translated = await this.deps.translate(block.raw, (model, attempt, total) => {
@@ -235,38 +246,21 @@ export class ChangelogService {
       console.warn(`版本 ${block.title} 译制被拒绝(API Key 缺失?),保持英文`)
       return
     }
-    await this.db
-      .insertInto('changelog_translations')
-      .values({ block_hash: hash, translated, created_at: nowIso() })
-      .execute()
-    byHash.set(hash, translated)
+    await this.translations.save([{ text: block.raw, translated }])
+    byRaw.set(block.raw, translated)
   }
 
-  /** 批量捞现有译文 → 哈希 → 译文 映射(拼装与缺失比对共用一次查询)。 */
-  private async loadTranslations(blocks: Blocks): Promise<Map<string, string>> {
-    const hashes = blocks.blocks.map((b) => sha256(b.raw))
-    // 实测 361 版,远低于 SQLite 单语句参数上限(32766),不分批
-    const rows = hashes.length
-      ? await this.db
-          .selectFrom('changelog_translations')
-          .selectAll()
-          .where('block_hash', 'in', hashes)
-          .execute()
-      : []
-    return new Map(rows.map((r) => [r.block_hash, r.translated]))
-  }
-
-  /** 拼装:前缀 + 每块取译文(哈希命中)或原文。translatedVersions 与拼装同源。 */
+  /** 拼装:前缀 + 每块取译文(原文键命中)或原文。translatedVersions 与拼装同源。 */
   private assemble(
     blocks: Blocks,
-    byHash: Map<string, string>,
+    byRaw: Map<string, string>,
     releasedAt: string | null,
     releaseTimes: Record<string, string>,
   ): Snapshot {
     let markdown = blocks.prefix
     const translatedVersions: string[] = []
     for (const b of blocks.blocks) {
-      const translated = byHash.get(sha256(b.raw))
+      const translated = byRaw.get(b.raw)
       if (translated !== undefined) {
         markdown += translated.endsWith('\n') ? translated : `${translated}\n`
         translatedVersions.push(b.title)

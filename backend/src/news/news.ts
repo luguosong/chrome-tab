@@ -7,7 +7,8 @@ import type { Db } from '../db'
 import type { AuthEnv } from '../auth'
 import type { NewsDeps } from './sources/types'
 import { NEWS_GETTERS } from './sources'
-import { prodTitleTranslator, titleHash, TRANSLATED_SOURCES } from './translate'
+import { makeTranslationStore, type TranslationStore } from '../translate'
+import { prodTitleTranslator, TRANSLATED_SOURCES } from './translate'
 
 /**
  * 「新闻」(CONTEXT.md「新闻/新闻源」;ADR-0027):15 内置源、账号级勾选、cron 30min
@@ -29,10 +30,14 @@ export class NewsService {
   /** 同 VideoUpdatesService.exclusive:勾选首取与 cron 轮询排一条链串行。 */
   private tail: Promise<unknown> = Promise.resolve()
 
+  /** 标题译文仓(ADR-0034):原文键 load/ensure,哈希派生与补译骨架收进 store。 */
+  private readonly translations: TranslationStore
+
   constructor(
     private readonly db: Db,
     private readonly deps: NewsDeps,
   ) {
+    this.translations = makeTranslationStore(db, 'news_translations')
     // github 源退役(剥离为独立「GitHub 趋势」图标,ADR-0028):清掉旧条目池与勾选
     // 状态行的孤儿数据。幂等,每次启动跑一次零成本;不清也无害(feed 只读用户勾选行,
     // VALID_SOURCES 已不含该源),留着只是脏数据。catch 防 DB 失败成 unhandled rejection。
@@ -70,16 +75,16 @@ export class NewsService {
       .execute()
     // 标题译文拼装(ADR-0029):译文表按标题哈希独立于条目池,读侧内存 join(SQLite 无
     // 内置 sha256,不在 SQL 侧算)。无英文源条目直接跳过——纯中文勾选(最常见配置)
-    // 不白付全量哈希 + 一次注定为空的查询(code-review)
-    const zh = items.some((r) => TRANSLATED_SOURCES.has(r.source))
-      ? await this.loadTranslations(items.map((r) => r.title))
+    // 不白付一次注定为空的查询(code-review)
+    const zh = items.some((r) => TRANSLATED_SOURCES.has(r.source as NewsSourceId))
+      ? await this.translations.load(items.map((r) => r.title))
       : new Map<string, string>()
     return {
       items: items.map((r) => ({
         id: r.id,
         source: r.source as NewsSourceId,
         title: r.title,
-        titleZh: zh.get(titleHash(r.title)) ?? null,
+        titleZh: zh.get(r.title) ?? null,
         url: r.url,
         publishedAt: r.published_at ?? null,
       })) satisfies NewsItem[],
@@ -172,7 +177,8 @@ export class NewsService {
         .where('enabled', '=', 1)
         .execute()
       // 英文源补译(ADR-0029)在状态行之后:译制是增值步骤,失败不影响取数成功语义
-      if (TRANSLATED_SOURCES.has(source)) await this.translateMissing(source)
+      // (db 的 source 列写入时经 VALID_SOURCES 校验,读出收窄为 NewsSourceId 安全)
+      if (TRANSLATED_SOURCES.has(source as NewsSourceId)) await this.translateMissing(source)
     } catch (e) {
       if (!retried) {
         const pool = await this.db
@@ -244,40 +250,13 @@ export class NewsService {
         ),
       ]
       if (titles.length === 0) return
-      const known = await this.loadTranslations(titles)
-      // 含换行标题剔出译制集:逐行编号协议里必然配对失败,留在集合里只会每轮重发网关
-      // 计费(code-review);保持英文(宁英勿空),裁剪出窗即自然淘汰
-      const missing = titles.filter((t) => !known.has(titleHash(t)) && !t.includes('\n'))
-      if (missing.length === 0) return
-      const translated = await this.deps.translateTitles(missing)
-      const inserts = translated
-        .map((t, i) => (t == null ? null : { title_hash: titleHash(missing[i]!), translated: t, created_at: nowIso() }))
-        .filter((v): v is { title_hash: string; translated: string; created_at: string } => v != null)
-      if (inserts.length > 0) {
-        await this.db
-          .insertInto('news_translations')
-          .values(inserts)
-          .onConflict((oc) => oc.column('title_hash').doNothing())
-          .execute()
-      }
+      // 含换行标题剔出译制集(域过滤):逐行编号协议里必然配对失败,留在集合里只会
+      // 每轮重发网关计费(code-review);保持英文(宁英勿空),裁剪出窗即自然淘汰。
+      // 骨架(去重/滤缺/批译/null 丢弃/onConflict)收在译文仓 ensure(ADR-0034)
+      await this.translations.ensure(titles, this.deps.translateTitles, (t) => !t.includes('\n'))
     } catch (e) {
       console.warn(`新闻源 ${source} 标题译制失败,保持英文:`, e)
     }
-  }
-
-  /** 标题 → 已有译文(哈希键);in 查询按 500/批(保守低于 SQLite 参数上限)。 */
-  private async loadTranslations(titles: string[]): Promise<Map<string, string>> {
-    const map = new Map<string, string>()
-    const hashes = [...new Set(titles)].map(titleHash)
-    for (let i = 0; i < hashes.length; i += 500) {
-      const rows = await this.db
-        .selectFrom('news_translations')
-        .select(['title_hash', 'translated'])
-        .where('title_hash', 'in', hashes.slice(i, i + 500))
-        .execute()
-      for (const r of rows) map.set(r.title_hash, r.translated)
-    }
-    return map
   }
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {

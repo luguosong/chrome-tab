@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { openDb } from './db'
 import {
   buildNumberedList,
   extractContent,
   makeBatchTranslator,
+  makeTranslationStore,
   modelCandidates,
   parseNumberedTranslations,
+  sha256,
 } from './translate'
 
 /** 机制层测试(ADR-0029 首建编号协议;ADR-0032 起含网关地基与候选链真链路):
@@ -157,5 +160,95 @@ describe('makeBatchTranslator 候选链(真链路 mock fetch;no_key/换候选/40
     expect(models).toEqual(['m1', 'm1'])
     expect(out.slice(0, 20)).toEqual(Array.from({ length: 20 }, () => '一'))
     expect(out.slice(20)).toEqual([null, null, null, null, null])
+  })
+})
+
+// ---- 哈希译文仓(ADR-0034:三张「译文表」存储机制单点;真内存 SQLite)----
+
+describe('makeTranslationStore load/save(原文键;哈希是 implementation)', () => {
+  /** 每用例新库:译文表用 news 侧(三表同形,机制不挑表)。 */
+  function freshStore() {
+    const { db } = openDb(':memory:')
+    return { db, store: makeTranslationStore(db, 'news_translations') }
+  }
+
+  async function seedTitle(db: ReturnType<typeof openDb>['db'], title: string, translated: string) {
+    await db
+      .insertInto('news_translations')
+      .values({ title_hash: sha256(title), translated, created_at: new Date().toISOString() })
+      .execute()
+  }
+
+  it('load:命中的原文返回译文,未命中不入 Map(调用方 ?? null 保持原文)', async () => {
+    const { db, store } = freshStore()
+    await seedTitle(db, 'hello world', '你好,世界')
+    const zh = await store.load(['hello world', 'never stored'])
+    expect(zh.get('hello world')).toBe('你好,世界')
+    expect(zh.has('never stored')).toBe(false)
+  })
+
+  it('load:>500 条分批全量命中 + 入参去重(LOAD_CHUNK=500 边界)', async () => {
+    const { db, store } = freshStore()
+    const texts = Array.from({ length: 501 }, (_, i) => `title-${i}`)
+    await db
+      .insertInto('news_translations')
+      .values(texts.map((t) => ({ title_hash: sha256(t), translated: `译(${t})`, created_at: new Date().toISOString() })))
+      .execute()
+    const zh = await store.load([...texts, ...texts.slice(0, 10)]) // 511 入参、501 唯一
+    expect(zh.size).toBe(501)
+    expect(zh.get('title-500')).toBe('译(title-500)')
+  })
+
+  it('save:幂等入库——同原文二次保存不覆盖已有译文(哈希即身份,终身只译一次)', async () => {
+    const { store } = freshStore()
+    await store.save([{ text: 'a', translated: '甲' }])
+    await store.save([{ text: 'a', translated: '乙(后到不盖)' }])
+    expect((await store.load(['a'])).get('a')).toBe('甲')
+  })
+
+  it('save:空串/纯空白译文丢弃——空哈希行会终身缓存成空白(2026-08-25 事故形态)', async () => {
+    const { store } = freshStore()
+    await store.save([
+      { text: 'blank', translated: '' },
+      { text: 'space', translated: '   ' },
+      { text: 'ok', translated: '好' },
+    ])
+    const zh = await store.load(['blank', 'space', 'ok'])
+    expect(zh.size).toBe(1)
+    expect(zh.get('ok')).toBe('好')
+  })
+
+  it('ensure:滤掉的与已有的不送译;null 译文(本轮未译成)不写,下轮重试', async () => {
+    const { db, store } = freshStore()
+    await seedTitle(db, 'have', '已有')
+    const received: string[][] = []
+    const translate = vi.fn(async (texts: string[]) => {
+      received.push(texts)
+      return ['新译', null] // fresh → '新译';nullout → null 不写
+    })
+    await store.ensure(['have', 'fresh', 'skip-me', 'nullout'], translate, (t) => t !== 'skip-me')
+    expect(received).toEqual([['fresh', 'nullout']]) // 去重、滤除、缺译有序
+    const zh = await store.load(['have', 'fresh', 'nullout', 'skip-me'])
+    expect(zh.get('have')).toBe('已有') // 先入为主不被触碰
+    expect(zh.get('fresh')).toBe('新译')
+    expect(zh.has('nullout')).toBe(false)
+    expect(zh.has('skip-me')).toBe(false)
+  })
+
+  it('ensure:无缺译(全已有或全被滤)→ translator 零调用、零入库', async () => {
+    const { db, store } = freshStore()
+    await seedTitle(db, 'have', '已有')
+    const translate = vi.fn(async (texts: string[]) => texts.map(() => '不该被调用'))
+    await store.ensure(['have', '中文原文'], translate, (t) => t !== '中文原文')
+    expect(translate).not.toHaveBeenCalled()
+  })
+
+  it('三张译文表分派支各字面量列名配对正确(save→load 往返,锁 ADR-0034 判别分派)', async () => {
+    for (const table of ['changelog_translations', 'news_translations', 'trending_translations'] as const) {
+      const { db } = openDb(':memory:')
+      const store = makeTranslationStore(db, table)
+      await store.save([{ text: 'same source text', translated: '同一句原文' }])
+      expect((await store.load(['same source text'])).get('same source text')).toBe('同一句原文')
+    }
   })
 })

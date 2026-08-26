@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import type { Db } from './db'
 import { fetchText } from './common'
 
 /**
@@ -191,3 +192,127 @@ export function makeBatchTranslator(
     return out
   }
 }
+
+// ---- 哈希译文仓(ADR-0034:三张「译文表」存储机制单点)----
+
+/** 三张「译文表」表名(三表同形,仅主键列名异,见 schema.ts)。 */
+export type TranslationTable = 'changelog_translations' | 'news_translations' | 'trending_translations'
+
+/** in 查询分批上限:三域三答案的统一收编(news 500/批先例;361/25 量级单批不变,
+ *  行为中性)。SQLite 单语句参数上限 32766,500 保守低于它。 */
+const LOAD_CHUNK = 500
+
+/** 统一行形状(分派支内以字面量列名换取 Kysely 全类型,零 cast)。 */
+type HashRow = { hash: string; translated: string }
+
+/**
+ * 哈希译文仓(ADR-0034):「译文表」的 load/save/ensure 单点。键 = **原文**——
+ * 哈希派生是 implementation,调用方不再知道(三域 join 从 `zh.get(sha256(x))`
+ * 变 `zh.get(x)`)。空/空白译文不入库(空哈希行会终身缓存成空白,2026-08-25 事故
+ * 形态)。失败上抛:带域上下文(源 id/块标题)的降级 catch 留在各域——同 ADR-0032
+ * 「日志格式是各外层的运维 interface」的裁定。
+ *
+ * 表名↔主键列名配对不走动态列名(Kysely 0.29 的 dynamic.ref 无 .as,联合 builder
+ * 的 select/where 签名互斥)——判别分派各写字面量列名,配对由结构保证,编译器背书。
+ */
+export function makeTranslationStore(db: Db, table: TranslationTable) {
+  const nowIso = () => new Date().toISOString()
+
+  async function loadRows(hashes: string[]): Promise<HashRow[]> {
+    if (table === 'changelog_translations') {
+      const rows = await db
+        .selectFrom('changelog_translations')
+        .select(['block_hash', 'translated'])
+        .where('block_hash', 'in', hashes)
+        .execute()
+      return rows.map((r) => ({ hash: r.block_hash, translated: r.translated }))
+    }
+    if (table === 'news_translations') {
+      const rows = await db
+        .selectFrom('news_translations')
+        .select(['title_hash', 'translated'])
+        .where('title_hash', 'in', hashes)
+        .execute()
+      return rows.map((r) => ({ hash: r.title_hash, translated: r.translated }))
+    }
+    const rows = await db
+      .selectFrom('trending_translations')
+      .select(['desc_hash', 'translated'])
+      .where('desc_hash', 'in', hashes)
+      .execute()
+    return rows.map((r) => ({ hash: r.desc_hash, translated: r.translated }))
+  }
+
+  async function insertRows(rows: Array<{ hash: string; translated: string; created_at: string }>): Promise<void> {
+    if (table === 'changelog_translations') {
+      await db
+        .insertInto('changelog_translations')
+        .values(rows.map((r) => ({ block_hash: r.hash, translated: r.translated, created_at: r.created_at })))
+        .onConflict((oc) => oc.column('block_hash').doNothing())
+        .execute()
+      return
+    }
+    if (table === 'news_translations') {
+      await db
+        .insertInto('news_translations')
+        .values(rows.map((r) => ({ title_hash: r.hash, translated: r.translated, created_at: r.created_at })))
+        .onConflict((oc) => oc.column('title_hash').doNothing())
+        .execute()
+      return
+    }
+    await db
+      .insertInto('trending_translations')
+      .values(rows.map((r) => ({ desc_hash: r.hash, translated: r.translated, created_at: r.created_at })))
+      .onConflict((oc) => oc.column('desc_hash').doNothing())
+      .execute()
+  }
+
+  /** 原文集合 → 已有译文(原文键);入参去重,分批 LOAD_CHUNK/查询。 */
+  async function load(texts: readonly string[]): Promise<Map<string, string>> {
+    const map = new Map<string, string>()
+    // 哈希→原文的反查表:行返回哈希,interface 说话用原文
+    const byHash = new Map([...new Set(texts)].map((t) => [sha256(t), t]))
+    for (let i = 0; i < byHash.size; i += LOAD_CHUNK) {
+      const rows = await loadRows([...byHash.keys()].slice(i, i + LOAD_CHUNK))
+      for (const r of rows) map.set(byHash.get(r.hash)!, r.translated)
+    }
+    return map
+  }
+
+  /** 译文对入库(哈希即身份):onConflict doNothing 幂等,先入为主终身不覆盖;
+   *  空/纯空白译文丢弃(终身缓存防线)。 */
+  async function save(pairs: ReadonlyArray<{ text: string; translated: string }>): Promise<void> {
+    const rows = pairs
+      .filter((p) => p.translated.trim() !== '')
+      .map((p) => ({ hash: sha256(p.text), translated: p.translated, created_at: nowIso() }))
+    if (rows.length === 0) return
+    await insertRows(rows)
+  }
+
+  /**
+   * 批量补译编排(原 news/trending translateMissing 骨架归一):域过滤 → 去重 →
+   * load → 滤缺 → 批译 → null 丢弃入库。null 译文不写,由调用方轮询节奏免费重试。
+   * 失败上抛——带域上下文(源 id/块标题)的降级 catch 留在域,同本文件头注裁定。
+   * filter 必传:调用方总有一个「哪些原文不值得送译」的域口径(news 剔换行标题、
+   * trending 汉字启发式),没有就显式传 () => true。
+   */
+  async function ensure(
+    texts: readonly string[],
+    translate: BatchTranslator,
+    filter: (t: string) => boolean,
+  ): Promise<void> {
+    const candidates = [...new Set(texts.filter(filter))]
+    if (candidates.length === 0) return
+    const known = await load(candidates)
+    const missing = candidates.filter((t) => !known.has(t))
+    if (missing.length === 0) return
+    const translated = await translate(missing)
+    await save(missing.map((t, i) => ({ text: t, translated: translated[i] ?? null })).filter(
+      (p): p is { text: string; translated: string } => p.translated != null,
+    ))
+  }
+
+  return { load, save, ensure }
+}
+
+export type TranslationStore = ReturnType<typeof makeTranslationStore>
