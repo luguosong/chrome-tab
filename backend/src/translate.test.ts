@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { buildNumberedList, parseNumberedTranslations } from './translate'
 
-/** 纯函数接缝测试(ADR-0029):编号配对、漏行/畸行 null、围栏与空行宽容。HTTP 候选链
- * 不单测——同 changelog translateSegment 先例,靠 NewsService 假 deps 集成覆盖。 */
+/** 纯函数接缝测试(ADR-0029 首建,ADR-0030 起跨域复用):编号配对、漏行/畸行 null、
+ * 围栏与空行宽容。HTTP 候选链不单测——同 changelog translateSegment 先例,靠各域
+ * Service 假 deps 集成覆盖。 */
 describe('parseNumberedTranslations', () => {
   it('正常逐条配对', () => {
     expect(parseNumberedTranslations('1. 甲\n2. 乙\n3. 丙', 3)).toEqual(['甲', '乙', '丙'])

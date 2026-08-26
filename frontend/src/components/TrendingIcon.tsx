@@ -61,7 +61,7 @@ export default function TrendingIconBody({
                 href={r.url}
                 target="_blank"
                 rel="noreferrer"
-                title={r.description ? `${r.repo} — ${r.description}` : r.repo}
+                title={(r.descriptionZh ?? r.description) ? `${r.repo} — ${r.descriptionZh ?? r.description}` : r.repo}
                 className="flex min-w-0 items-center justify-between gap-2 rounded-lg px-2 py-1 hover:bg-white/10 transition-colors"
               >
                 <span className="flex min-w-0 items-center gap-1.5">

@@ -9,7 +9,10 @@ import {
   type TrendingSince,
 } from 'chrome-tab-shared'
 import type { AuthEnv } from './auth'
+import { sha256 } from './changelog'
+import type { Db } from './db'
 import { BadRequest, FETCH_TIMEOUT, chromeHeaders, fetchText } from './common'
+import { makeBatchTranslator, type BatchTranslator } from './translate'
 
 /**
  * 「GitHub 趋势」(CONTEXT.md「GitHub 趋势」;ADR-0028):独立单例图标的数据服务。
@@ -18,6 +21,8 @@ import { BadRequest, FETCH_TIMEOUT, chromeHeaders, fetchText } from './common'
  * - 默认组合(今日 + 不限)由 cron 1h 保热,图标卡片读缓存零等待;
  * - 其余组合 GET 时现抓,后端内存缓存 TTL 1h,不落库(低频探察,不值得建表)。
  * 抓取失败降级:有过期缓存则照发(fetchedAt 如实陈旧),无缓存才 500。
+ * 描述译制(ADR-0030):非中文描述(汉字启发式判定)后台批量译成中文、按描述哈希
+ * 落 trending_translations 终身复用——榜单不落库,译文是「原文→中文」永久事实。
  */
 
 /** 内存缓存 TTL;与 cron 保热节奏(1h)同量级。 */
@@ -32,6 +37,20 @@ const SPOKEN_SET = new Set(TRENDING_SPOKEN.map((l) => l.slug))
 
 const queryKey = (q: TrendingQuery) => `${q.since}|${q.language}|${q.spoken}`
 const starNumber = (s: string): number => Number(s.replace(/,/g, '')) || 0
+const nowIso = () => new Date().toISOString()
+
+/** 汉字启发式(ADR-0030):描述含汉字 → 视为中文不译(零依赖零成本);无汉字的日文假名/
+ *  韩文/西里尔等照送译成中文,正合「非中文都译」。误判形态温和——最坏是含汉字的日文
+ *  描述保留原样,而非错译。 */
+const HAS_HAN = /[\u4e00-\u9fff]/
+
+/** 描述译制系统提示(对齐 news prompt 口径,域语境换为项目描述)。 */
+const TRENDING_SYSTEM_PROMPT = `你是专业技术编辑。把用户给出的编号英文项目描述列表逐条译成简体中文,输出同样编号的中文列表。
+严格约束：
+1. 输出与输入逐条对应：每行「序号. 译文」,不添加任何解释、前后缀,也不要代码围栏。
+2. 专有名词、产品名、公司名、代码标识符、库名、API 名保留英文原样。
+3. emoji、数字、定价词（$5、free 等）、命令与代码片段原样保留。
+4. 译文简洁贴近原文长度,不扩写不解释。`
 
 /** 解析 trending 页 HTML(纯函数,fixture 见 trending.test.ts)。 */
 export function parseTrending(html: string): TrendingRepo[] {
@@ -54,6 +73,8 @@ export function parseTrending(html: string): TrendingRepo[] {
       repo: href.replace(/^\//, ''),
       url: `https://github.com${href}`,
       description,
+      // 占位 null:wire 出口恒经 toResponse 覆盖(get 是唯一读路径),解析层不碰译制
+      descriptionZh: null,
       language,
       languageColor,
       stars: starNumber($(el).find('a[href$="/stargazers"]').text()),
@@ -63,12 +84,17 @@ export function parseTrending(html: string): TrendingRepo[] {
   return out
 }
 
-/** deps 注入 seam(测试塞假实现,同 NewsDeps 范式;trending 只需文本抓取)。 */
+/** deps 注入 seam(测试塞假实现,同 NewsDeps 范式)。 */
 export interface TrendingDeps {
   fetchText: (url: string, timeoutMs: number, init?: RequestInit) => Promise<string>
+  /** 描述批量译制(ADR-0030;机制见 translate.ts,null = 该条保持原文)。 */
+  translateDescriptions: BatchTranslator
 }
 
-export const prodTrendingDeps = (): TrendingDeps => ({ fetchText })
+export const prodTrendingDeps = (): TrendingDeps => ({
+  fetchText,
+  translateDescriptions: makeBatchTranslator(TRENDING_SYSTEM_PROMPT, 'trending-translate'),
+})
 
 async function fetchTrending(deps: TrendingDeps, q: TrendingQuery): Promise<TrendingRepo[]> {
   const params = new URLSearchParams()
@@ -92,20 +118,23 @@ type Entry = { repos: TrendingRepo[]; fetchedAt: number }
 export class TrendingService {
   private readonly cache = new Map<string, Entry>()
 
-  constructor(private readonly deps: TrendingDeps) {}
+  constructor(private readonly db: Db, private readonly deps: TrendingDeps) {}
 
-  /** 读组合:缓存未过期直接回;过期现抓(失败回落过期缓存)。 */
+  /** 读组合:缓存未过期直接回;过期现抓(失败回落过期缓存)。抓取成功即后台补译
+   * (ADR-0030 fire-and-forget)——首批响应先回原文,译文就位后靠前端既有刷新节奏
+   * (staleTime 5min + 聚焦重拉)自然到达,缓存命中路径每次 join 译文表即见。 */
   async get(q: TrendingQuery): Promise<TrendingResponse> {
     const key = queryKey(q)
     const hit = this.cache.get(key)
-    if (hit && Date.now() - hit.fetchedAt < CACHE_TTL_MS) return toResponse(hit)
+    if (hit && Date.now() - hit.fetchedAt < CACHE_TTL_MS) return this.toResponse(hit)
     try {
       const entry: Entry = { repos: await fetchTrending(this.deps, q), fetchedAt: Date.now() }
       this.cache.set(key, entry)
-      return toResponse(entry)
+      void this.translateMissingDescriptions(entry.repos)
+      return await this.toResponse(entry)
     } catch (e) {
       // 降级:陈旧数据好过没有(tile 有 fetchedAt 如实显示鲜度);无缓存才上抛 500
-      if (hit) return toResponse(hit)
+      if (hit) return await this.toResponse(hit)
       throw e
     }
   }
@@ -114,12 +143,68 @@ export class TrendingService {
   async refreshDefault(): Promise<void> {
     await this.get({ since: 'daily', language: '', spoken: '' })
   }
-}
 
-const toResponse = (e: Entry): TrendingResponse => ({
-  repos: e.repos,
-  fetchedAt: new Date(e.fetchedAt).toISOString(),
-})
+  /** 描述译文拼装(读侧内存 join,同 news feed 范式;25 哈希一次 in 查询,毫秒级)。 */
+  private async toResponse(e: Entry): Promise<TrendingResponse> {
+    const descriptions = e.repos.map((r) => r.description).filter((d): d is string => d != null)
+    const zh =
+      descriptions.length > 0 ? await this.loadTranslations(descriptions) : new Map<string, string>()
+    return {
+      repos: e.repos.map((r) => ({
+        ...r,
+        descriptionZh: r.description ? (zh.get(sha256(r.description)) ?? null) : null,
+      })),
+      fetchedAt: new Date(e.fetchedAt).toISOString(),
+    }
+  }
+
+  /** 非中文描述补译(ADR-0029 新闻范式移植):汉字启发式过滤 → 扫缺译 → 批量译 →
+   *  写哈希表。整体 try 吞错:译制失败不冒泡进 get——那里会误伤正常取数路径。
+   *  失败哈希未写,下次该组合缓存过期重抓(或 cron 1h)自然重试。 */
+  private async translateMissingDescriptions(repos: TrendingRepo[]): Promise<void> {
+    try {
+      const descriptions = [
+        ...new Set(
+          repos
+            .map((r) => r.description)
+            .filter((d): d is string => d != null)
+            .filter((d) => !HAS_HAN.test(d)),
+        ),
+      ]
+      if (descriptions.length === 0) return
+      const known = await this.loadTranslations(descriptions)
+      const missing = descriptions.filter((d) => !known.has(sha256(d)))
+      if (missing.length === 0) return
+      const translated = await this.deps.translateDescriptions(missing)
+      const inserts = translated
+        .map((t, i) => (t == null ? null : { desc_hash: sha256(missing[i]!), translated: t, created_at: nowIso() }))
+        .filter((v): v is { desc_hash: string; translated: string; created_at: string } => v != null)
+      if (inserts.length > 0) {
+        await this.db
+          .insertInto('trending_translations')
+          .values(inserts)
+          .onConflict((oc) => oc.column('desc_hash').doNothing())
+          .execute()
+      }
+    } catch (e) {
+      console.warn('趋势描述译制失败,保持原文:', e)
+    }
+  }
+
+  /** 描述 → 已有译文(哈希键);组合 25 条量级,单次 in 查询即足(无 news 500/批分片需求)。 */
+  private async loadTranslations(descriptions: string[]): Promise<Map<string, string>> {
+    const rows = await this.db
+      .selectFrom('trending_translations')
+      .select(['desc_hash', 'translated'])
+      .where(
+        'desc_hash',
+        'in',
+        [...new Set(descriptions)].map(sha256),
+      )
+      .execute()
+    return new Map(rows.map((r) => [r.desc_hash, r.translated] as const))
+  }
+}
 
 // ---- HTTP 路由 ----
 

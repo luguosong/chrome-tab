@@ -13,7 +13,7 @@ import { useTrending } from '../hooks/useTrending'
  * 口语语言 / 编程语言 / 周期**三行胶囊**正交筛选(单选互斥,role=group + aria-pressed,
  * 与 ModelModal 种类胶囊同语汇——胶囊 = 叠加筛条件,区别于 tab 的切视图)。筛选即
  * queryKey:切组合自动按需现拉(后端内存缓存 1h,非默认组合首拉 ~2.4s)。
- * 行 = repo 名 + 总 star / 语言色点·语言名·描述截断 + 周期内增量,点行新开 tab。
+ * 行 = repo 名 + 总 star / 描述(完整换行永不省略,非中文后台译中、悬停原文)/ 语言色点·语言名 + 周期内增量,点行新开 tab。
  * 不持久化筛选状态:每次打开回到默认 Today 视图(trending 语义即「此刻什么热」)。
  * 容器:fixed 遮罩 + 居中玻璃面板;Esc/点遮罩关闭(ModelModal 同款)。
  */
@@ -105,6 +105,17 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
                       ★ {r.stars.toLocaleString('en-US')}
                     </span>
                   </span>
+                  {/* 描述独立成行、完整换行:它是了解项目的第一途径,永不省略。
+                      层级仿 GitHub Trending:名字 → 描述 → 语言/增量元数据行。
+                      译文(ADR-0030)优先展示,悬停 title 放英文原文供核对(同新闻范式)。 */}
+                  {(r.descriptionZh ?? r.description) && (
+                    <p
+                      className="text-xs leading-snug text-white/60"
+                      title={r.descriptionZh ? (r.description ?? undefined) : undefined}
+                    >
+                      {r.descriptionZh ?? r.description}
+                    </p>
+                  )}
                   <span className="flex min-w-0 items-baseline justify-between gap-3">
                     <span className="flex min-w-0 items-baseline gap-1.5 text-xs text-white/50">
                       {r.languageColor && (
@@ -115,11 +126,6 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
                         />
                       )}
                       {r.language && <span className="shrink-0">{r.language}</span>}
-                      {r.description && (
-                        <span className="min-w-0 truncate" title={r.description}>
-                          {r.language && '· '}{r.description}
-                        </span>
-                      )}
                     </span>
                     <span className="shrink-0 font-mono text-xs text-accent">
                       +{r.periodStars.toLocaleString('en-US')} {TRENDING_SINCE_LABELS[since]}

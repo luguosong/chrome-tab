@@ -217,6 +217,15 @@ CREATE TABLE IF NOT EXISTS news_translations (
     translated    TEXT NOT NULL,
     created_at    TEXT NOT NULL
 );
+-- 趋势仓库描述译文(ADR-0030):主键 = 描述原文 SHA-256,哈希即身份——repo 改描述
+-- 即新键自然重译,改回旧值免费命中;孤儿行(描述改版后的旧译文)不清理,量级无害
+-- (同 news_translations 口径)。榜单数据本身仍内存缓存不落库(ADR-0028):落库的
+-- 只是「原文→中文」永久事实,与榜单生命周期无关——热项目连日在榜,终身只译一次。
+CREATE TABLE IF NOT EXISTS trending_translations (
+    desc_hash    TEXT PRIMARY KEY NOT NULL,
+    translated   TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+);
 `
 
 /** openDb 打开连接后即执行;幂等(IF NOT EXISTS + 增量加列)。 */
@@ -433,6 +442,12 @@ export interface NewsTranslationsTable {
   created_at: string
 }
 
+export interface TrendingTranslationsTable {
+  desc_hash: string
+  translated: string
+  created_at: string
+}
+
 export interface SchemaDatabase {
   users: UsersTable
   pages: PagesTable
@@ -453,4 +468,5 @@ export interface SchemaDatabase {
   news_sources: NewsSourcesTable
   news_items: NewsItemsTable
   news_translations: NewsTranslationsTable
+  trending_translations: TrendingTranslationsTable
 }

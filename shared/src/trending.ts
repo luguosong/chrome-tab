@@ -58,6 +58,9 @@ export type TrendingRepo = {
   repo: string
   url: string
   description: string | null
+  /** 描述中译(ADR-0030:无汉字即视为非中文送 LLM 译制,译文按描述哈希终身复用);
+   *  null = 未译/译制失败/无 Key/原文即中文/无描述。 */
+  descriptionZh: string | null
   /** 编程语言名(英文原生,如 JavaScript);null = 未标语言。 */
   language: string | null
   /** linguist 语言色(GitHub 行内色点同源);null = 未标/未知语言。 */

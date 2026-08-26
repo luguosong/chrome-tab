@@ -40,8 +40,9 @@ const modelTrackingService = new ModelTrackingService(db, prodModelDeps(), proce
 await modelTrackingService.init()
 // 新闻(CONTEXT.md「新闻」,ADR-0027):匿名抓取无凭据,勾选与降级口径见 news.ts
 const newsService = new NewsService(db, prodNewsDeps())
-// GitHub 趋势(CONTEXT.md「GitHub 趋势」,ADR-0028):无凭据匿名抓取,内存缓存不落库
-const trendingService = new TrendingService(prodTrendingDeps())
+// GitHub 趋势(CONTEXT.md「GitHub 趋势」,ADR-0028):无凭据匿名抓取,榜单内存缓存
+// 不落库;描述译文按哈希落 trending_translations 终身复用(ADR-0030)
+const trendingService = new TrendingService(db, prodTrendingDeps())
 const app = createApp({
   db,
   cookieSecure,

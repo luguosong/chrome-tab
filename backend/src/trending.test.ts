@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { openDb } from './db'
 import { TrendingService, parseTrending, type TrendingDeps } from './trending'
 
 /** 解析层 fixture 测试(锚点 2026-08-26 实抓 github.com/trending 核验;class 精简保留语义)。 */
@@ -22,6 +23,14 @@ const ARTICLE_MINIMAL =
   '<span class="d-inline-block float-sm-right">3 stars this week</span>' +
   '</article>'
 
+/** 英文描述条目(译制链 fixture;ADR-0030)。 */
+const ARTICLE_EN =
+  '<article class="Box-row">' +
+  '<h2><a href="/en/repo">en / repo</a></h2>' +
+  '<p>A fast build tool</p>' +
+  '<span class="d-inline-block float-sm-right">5 stars today</span>' +
+  '</article>'
+
 const page = (...articles: string[]) =>
   `<main><div class="Box"><div data-hpc="">${articles.join('')}</div></div></main>`
 
@@ -33,6 +42,7 @@ describe('parseTrending', () => {
         repo: 'foo/bar',
         url: 'https://github.com/foo/bar',
         description: '一个描述',
+        descriptionZh: null,
         language: 'JavaScript',
         languageColor: '#f1e05a',
         stars: 19349,
@@ -48,6 +58,7 @@ describe('parseTrending', () => {
         repo: 'baz/qux',
         url: 'https://github.com/baz/qux',
         description: null,
+        descriptionZh: null,
         language: null,
         languageColor: null,
         stars: 12,
@@ -72,13 +83,15 @@ describe('TrendingService 缓存', () => {
         calls.push(url)
         return page(ARTICLE_FULL)
       },
+      translateDescriptions: async () => [],
     }
     return { deps, calls }
   }
+  const freshDb = () => openDb(':memory:').db
 
   it('TTL 内重复读不重复抓(默认组合命中 cron 保热缓存)', async () => {
     const { deps, calls } = makeDeps()
-    const svc = new TrendingService(deps)
+    const svc = new TrendingService(freshDb(), deps)
     const q = { since: 'daily', language: '', spoken: '' } as const
     await svc.get(q)
     const again = await svc.get(q)
@@ -88,7 +101,7 @@ describe('TrendingService 缓存', () => {
 
   it('组合不同 key 不同(筛选维度进抓取 URL)', async () => {
     const { deps, calls } = makeDeps()
-    const svc = new TrendingService(deps)
+    const svc = new TrendingService(freshDb(), deps)
     await svc.get({ since: 'weekly', language: 'python', spoken: 'zh' })
     expect(calls[0]).toBe('https://github.com/trending?since=weekly&language=python&spoken_language_code=zh')
   })
@@ -97,7 +110,7 @@ describe('TrendingService 缓存', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-26T08:00:00Z'))
     const { deps, calls } = makeDeps()
-    const svc = new TrendingService(deps)
+    const svc = new TrendingService(freshDb(), deps)
     const q = { since: 'daily', language: '', spoken: '' } as const
     const first = await svc.get(q)
     expect(first.fetchedAt).toBe('2026-08-26T08:00:00.000Z')
@@ -112,5 +125,68 @@ describe('TrendingService 缓存', () => {
     // 无缓存组合:失败上抛(路由 500,前端重试)
     await expect(svc.get({ since: 'monthly', language: '', spoken: '' })).rejects.toThrow('风控')
     expect(calls).toHaveLength(1)
+  })
+})
+
+describe('TrendingService 描述译制(ADR-0030)', () => {
+  /** fire-and-forget 补译落表的小轮询(真实 timer,本 describe 无 fake timers)。 */
+  const until = async (cond: () => boolean | Promise<boolean>) => {
+    for (let i = 0; i < 200 && !(await cond()); i++) await new Promise((r) => setTimeout(r, 5))
+    expect(await cond()).toBe(true)
+  }
+
+  const makeDeps = (html: string) => {
+    const translationCalls: string[][] = []
+    const deps: TrendingDeps = {
+      fetchText: async () => html,
+      translateDescriptions: async (texts) => {
+        translationCalls.push(texts)
+        return texts.map((t) => `译(${t})`)
+      },
+    }
+    return { deps, translationCalls }
+  }
+  const freshDb = () => openDb(':memory:').db
+  const zhRows = async (db: ReturnType<typeof freshDb>) =>
+    (await db.selectFrom('trending_translations').selectAll().execute()).length
+
+  it('英文描述后台补译:首批先回原文,落表后缓存命中路径 join 出译文;中文描述不送译', async () => {
+    const { deps, translationCalls } = makeDeps(page(ARTICLE_FULL, ARTICLE_EN))
+    const db = freshDb()
+    const svc = new TrendingService(db, deps)
+    const first = await svc.get({ since: 'daily', language: '', spoken: '' })
+    // 汉字启发式:中文条 descriptionZh null 且不进译制集;英文条首批未及译文(null)
+    expect(first.repos.map((r) => [r.description, r.descriptionZh])).toEqual([
+      ['一个描述', null],
+      ['A fast build tool', null],
+    ])
+    expect(translationCalls).toEqual([['A fast build tool']])
+    await until(async () => (await zhRows(db)) > 0)
+    const second = await svc.get({ since: 'daily', language: '', spoken: '' })
+    expect(second.repos[1]!.descriptionZh).toBe('译(A fast build tool)')
+    expect(second.repos[0]!.descriptionZh).toBeNull()
+  })
+
+  it('同描述跨组合哈希复用,不重译', async () => {
+    const { deps, translationCalls } = makeDeps(page(ARTICLE_EN))
+    const db = freshDb()
+    const svc = new TrendingService(db, deps)
+    await svc.get({ since: 'daily', language: '', spoken: '' })
+    await until(async () => (await zhRows(db)) > 0)
+    await svc.get({ since: 'weekly', language: '', spoken: '' })
+    expect(translationCalls).toHaveLength(1)
+  })
+
+  it('译制器抛错整体吞掉:get 正常返回原文,不污染取数路径', async () => {
+    const deps: TrendingDeps = {
+      fetchText: async () => page(ARTICLE_EN),
+      translateDescriptions: async () => {
+        throw new Error('网关炸了')
+      },
+    }
+    const svc = new TrendingService(freshDb(), deps)
+    const res = await svc.get({ since: 'daily', language: '', spoken: '' })
+    expect(res.repos[0]!.description).toBe('A fast build tool')
+    expect(res.repos[0]!.descriptionZh).toBeNull()
   })
 })

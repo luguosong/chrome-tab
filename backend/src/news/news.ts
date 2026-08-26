@@ -142,7 +142,11 @@ export class NewsService {
       .select('source')
       .where('enabled', '=', 1)
       .execute()
-    for (const source of new Set(rows.map((r) => r.source))) {
+    const sources = [...new Set(rows.map((r) => r.source))]
+    // cron 活性打点(2026-08-26 事故:部署后零译制日志,无从区分「没到 cron 点/没执行/
+    // 静默跳过」,只能靠时间线推理);48 行/天,取数失败另有 error,成功以 DB 状态行为准
+    console.log(`[news] 轮询开始:${sources.length} 源`)
+    for (const source of sources) {
       await this.pollSource(source)
     }
   }
