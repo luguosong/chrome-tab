@@ -51,6 +51,25 @@ export function splitBlocks(markdown: string): Blocks {
 
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex')
 
+/** 版本块再切段(2026-08-26):段 = 连续整行(行是原子,不撕开),总长 ≤ maxChars;
+ *  单行自身超限独占一段。动机:非流式译制耗时 ∝ 输出长度,2.1.246 块 9.2k 字符单请求
+ *  生成 >60s,7 候选全超时;切段后单请求输出 ~1/N(~700 字符),稳离 60s 上限,
+ *  段失败换候选只重试该段。段边界在行尾,译文段拼回即整块译文。 */
+export function splitSegments(block: string, maxChars = 2000): string[] {
+  if (block.length <= maxChars) return [block]
+  const segments: string[] = []
+  let cur = ''
+  for (const line of block.split(/(?<=\n)/)) {
+    if (cur && cur.length + line.length > maxChars) {
+      segments.push(cur)
+      cur = ''
+    }
+    cur += line
+  }
+  if (cur) segments.push(cur)
+  return segments
+}
+
 /** 无原文源(如 Codex,changelogUrl 缺省)的版本流合成:npm time 表 → 每版本一行 `## `
  *  标题空块的 markdown,下游 splitBlocks / 前端 parseChangelog 照常切出版本列表(块内无
  *  条目、也无从译制)。剔 created/modified 元键与 prerelease(alpha 比稳定版多且新,进榜
@@ -386,50 +405,61 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
     fetchReleaseInfo,
     translate: async (block, onPhase) => {
       if (!apiKey) return null // Key 缺失:Service 层据此透传英文原文
-      let lastErr: unknown
-      for (const [i, model] of models.entries()) {
-        onPhase?.(model, i + 1, models.length)
-        const startedAt = Date.now()
-        // 每次尝试一行结果日志(线上排障:模型/序号/耗时/status+body/走向,全部收容器 stdout)
-        const log = (outcome: string, extra = '') =>
-          console.warn(`[changelog-translate] ${source} 候选 ${i + 1}/${models.length} ${model} ${outcome}(${Date.now() - startedAt}ms)${extra}`)
-        try {
-          const resp = await fetchText(`${LLM_BASE_URL}/chat/completions`, 60_000, {
-            method: 'POST',
-            headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-            body: JSON.stringify({
-              model,
-              messages: [
-                { role: 'system', content: SYSTEM_PROMPT },
-                { role: 'user', content: block },
-              ],
-            }),
-          })
-          // 200 但拿不到译文(空补全/内容过滤/非 JSON 响应体)也按候选失效换下一个——
-          // 2026-08-25 线上即此形态静默失败:后台有 200 调用记录、无后续候选、译文缺位。
-          let content: string | null = null
+      const segments = splitSegments(block)
+      /** 单段走候选链:候选失效换下一个,全链失效上抛(整块失败,Service 层 warn 降级)。 */
+      const translateSegment = async (seg: string, si: number): Promise<string> => {
+        let lastErr: unknown
+        for (const [i, model] of models.entries()) {
+          onPhase?.(model, i + 1, models.length)
+          const startedAt = Date.now()
+          // 每次尝试一行结果日志(线上排障:段/模型/序号/耗时/status+body/走向,全部收容器 stdout)
+          const log = (outcome: string, extra = '') =>
+            console.warn(`[changelog-translate] ${source} 段${si + 1}/${segments.length} 候选 ${i + 1}/${models.length} ${model} ${outcome}(${Date.now() - startedAt}ms)${extra}`)
           try {
-            content = extractContent(JSON.parse(resp))
-          } catch {
-            content = null
+            const resp = await fetchText(`${LLM_BASE_URL}/chat/completions`, 60_000, {
+              method: 'POST',
+              headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+              body: JSON.stringify({
+                model,
+                messages: [
+                  { role: 'system', content: SYSTEM_PROMPT },
+                  { role: 'user', content: seg },
+                ],
+              }),
+            })
+            // 200 但拿不到译文(空补全/内容过滤/非 JSON 响应体)也按候选失效换下一个——
+            // 2026-08-25 线上即此形态静默失败:后台有 200 调用记录、无后续候选、译文缺位。
+            let content: string | null = null
+            try {
+              content = extractContent(JSON.parse(resp))
+            } catch {
+              content = null
+            }
+            if (content == null) {
+              lastErr = new Error(`HTTP 200 但响应无 content:${resp.slice(0, 200)}`)
+              log(`失败: ${lastErr}`, ',换下一候选')
+              continue
+            }
+            log(`成功: ${content.length} 字符`)
+            return content
+          } catch (e) {
+            if (!isCandidateExhausted(e)) {
+              log(`失败: ${e}`, ',换模型无益,放弃本次译制')
+              throw e
+            }
+            lastErr = e
+            log(`失败: ${e} ${(e as { body?: string }).body ?? ''}`, ',换下一候选')
           }
-          if (content == null) {
-            lastErr = new Error(`HTTP 200 但响应无 content:${resp.slice(0, 200)}`)
-            log(`失败: ${lastErr}`, ',换下一候选')
-            continue
-          }
-          log(`成功: ${content.length} 字符`)
-          return content
-        } catch (e) {
-          if (!isCandidateExhausted(e)) {
-            log(`失败: ${e}`, ',换模型无益,放弃本次译制')
-            throw e
-          }
-          lastErr = e
-          log(`失败: ${e} ${(e as { body?: string }).body ?? ''}`, ',换下一候选')
         }
+        throw lastErr
       }
-      throw lastErr
+      // 串行逐段(free 渠道限流敏感,不并发);非末段译文补尾换行——LLM 偶尔丢,缺了会与下段粘行
+      // (末段不补:单段块行为不变,块级兜底在 assemble)
+      const out: string[] = []
+      for (const [si, seg] of segments.entries()) out.push(await translateSegment(seg, si))
+      return out
+        .map((t, i) => (i < out.length - 1 && !t.endsWith('\n') ? `${t}\n` : t))
+        .join('')
     },
   }
 }

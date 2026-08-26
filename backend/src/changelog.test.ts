@@ -10,6 +10,7 @@ import {
   modelCandidates,
   prodChangelogDeps,
   splitBlocks,
+  splitSegments,
   synthesizeVersionsMarkdown,
   type ChangelogDeps,
   type TranslatePhase,
@@ -591,6 +592,90 @@ describe('translate 候选链(候选失效=403/404/429/5xx/no_available_channel/
       ['m1', 1, 2],
       ['m2', 2, 2],
     ])
+  })
+})
+
+// ---- 分段译制(2026-08-26:2.1.246 块 9.2k 字符,非流式单请求生成 >60s,7 候选全超时)----
+
+describe('splitSegments(段=行边界,单请求输出压小,稳离 60s 超时)', () => {
+  it('不超过上限整块一段,原样返回', () => {
+    expect(splitSegments('## 1.0\n- x\n')).toEqual(['## 1.0\n- x\n'])
+  })
+
+  it('超上限按行切段:每段 ≤上限、行不撕开、标题行留首段', () => {
+    const line = `- ${'a'.repeat(98)}\n` // 101 字符/行
+    const block = `## 9.9\n${line.repeat(20)}` // 7 + 2020 = 2027 > 2000
+    const segs = splitSegments(block)
+    expect(segs.length).toBe(2)
+    expect(segs[0]).toBe(`## 9.9\n${line.repeat(19)}`)
+    expect(segs[1]).toBe(line)
+    expect(segs.every((s) => s.length <= 2000)).toBe(true)
+  })
+
+  it('单行自身超上限:独占一段不撕行(前段先按上限封住)', () => {
+    const huge = `- ${'a'.repeat(3000)}\n`
+    expect(splitSegments(`## 1.0\n${huge}- small\n`)).toEqual(['## 1.0\n', huge, '- small\n'])
+  })
+})
+
+describe('translate 分段(大块逐段请求,段失败换候选只重试该段)', () => {
+  const realFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    delete process.env.AIHUBMIX_API_KEY
+    delete process.env.CHANGELOG_LLM_MODEL
+  })
+
+  /** mockFetchSeq 的分段版:另记录每次请求的 user content(断言段大小与内容)。 */
+  function mockFetchSeqLog(seq: Array<{ status?: number; body?: unknown; timeout?: boolean }>): {
+    models: string[]
+    users: string[]
+  } {
+    const models: string[] = []
+    const users: string[] = []
+    let i = 0
+    globalThis.fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body))
+      models.push(body.model)
+      users.push(body.messages[1].content)
+      const s = seq[Math.min(i++, seq.length - 1)]!
+      if (s.timeout) throw new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+      return new Response(JSON.stringify(s.body), { status: s.status ?? 200 })
+    }) as typeof fetch
+    return { models, users }
+  }
+
+  const NO_CHANNEL = { status: 400, body: { error: { code: 'no_available_channel' } } }
+  const line = (tag: string) => `- ${'a'.repeat(96)} ${tag}\n` // 102 字符/行
+  const ok = (content: string) => ({ status: 200, body: { choices: [{ message: { content } }] } })
+
+  /** 21 行 × 102 字符 + 标题 = 2149 > 2000 → 恰切 2 段;段内容断言委托 splitSegments 自身。 */
+  const bigBlock = `## 9.9\n${Array.from({ length: 21 }, (_, i) => line(`s${i}`)).join('')}`
+  const segs = splitSegments(bigBlock)
+
+  it('大块 → 多次请求,每次 user = splitSegments 的段,译文按段序拼接(段间补换行防粘行)', async () => {
+    process.env.AIHUBMIX_API_KEY = 'k'
+    process.env.CHANGELOG_LLM_MODEL = 'm1'
+    const { models, users } = mockFetchSeqLog([ok('段一译文'), ok('段二译文')])
+    await expect(prodChangelogDeps().translate(bigBlock)).resolves.toBe('段一译文\n段二译文')
+    expect(models).toEqual(['m1', 'm1'])
+    expect(users).toEqual(segs)
+  })
+
+  it('段 2 首候选 no_available_channel → 换候选只重试该段,段 1 译文不重译', async () => {
+    process.env.AIHUBMIX_API_KEY = 'k'
+    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
+    const { models } = mockFetchSeqLog([ok('段一'), NO_CHANNEL, ok('段二')])
+    await expect(prodChangelogDeps().translate(bigBlock)).resolves.toBe('段一\n段二')
+    expect(models).toEqual(['m1', 'm1', 'm2'])
+  })
+
+  it('某段全链候选失效 → 整块 reject(Service 层 warn 降级英文,语义同前)', async () => {
+    process.env.AIHUBMIX_API_KEY = 'k'
+    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
+    const { models } = mockFetchSeqLog([ok('段一'), NO_CHANNEL, NO_CHANNEL])
+    await expect(prodChangelogDeps().translate(bigBlock)).rejects.toThrow('HTTP 400')
+    expect(models).toEqual(['m1', 'm1', 'm2'])
   })
 })
 
