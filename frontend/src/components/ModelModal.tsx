@@ -1,5 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import type { ModelEvaluationsStatus, ModelProviderId, TrackedModel } from 'chrome-tab-shared'
+import type {
+  ModelEvaluationsStatus,
+  ModelKind,
+  ModelProviderId,
+  TrackedModel,
+} from 'chrome-tab-shared'
 import { useModelArchive } from '../hooks/useModelArchive'
 import { timeAgo } from '../lib/timeAgo'
 import {
@@ -20,11 +25,13 @@ import {
 
 /**
  * 模型追踪详情 Modal(见 CONTEXT.md「模型追踪」,ADR-0022「更多」标头唯一入口):
- * 「全部」+ 各「跟踪厂家」tab;模型行在**当前 Modal 内就地展开**(摘要 + 限额/训练
- * 参数/价格/评测四张规格卡——值按语义着色,动态时间线与信源全宽,不套第二层 Modal),
- * 24h 新动态行首红点(时间驱动,无已读概念)。信源失败保留最后成功结果并标记陈旧
- * (CONTEXT.md「模型档案」)——头部给一行陈旧提示。容器:fixed 遮罩 + 居中玻璃面板;
- * Esc/点遮罩关闭,tab 为 TodoModal 同款下划线式。
+ * 「全部」+ 各「跟踪厂家」tab;tab 下挂一行「模型种类」过滤胶囊(与厂家 tab 正交
+ * AND 组合,单选互斥;种类词着色与行内种类词同纲——颜色即导航)。模型行在**当前
+ * Modal 内就地展开**(摘要 + 限额/训练参数/价格/评测四张规格卡——值按语义着色,
+ * 动态时间线与信源全宽,不套第二层 Modal),24h 新动态行首红点(时间驱动,无已读
+ * 概念)。信源失败保留最后成功结果并标记陈旧(CONTEXT.md「模型档案」)——头部给
+ * 一行陈旧提示。容器:fixed 遮罩 + 居中玻璃面板;Esc/点遮罩关闭,tab 为 TodoModal
+ * 同款下划线式(过滤行用胶囊形态以区分「切视图/筛条件」两个维度)。
  */
 /** tab 维度 = 全部 + 各跟踪厂家(自 PROVIDER_LABELS 派生,厂家票扩 shared 时 tab 随动)。 */
 type Tab = 'all' | ModelProviderId
@@ -36,9 +43,21 @@ const TABS: { key: Tab; label: string }[] = [
   })),
 ]
 
+/** 种类过滤维度 = 全部种类 + 八类(自 MODEL_KIND_LABELS 派生,种类票扩时随动)。 */
+type KindFilter = 'all' | ModelKind
+const KIND_FILTERS: { key: KindFilter; label: string }[] = [
+  { key: 'all', label: '全部种类' },
+  ...(Object.keys(MODEL_KIND_LABELS) as ModelKind[]).map((k) => ({
+    key: k,
+    label: MODEL_KIND_LABELS[k],
+  })),
+]
+
 export default function ModelModal({ onClose }: { onClose: () => void }) {
   const { data, isError, refetch, isFetching } = useModelArchive()
   const [tab, setTab] = useState<Tab>('all')
+  /** 种类过滤(正交维度):切厂家 tab 时保留——用户在组合浏览,不代为重置。 */
+  const [kindFilter, setKindFilter] = useState<KindFilter>('all')
   /** 就地展开的模型行(同时只开一行,展开/收起即点击行头)。 */
   const [expandedId, setExpandedId] = useState<number | null>(null)
 
@@ -61,7 +80,7 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
     >
       <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
 
-      <div className="glass-panel glass-panel-readable relative w-full max-w-lg rounded-3xl p-6 max-h-[80vh] overflow-y-auto modal-scroll animate-pop-in">
+      <div className="glass-panel glass-panel-readable relative w-full max-w-2xl rounded-3xl p-6 max-h-[80vh] overflow-y-auto modal-scroll animate-pop-in">
         <button
           type="button"
           onClick={onClose}
@@ -96,6 +115,39 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
           ))}
         </div>
 
+        {/* 种类过滤胶囊:单选互斥,与厂家 tab AND 组合。不是 tab(不切换视图,
+            只叠加过滤条件)——role=group + aria-pressed。种类词着色与行内种类词
+            同纲(MODEL_KIND_COLOR_CLASSES):chip 与行内同色互证,颜色即导航。 */}
+        <div
+          role="group"
+          aria-label="按模型种类过滤"
+          className="flex gap-1.5 overflow-x-auto modal-scroll -mt-1 mb-2 pb-1"
+        >
+          {KIND_FILTERS.map(({ key, label }) => {
+            const active = kindFilter === key
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setKindFilter(key)}
+                className={
+                  'shrink-0 rounded-full border px-2.5 py-0.5 text-meta transition ' +
+                  (active
+                    ? 'border-white/25 bg-white/15 text-white/90'
+                    : 'border-white/15 text-white/60 hover:border-white/30 hover:text-white/85')
+                }
+              >
+                <span
+                  className={key === 'all' ? undefined : MODEL_KIND_COLOR_CLASSES[key] || undefined}
+                >
+                  {label}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+
         {isError ? (
           <div className="flex items-center gap-3">
             <span className="text-sm text-white/60">档案刷新失败</span>
@@ -127,8 +179,16 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
               // filter 返回新数组,直接原位排(不动 React Query 缓存)——上线发布时间优先
               //(2026-08-26 轴改),防「全部」被单一厂家的入库序垄断(2026-08-25 智谱 44 模型连排数屏)
               models={data.models
-                .filter((m) => tab === 'all' || m.provider === tab)
+                .filter(
+                  (m) =>
+                    (tab === 'all' || m.provider === tab) &&
+                    (kindFilter === 'all' || m.kind === kindFilter),
+                )
                 .sort(compareModelsByRelease)}
+              // 组合过滤可命中空集(如 智谱×视频生成),与档案真空区分文案
+              emptyText={
+                tab !== 'all' || kindFilter !== 'all' ? '当前筛选下暂无模型' : undefined
+              }
               evaluationStatus={data.evaluations}
               expandedId={expandedId}
               onToggle={(id) => setExpandedId((cur) => (cur === id ? null : id))}
@@ -146,14 +206,17 @@ function ModelList({
   evaluationStatus,
   expandedId,
   onToggle,
+  emptyText,
 }: {
   models: TrackedModel[]
   evaluationStatus: ModelEvaluationsStatus
   expandedId: number | null
   onToggle: (id: number) => void
+  /** 空态文案:过滤空集与档案真空由调用方区分,默认为档案真空。 */
+  emptyText?: string
 }) {
   if (models.length === 0) {
-    return <div className="text-sm text-white/50 py-6 text-center">暂无跟踪模型</div>
+    return <div className="text-sm text-white/50 py-6 text-center">{emptyText ?? '暂无跟踪模型'}</div>
   }
   return (
     <ul className="space-y-1">
