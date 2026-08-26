@@ -1,5 +1,4 @@
-import { sha256 } from '../changelog'
-import { makeBatchTranslator, type BatchTranslator } from '../translate'
+import { makeBatchTranslator, sha256, type BatchTranslator } from '../translate'
 
 /**
  * 新闻英文源标题译制(ADR-0029,CONTEXT.md「新闻」+「译文表」):域特化层——

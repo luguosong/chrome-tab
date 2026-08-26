@@ -9,10 +9,9 @@ import {
   type TrendingSince,
 } from 'chrome-tab-shared'
 import type { AuthEnv } from './auth'
-import { sha256 } from './changelog'
+import { makeBatchTranslator, sha256, type BatchTranslator } from './translate'
 import type { Db } from './db'
 import { BadRequest, FETCH_TIMEOUT, chromeHeaders, fetchText } from './common'
-import { makeBatchTranslator, type BatchTranslator } from './translate'
 
 /**
  * 「GitHub 趋势」(CONTEXT.md「GitHub 趋势」;ADR-0028):独立单例图标的数据服务。

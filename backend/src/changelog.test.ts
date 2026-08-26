@@ -5,9 +5,7 @@ import { openDb, type Db } from './db'
 import { bootstrap } from './seed'
 import { expectError, setupApp } from './testUtils'
 import {
-  extractContent,
   ChangelogService,
-  modelCandidates,
   prodChangelogDeps,
   splitBlocks,
   splitSegments,
@@ -459,44 +457,7 @@ describe('无原文源(codex:changelogUrl 缺省,版本流 npm 合成、零译�
   })
 })
 
-describe('extractContent(畸形响应 → null 触发降级,不抛)', () => {
-  it('取 choices[0].message.content', () => {
-    expect(extractContent({ choices: [{ message: { content: '译文' } }] })).toBe('译文')
-  })
-
-  it('choices 缺失 / 非数组 / 空数组 → null', () => {
-    expect(extractContent(null)).toBeNull()
-    expect(extractContent({})).toBeNull()
-    expect(extractContent({ choices: 'nope' })).toBeNull()
-    expect(extractContent({ choices: [] })).toBeNull()
-  })
-
-  it('content 非字符串 → null', () => {
-    expect(extractContent({ choices: [{ message: { content: 42 } }] })).toBeNull()
-    expect(extractContent({ choices: [{ message: null }] })).toBeNull()
-  })
-})
-
 // ---- 模型候选链(prodChangelogDeps.translate 真链路,mock globalThis.fetch)----
-
-describe('modelCandidates(free 优先,CHANGELOG_LLM_MODEL 逗号分隔覆盖)', () => {
-  it('默认:六 free + coding-glm-5.3 兜底', () => {
-    expect(modelCandidates()).toEqual([
-      'coding-glm-5.1-free',
-      'coding-kimi-k3-free',
-      'gemini-3.6-flash-free',
-      'gemini-3.7-flash-free',
-      'gpt-5.5-free',
-      'coding-glm-5-free',
-      'coding-glm-5.3',
-    ])
-  })
-
-  it('env 覆盖:逗号分隔 + trim,空段过滤;空串回默认(compose 缺省键注入的是 "")', () => {
-    expect(modelCandidates({ CHANGELOG_LLM_MODEL: ' a , b,,' } as NodeJS.ProcessEnv)).toEqual(['a', 'b'])
-    expect(modelCandidates({ CHANGELOG_LLM_MODEL: '' } as NodeJS.ProcessEnv)).toEqual(modelCandidates())
-  })
-})
 
 describe('translate 候选链(候选失效=403/404/429/5xx/no_available_channel/超时/200空content 换下一个,401等直接抛)', () => {
   const realFetch = globalThis.fetch
@@ -550,6 +511,14 @@ describe('translate 候选链(候选失效=403/404/429/5xx/no_available_channel/
     process.env.AIHUBMIX_API_KEY = 'k'
     process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
     const models = mockFetchSeq([{ status: 200, body: { choices: [{ message: { content: null } }] } }, OK])
+    await expect(prodChangelogDeps().translate('块')).resolves.toBe('译文')
+    expect(models).toEqual(['m1', 'm2'])
+  })
+
+  it('200 但 content 为空串 → 同判候选失效:空译文入哈希表会让该版本永久渲染空行', async () => {
+    process.env.AIHUBMIX_API_KEY = 'k'
+    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
+    const models = mockFetchSeq([{ status: 200, body: { choices: [{ message: { content: '' } }] } }, OK])
     await expect(prodChangelogDeps().translate('块')).resolves.toBe('译文')
     expect(models).toEqual(['m1', 'm2'])
   })

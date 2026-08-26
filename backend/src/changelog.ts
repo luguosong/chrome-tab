@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { schedule } from 'node-cron'
 import { Hono, type Context } from 'hono'
 import {
@@ -9,6 +8,7 @@ import {
 import type { Db } from './db'
 import type { AuthEnv } from './auth'
 import { fetchText } from './common'
+import { callModel, isCandidateExhausted, modelCandidates, sha256 } from './translate'
 
 /**
  * 更新日志译制代理(ADR-0005/0016/0017,语义照搬 Java changelog 模块;多源化见 ADR-0020)。
@@ -48,8 +48,6 @@ export function splitBlocks(markdown: string): Blocks {
   }
   return { prefix: markdown.slice(0, starts[0]), blocks }
 }
-
-export const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex')
 
 /** 版本块再切段(2026-08-26):段 = 连续整行(行是原子,不撕开),总长 ≤ maxChars;
  *  单行自身超限独占一段。动机:非流式译制耗时 ∝ 输出长度,2.1.246 块 9.2k 字符单请求
@@ -308,8 +306,7 @@ export function changelogRoutes(services: ChangelogServices): Hono<AuthEnv> {
 }
 
 // ---- 生产协作器(Java ChangelogConfig/NpmReleaseDateService 对应物;源定义在 shared)----
-
-export const LLM_BASE_URL = 'https://aihubmix.com/v1'
+// 网关地基(sha256/LLM_BASE_URL/候选链/响应解析)与调模型原语在 translate.ts(ADR-0032)。
 
 /** 译制系统提示(照搬 Java,ADR-0005):确定性靠提示约束,GPT-5 系 temperature 被网关忽略。 */
 const SYSTEM_PROMPT = `你是专业技术译者。把用户给出的 CHANGELOG markdown 片段由英文译成简体中文。
@@ -321,42 +318,6 @@ const SYSTEM_PROMPT = `你是专业技术译者。把用户给出的 CHANGELOG m
 5. 通用技术术语（Claude Code、API、token、hook 等）可保留原文或按惯例中译。`
 
 // fetchText 已收归 common.ts(changelog/videoUpdates/modelTracking 三处同形)
-
-/** 从 OpenAI 兼容响应取 choices[0].message.content;任何畸形形态返回 null(调用方据此降级英文)。 */
-export function extractContent(resp: unknown): string | null {
-  const choices = (resp as { choices?: unknown } | null)?.choices
-  if (!Array.isArray(choices) || choices.length === 0) return null
-  const content = (choices[0] as { message?: { content?: unknown } })?.message?.content
-  return typeof content === 'string' ? content : null
-}
-
-/**
- * 译制模型候选链(2026-08-25):free 优先,free 全不可用落到付费 coding-glm-5.3。
- * 候选失效 = 403/404(模型被禁/不存在)、429/5xx(限流/网关错)、400 no_available_channel(渠道没了)、超时(挂死)或 200 但响应无 content(空补全);其他错误(401 key/网络)换模型无益,直接抛。
- * CHANGELOG_LLM_MODEL 支持逗号分隔列表覆盖;Key 沿用 AIHUBMIX_API_KEY。
- */
-export const DEFAULT_LLM_MODELS =
-  'coding-glm-5.1-free,coding-kimi-k3-free,gemini-3.6-flash-free,gemini-3.7-flash-free,gpt-5.5-free,coding-glm-5-free,coding-glm-5.3'
-
-export function modelCandidates(env: NodeJS.ProcessEnv = process.env): string[] {
-  // 空串回退默认:compose 引用行对 .env 缺省键注入的是 ''(非 undefined),split 后会是空列表
-  return (env.CHANGELOG_LLM_MODEL?.trim() || DEFAULT_LLM_MODELS).split(',').map((m) => m.trim()).filter(Boolean)
-}
-
-/** 网关对该候选「没戏了,换下一个」的判定:模型被禁/不存在(403/404)、限流/网关错(429/5xx,
- *  换候选=换渠道可能绕开)、无渠道(400 no_available_channel)、超时(fetchText 的
- *  AbortSignal.timeout 抛 TimeoutError——挂死的 free 模型换下一个,不再单点拖满上限)。 */
-export function isCandidateExhausted(e: unknown): boolean {
-  const err = e as { status?: number; body?: string; name?: string }
-  return (
-    err?.status === 403 ||
-    err?.status === 404 ||
-    err?.status === 429 ||
-    (err?.status ?? 0) >= 500 ||
-    err?.name === 'TimeoutError' ||
-    /no_available_channel/.test(err?.body ?? '')
-  )
-}
 
 export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_SOURCE): ChangelogDeps {
   const def = getChangelogSource(source)
@@ -416,26 +377,12 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
           const log = (outcome: string, extra = '') =>
             console.warn(`[changelog-translate] ${source} 段${si + 1}/${segments.length} 候选 ${i + 1}/${models.length} ${model} ${outcome}(${Date.now() - startedAt}ms)${extra}`)
           try {
-            const resp = await fetchText(`${LLM_BASE_URL}/chat/completions`, 60_000, {
-              method: 'POST',
-              headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-              body: JSON.stringify({
-                model,
-                messages: [
-                  { role: 'system', content: SYSTEM_PROMPT },
-                  { role: 'user', content: seg },
-                ],
-              }),
-            })
+            const { content, resp } = await callModel(model, apiKey, SYSTEM_PROMPT, seg)
             // 200 但拿不到译文(空补全/内容过滤/非 JSON 响应体)也按候选失效换下一个——
             // 2026-08-25 线上即此形态静默失败:后台有 200 调用记录、无后续候选、译文缺位。
-            let content: string | null = null
-            try {
-              content = extractContent(JSON.parse(resp))
-            } catch {
-              content = null
-            }
-            if (content == null) {
+            // 空串同判:空译文会以哈希主键终身缓存,该版本永久渲染成空行(批量路径
+            // parseNumberedTranslations 的 !text 守卫同款,code-review 补齐)
+            if (content == null || !content.trim()) {
               lastErr = new Error(`HTTP 200 但响应无 content:${resp.slice(0, 200)}`)
               log(`失败: ${lastErr}`, ',换下一候选')
               continue
