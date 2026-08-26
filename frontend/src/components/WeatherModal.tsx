@@ -93,7 +93,7 @@ export default function WeatherModal({
         {hourly && hourly.length > 0 && (
           <div className="mb-4">
             <SectionTitle>24 小时预报</SectionTitle>
-            <div className="flex gap-3 overflow-x-auto pb-1">
+            <div className="flex gap-3 overflow-x-auto modal-scroll pb-1">
               {hourly.map((h) => (
                 <HourCell key={h.fxTime} h={h} />
               ))}
