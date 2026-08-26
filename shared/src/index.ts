@@ -53,9 +53,16 @@ export type VideoBlogger = {
  * 24h 红点窗口按北京时间零点锚定在前端推导(见 frontend lib/modelTracking.ts)。
  * issues/01 贯通智谱文本首片;issues/02 补齐智谱八类全量档案;issues/03 接入
  * OpenAI;issues/04 接入 Anthropic;issues/05 接入 xAI;issues/06 接入月之暗面;issues/07 接入
- * DeepSeek;ModelProviderId 随后续厂家票扩。
+ * DeepSeek;issues/09 接入阿里通义;ModelProviderId 随后续厂家票扩。
  */
-export type ModelProviderId = 'zhipu' | 'openai' | 'anthropic' | 'xai' | 'moonshot' | 'deepseek'
+export type ModelProviderId =
+  | 'zhipu'
+  | 'openai'
+  | 'anthropic'
+  | 'xai'
+  | 'moonshot'
+  | 'deepseek'
+  | 'alibaba'
 
 /** 模型种类(CONTEXT.md「模型种类」,八类;与发布阶段/开放方式正交)。 */
 export type ModelKind =

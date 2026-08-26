@@ -136,6 +136,36 @@ export const AA_MODEL_MAP: Record<string, { provider: ModelProviderId; officialI
   'deepseek-v3-1': { provider: 'deepseek', officialId: 'deepseek-v3.1' },
   'deepseek-r1': { provider: 'deepseek', officialId: 'deepseek-r1' },
   'deepseek-v3': { provider: 'deepseek', officialId: 'deepseek-v3' },
+  // 阿里通义(2026-08-26 sitemap 核验)。无版本别名(qwen-turbo 等)与 reasoning/
+  // non-reasoning/effort 分档页不映射;qwen3-6-27b 按官方目录序作 3.6 开源代代表;
+  // qwq-32b 为 QwQ 线唯一公开页;qwen3-coder-480b/30b 与 qwen3-omni-30b 是基线行
+  // 所认领的开源对应版,随行映射;媒体模型 AA 站带路径前缀(image/models/…),API slug
+  // 取尾段(wan-2-2-a14b 归 2.2 代级行,同代 5b 页不映射防撞键)
+  'qwen3-8-max': { provider: 'alibaba', officialId: 'qwen3.8-max' },
+  'qwen3-7-max': { provider: 'alibaba', officialId: 'qwen3.7-max' },
+  'qwen3-6-max': { provider: 'alibaba', officialId: 'qwen3.6-max-preview' },
+  'qwen3-max': { provider: 'alibaba', officialId: 'qwen3-max' },
+  'qwen3-7-plus': { provider: 'alibaba', officialId: 'qwen3.7-plus' },
+  'qwen3-6-plus': { provider: 'alibaba', officialId: 'qwen3.6-plus' },
+  'qwen3-8-2-4t-a95b': { provider: 'alibaba', officialId: 'qwen3.8-2.4t-a95b' },
+  'qwen3-8-27b': { provider: 'alibaba', officialId: 'qwen3.8-27b' },
+  'qwen3-6-27b': { provider: 'alibaba', officialId: 'qwen3.6-open' },
+  'qwen3-5-397b-a17b': { provider: 'alibaba', officialId: 'qwen3.5-open' },
+  'qwen3-235b-a22b-instruct': { provider: 'alibaba', officialId: 'qwen3-open' },
+  'qwen3-next-80b-a3b-instruct': { provider: 'alibaba', officialId: 'qwen3-next-80b-a3b' },
+  'qwq-32b': { provider: 'alibaba', officialId: 'qwq-plus' },
+  'qwen3-coder-next': { provider: 'alibaba', officialId: 'qwen3-coder-next' },
+  'qwen3-coder-480b-a35b-instruct': { provider: 'alibaba', officialId: 'qwen3-coder-plus' },
+  'qwen3-coder-30b-a3b-instruct': { provider: 'alibaba', officialId: 'qwen3-coder-flash' },
+  'qwen3-vl-235b-a22b-instruct': { provider: 'alibaba', officialId: 'qwen3-vl-open' },
+  'qwen3-omni-30b-a3b-instruct': { provider: 'alibaba', officialId: 'qwen3-omni-flash' },
+  'qwen-image': { provider: 'alibaba', officialId: 'qwen-image' },
+  'qwen-audio-3-0-tts-plus': { provider: 'alibaba', officialId: 'qwen-audio-3.0-tts-plus' },
+  'qwen3-tts-flash': { provider: 'alibaba', officialId: 'qwen3-tts-flash' },
+  'qwen3-asr': { provider: 'alibaba', officialId: 'qwen3-asr-flash' },
+  'wan-2-5-preview': { provider: 'alibaba', officialId: 'wan2.5-video-preview' },
+  'wan-2-2-a14b': { provider: 'alibaba', officialId: 'wan2.2-video' },
+  'wan-2-1-14b': { provider: 'alibaba', officialId: 'wanx2.1-video' },
 }
 
 // ---- 纯函数(解析与匹配;防御式读取沿用 common 的 asRec/str 先例)----

@@ -22,6 +22,7 @@ import { XAI_BASELINE } from './xaiBaseline'
 import { KIMI_BASELINE } from './kimiBaseline'
 import { OPENAI_BASELINE, OPENAI_CHANGELOG_PAGE_URL, openaiChangelogAnchor } from './openaiBaseline'
 import { DEEPSEEK_BASELINE, DEEPSEEK_UPDATES_URL, matchDeepSeekEvent, parseDeepSeekUpdates } from './deepseekBaseline'
+import { QWEN_BASELINE, QWEN_RELEASES_URL, matchQwenEvents, parseBailianReleases } from './qwenBaseline'
 import {
   AA_EVALUATOR,
   AA_EVALUATOR_LABEL,
@@ -43,7 +44,9 @@ import {
  * release notes 的 `### 日期` 段内条目、xAI 发布流的 `## 月份`/`### 条目` 段——仅月
  * 份粒度、事件锚定当月 1 日、月之暗面资讯/Blog 的文章卡片(无 RSS,按文章 URL
  * 去重)、DeepSeek API Change Log 的 HTML `Date:` 段内 h3 小节、OpenAI API changelog
- * 的 `## 月份`/`### 日` 段内类型行(`Model:` 字段即结构化归属);按模型+类型+日期+信源去重);解析器
+ * 的 `## 月份`/`### 日` 段内类型行(`Model:` 字段即结构化归属)、阿里通义百炼
+ * 「模型上下架与更新」首表的表格行(模型ID 结构化列;DeepSeek/通义解析器随厂家
+ * 基线文件走);按模型+类型+日期+信源去重);解析器
  * **不认识**的更新块(基线外型号,含智谱平台托管的第三方模型、Anthropic 仅限受邀
  * 项目的 Mythos 系列)只作待核验线索跳过——待基线人工核验后纳入,这是「跟踪厂家」
  * 的定义性约束(不开放任意厂家/信源配置,理由见 ADR-0025)。issues/08 增外部评测:
@@ -123,7 +126,7 @@ export interface BaselineModel {
   events?: Array<Omit<ModelEvent, 'id'>>
 }
 
-export { ZHIPU_BASELINE, ANTHROPIC_BASELINE, XAI_BASELINE, KIMI_BASELINE, OPENAI_BASELINE, DEEPSEEK_BASELINE }
+export { ZHIPU_BASELINE, ANTHROPIC_BASELINE, XAI_BASELINE, KIMI_BASELINE, OPENAI_BASELINE, DEEPSEEK_BASELINE, QWEN_BASELINE }
 
 /** 全部厂家基线(init 幂等 upsert 的单一遍历源;新厂家票 = 基线文件 + 追加于此)。 */
 const ALL_BASELINES: BaselineModel[] = [
@@ -133,6 +136,7 @@ const ALL_BASELINES: BaselineModel[] = [
   ...KIMI_BASELINE,
   ...OPENAI_BASELINE,
   ...DEEPSEEK_BASELINE,
+  ...QWEN_BASELINE,
 ]
 
 // ---- Anthropic release notes 解析(研究 §3:主发布源;页面混有 SDK/平台功能条目,
@@ -713,6 +717,7 @@ export class ModelTrackingService {
     void this.pollMoonshot().catch((e) => console.error('模型追踪(月之暗面)取数失败:', e))
     void this.pollOpenAI().catch((e) => console.error('模型追踪(OpenAI)取数失败:', e))
     void this.pollDeepSeek().catch((e) => console.error('模型追踪(DeepSeek)取数失败:', e))
+    void this.pollAlibaba().catch((e) => console.error('模型追踪(通义)取数失败:', e))
     void this.pollEvaluations().catch((e) => console.error('模型追踪(评测)取数失败:', e))
   }
 
@@ -722,6 +727,15 @@ export class ModelTrackingService {
     await this.pollOne('deepseek', DEEPSEEK_UPDATES_URL, (html) => {
       const sections = parseDeepSeekUpdates(html)
       return sections.length === 0 ? null : sections.flatMap(matchDeepSeekEvent)
+    })
+  }
+
+  /** 通义一轮:百炼「模型上下架与更新」首表行 → 模型ID 匹配基线(解析器/匹配器随基线
+   *  收在 qwenBaseline.ts;零行 = 上游改版,同 pollOne 口径)。 */
+  async pollAlibaba(): Promise<void> {
+    await this.pollOne('alibaba', QWEN_RELEASES_URL, (html) => {
+      const rows = parseBailianReleases(html)
+      return rows.length === 0 ? null : matchQwenEvents(rows)
     })
   }
 

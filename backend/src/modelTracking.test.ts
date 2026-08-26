@@ -38,6 +38,13 @@ import {
   matchDeepSeekEvent,
   parseDeepSeekUpdates,
 } from './deepseekBaseline'
+import {
+  QWEN_BASELINE,
+  QWEN_RELEASES_URL,
+  matchQwenEvents,
+  parseBailianReleases,
+  resolveQwenModelId,
+} from './qwenBaseline'
 
 /**
  * 模型追踪自动检查(issues/01:单例/占格、持久化、陈旧降级 + 鉴权;issues/02:八类
@@ -225,6 +232,24 @@ const DEEPSEEK_HTML = `<html><body>
  * 按 URL 分发页面。单字符串 = 智谱页内容 + 其余厂家页固定夹具(既有单厂家用例下
  * 各轮询都成功且行为确定);Record 原样分发,未列出的 URL 抛错。
  */
+/**
+ * 百炼「模型上下架与更新」首表快照节选(2026-08-26 实抓口径:表头 `<th>` 行、时间列
+ * 零填充(含一行不补零防御)、多 ID 单元格多 `<p><code>`、中西文间距 span、第三方
+ * 托管行(kimi-k3/vidu)、无版本别名行;末尾附第二张表验「只取首表」)。
+ */
+const QWEN_HTML = `<table>
+<tr><th>模型类型</th><th>时间</th><th>模型ID</th><th>功能说明</th></tr>
+<tr><td>图片生成</td><td>2026-08-24</td><td><p><code>vidu/vidu-image-pro_reference2image</code></p></td><td>第三方托管模型,不认领</td></tr>
+<tr><td>视频生成</td><td>2026-08-20</td><td><p><code>wan3.0-video-prime</code></p></td><td>Wan3.0-Video-Prime 是万相 3.0 的高速版视频生成模型</td></tr>
+<tr><td>文本生成、深度思考</td><td>2026-8-2</td><td><p><code>qwen3.8-max</code></p></td><td>Qwen3.8-Max 是 2.4 万亿参数 MoE 旗舰模型<span class="help-letter-space"></span>编程与办公能力全面跃升</td></tr>
+<tr><td>文本生成</td><td>2026-07-15</td><td><p><code>qwen3.7-flash</code></p><p><code>qwen3.7-flash-2026-07-15</code></p></td><td>Qwen3.7-Flash 高性价比模型(主线+快照同格)</td></tr>
+<tr><td>文本生成</td><td>2026-08-24</td><td><p><code>kimi-k3</code></p></td><td>第三方托管模型,不认领</td></tr>
+<tr><td>文本生成</td><td>2026-08-10</td><td><p><code>qwen-plus</code></p><p><code>qwen-plus-latest</code></p></td><td>动态更新版本,模型更新不会提前通知(无版本别名)</td></tr>
+</table>
+<table>
+<tr><td>文本生成</td><td>2020-01-01</td><td><p><code>qwen3.8-max</code></p></td><td>hydration 拷贝表,不应被解析</td></tr>
+</table>`
+
 function makeDeps(md: string | Record<string, string>): ModelTrackingDeps {
   const pages: Record<string, string> =
     typeof md === 'string'
@@ -236,6 +261,7 @@ function makeDeps(md: string | Record<string, string>): ModelTrackingDeps {
           [KIMI_NEWS_URL]: KIMI_NEWS_HTML,
           [KIMI_BLOG_URL]: KIMI_BLOG_HTML,
           [DEEPSEEK_UPDATES_URL]: DEEPSEEK_HTML,
+          [QWEN_RELEASES_URL]: QWEN_HTML,
         }
       : md
   return {
@@ -265,7 +291,7 @@ async function byId(svc: ModelTrackingService, officialId: string) {
 
 /** 各厂家基线总行数(init 入档的期望值;含并行会话已接线进 ALL_BASELINES 的厂家)。 */
 const TOTAL_BASELINE =
-  ZHIPU_BASELINE.length + ANTHROPIC_BASELINE.length + XAI_BASELINE.length + KIMI_BASELINE.length + OPENAI_BASELINE.length + DEEPSEEK_BASELINE.length
+  ZHIPU_BASELINE.length + ANTHROPIC_BASELINE.length + XAI_BASELINE.length + KIMI_BASELINE.length + OPENAI_BASELINE.length + DEEPSEEK_BASELINE.length + QWEN_BASELINE.length
 
 describe('模型追踪:图标类型接线(单例/占格)', () => {
   it('MODEL 进单例枚举与跨格表(3×2=6 格,对齐前端注册表)', () => {
@@ -598,7 +624,8 @@ describe('模型追踪:路由', () => {
     await svc.pollXai()
     await svc.pollOpenAI()
     await svc.pollMoonshot()
-    await svc.pollDeepSeek() // 六源显式就位(sources 数确定,不靠 init 内未等待轮询的时序)
+    await svc.pollDeepSeek()
+    await svc.pollAlibaba() // 七源显式就位(sources 数确定,不靠 init 内未等待轮询的时序)
     const app = createApp({ db, modelTracking: svc })
     const anon = await app.request('/api/model-tracking/archive')
     expect(anon.status).toBe(401)
@@ -612,7 +639,7 @@ describe('模型追踪:路由', () => {
     expect(res.status).toBe(200)
     const json = (await res.json()) as { models: unknown[]; sources: unknown[] }
     expect(json.models).toHaveLength(TOTAL_BASELINE)
-    expect(json.sources).toHaveLength(6)
+    expect(json.sources).toHaveLength(7)
   })
 })
 
@@ -1453,5 +1480,98 @@ describe('模型追踪:DeepSeek 基线与服务(issues/07)', () => {
     expect(pro.events).toHaveLength(4) // 权重/API/GA 三条基线 + 1 条新公告
     expect(pro.events.find((e) => e.occurredOn === '2026-08-13')!.kind).toBe('updated') // GA 公告未被覆盖
     expect(pro.events[0]).toMatchObject({ kind: 'updated', occurredOn: '2026-09-09', title: 'DeepSeek-V4-Pro Price Cut' })
+  })
+})
+
+describe('模型追踪:百炼上下架表解析(纯函数;issues/09)', () => {
+  it('只取首表:表头 th 行跳过、不补零日期归一、多 ID 切分、间距 span 剥除;hydration 拷贝表不解析', () => {
+    const rows = parseBailianReleases(QWEN_HTML)
+    expect(rows).toHaveLength(6)
+    expect(rows[0]).toMatchObject({ date: '2026-08-24', modelIds: ['vidu/vidu-image-pro_reference2image'] })
+    expect(rows[2]).toEqual({
+      date: '2026-08-02',
+      modelIds: ['qwen3.8-max'],
+      description: 'Qwen3.8-Max 是 2.4 万亿参数 MoE 旗舰模型编程与办公能力全面跃升',
+    })
+    expect(rows[3]!.modelIds).toEqual(['qwen3.7-flash', 'qwen3.7-flash-2026-07-15'])
+    expect(parseBailianReleases('')).toEqual([])
+    expect(parseBailianReleases('<html>无表格</html>')).toEqual([])
+  })
+
+  it('模型 ID 归属:精确优先、快照前缀归家族、别名与第三方托管天然不认领', () => {
+    expect(resolveQwenModelId('qwen3.8-max')).toBe('qwen3.8-max')
+    expect(resolveQwenModelId('qwen3.7-max-2026-06-08')).toBe('qwen3.7-max') // 快照归家族
+    expect(resolveQwenModelId('qwen3-235b-a22b-instruct-2507')).toBe('qwen3-open') // 开源代级行
+    expect(resolveQwenModelId('qwen-plus-2025-04-28')).toBeNull() // 无版本别名:不立行
+    expect(resolveQwenModelId('qwen-plus')).toBeNull()
+    expect(resolveQwenModelId('kimi-k3')).toBeNull() // 百炼托管第三方
+    expect(resolveQwenModelId('ZHIPU/GLM-5.3')).toBeNull()
+    expect(resolveQwenModelId('tongyi-intent-detect-v3')).toBeNull() // 通义他线品牌(C-5 边界)
+  })
+
+  it('表格行 → 事件:同格多 ID 命中同模型只产一条;第三方/别名行零事件;信源统一主发布源页', () => {
+    const hits = matchQwenEvents(parseBailianReleases(QWEN_HTML))
+    expect(hits).toHaveLength(3)
+    expect(hits).toContainEqual({
+      officialId: 'wan3.0-video-prime',
+      event: {
+        kind: 'updated',
+        occurredOn: '2026-08-20',
+        title: 'Wan3.0-Video-Prime 是万相 3.0 的高速版视频生成模型',
+        sourceUrl: QWEN_RELEASES_URL,
+      },
+    })
+    expect(hits).toContainEqual({
+      officialId: 'qwen3.7-flash',
+      event: {
+        kind: 'updated',
+        occurredOn: '2026-07-15',
+        title: 'Qwen3.7-Flash 高性价比模型(主线+快照同格)',
+        sourceUrl: QWEN_RELEASES_URL,
+      },
+    })
+    expect(hits.filter((h) => h.officialId === 'qwen-plus')).toHaveLength(0)
+  })
+})
+
+describe('模型追踪:通义基线形状与服务轮询(issues/09)', () => {
+  it('基线形状:provider 恒 alibaba、officialId 唯一、别名四件套不立行、非退役必有渠道、种类不越枚举', () => {
+    const ids = new Set(QWEN_BASELINE.map((b) => b.officialId))
+    expect(ids.size).toBe(QWEN_BASELINE.length)
+    expect(QWEN_BASELINE.every((b) => b.provider === 'alibaba')).toBe(true)
+    for (const alias of ['qwen-plus', 'qwen-max', 'qwen-flash', 'qwen-turbo']) {
+      expect(ids.has(alias), `别名 ${alias} 不得立行`).toBe(false)
+    }
+    const kinds = ['text', 'multimodal_understanding', 'image_generation', 'video_generation', 'audio_speech', 'embedding', 'rerank', 'moderation_classification'] as ModelKind[]
+    for (const b of QWEN_BASELINE) {
+      expect(kinds).toContain(b.kind)
+      expect(b.matchAliases.length).toBeGreaterThan(0)
+      if (b.stage !== 'retired') expect(b.availability.length, `${b.officialId} 非退役必有渠道`).toBeGreaterThan(0)
+    }
+  })
+
+  it('通义一轮:表格事件入库、与基线同 (模型,日期,信源) 的上架行不补重复动态;两轮幂等', async () => {
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, makeDeps(QWEN_HTML))
+    await svc.pollAlibaba()
+    await svc.pollAlibaba() // 幂等
+    const max = (await byId(svc, 'qwen3.8-max'))!
+    // 基线 api_available(2026-08-02,主发布源)已在库,同键表格行不补 updated
+    expect(max.events.filter((e) => e.occurredOn === '2026-08-02')).toHaveLength(1)
+    const flash = (await byId(svc, 'qwen3.7-flash'))!
+    expect(flash.events.filter((e) => e.kind === 'updated')).toHaveLength(1) // 新日期 2026-07-15 入库一条
+    const source = (await svc.archive()).sources.find((s) => s.provider === 'alibaba')
+    expect(source).toMatchObject({ stale: false })
+  })
+
+  it('上游改版(零结构化行)标陈旧、库内通义档案保留,不影响他厂', async () => {
+    const { db } = openDb(':memory:')
+    const failing = await makeService(db, makeDeps({ [QWEN_RELEASES_URL]: '<html>改版空表</html>', [ZHIPU_RELEASES_URL]: ZHIPU_MD }))
+    await failing.pollZhipu() // 智谱显式成功就位(不靠 init 内未等待轮询的时序)
+    await expect(failing.pollAlibaba()).rejects.toThrow('发布源无结构化条目')
+    const archive = await failing.archive()
+    expect(archive.sources.find((s) => s.provider === 'alibaba')!.stale).toBe(true)
+    expect((await byId(failing, 'qwen3.8-max'))!.events.length).toBeGreaterThan(0) // 基线在库保留
+    expect(archive.sources.find((s) => s.provider === 'zhipu')!.stale).toBe(false) // 厂家隔离
   })
 })

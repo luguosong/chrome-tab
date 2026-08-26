@@ -11,6 +11,7 @@ import {
   XAI_BASELINE,
   ZHIPU_BASELINE,
 } from './modelTracking'
+import { QWEN_BASELINE } from './qwenBaseline'
 import { AA_LLM_URL, AA_MEDIA_ENDPOINTS, AA_MODEL_MAP, aaModelUrl, aaRowsFromLlms, aaRowsFromMedia, beijingToday } from './aaEvaluations'
 
 /**
@@ -41,8 +42,8 @@ const AA_LLM_JSON = JSON.stringify({
     {
       id: 'u3',
       name: 'Some Third Party',
-      slug: 'qwen3-max', // 非跟踪厂家:不映射
-      model_creator: { id: 'c3', name: 'Alibaba', slug: 'alibaba' },
+      slug: 'minimax-m2', // 非跟踪厂家:不映射
+      model_creator: { id: 'c3', name: 'MiniMax', slug: 'minimax' },
       evaluations: { mmlu_pro: 0.8 },
     },
   ],
@@ -139,6 +140,7 @@ describe('评测:解析与映射(纯函数)', () => {
       xai: XAI_BASELINE,
       moonshot: KIMI_BASELINE,
       deepseek: DEEPSEEK_BASELINE,
+      alibaba: QWEN_BASELINE,
     }
     for (const [slug, m] of Object.entries(AA_MODEL_MAP)) {
       const hit = baselines[m.provider].some((b) => b.officialId === m.officialId)

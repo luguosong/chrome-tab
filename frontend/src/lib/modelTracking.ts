@@ -83,6 +83,7 @@ export const PROVIDER_LABELS: Record<ModelProviderId, string> = {
   xai: 'xAI',
   moonshot: '月之暗面',
   deepseek: 'DeepSeek',
+  alibaba: '通义',
 }
 
 /**
