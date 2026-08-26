@@ -6,12 +6,13 @@ import {
   AVAILABILITY_LABELS,
   EVALUATION_ATTRIBUTION,
   EVENT_KIND_LABELS,
+  MODEL_KIND_COLOR_CLASSES,
   MODEL_KIND_LABELS,
   PROVIDER_LABELS,
   STAGE_LABELS,
   benchmarkLabel,
   compareModelsByRelease,
-  formatLatestEventBrief,
+  formatReleaseBrief,
   formatModelPricing,
   formatEvaluationScore,
   isFreshModelEvent,
@@ -159,6 +160,8 @@ function ModelList({
       {models.map((m) => {
         const open = expandedId === m.id
         const latest = m.events[0]
+        /** 行尾发布简报(排序轴同源):更新动态不再抢占发布位,动态明细展开区可看。 */
+        const releaseBrief = formatReleaseBrief(m)
         return (
           <li key={m.id} className="rounded-xl transition">
             <button
@@ -188,11 +191,15 @@ function ModelList({
               </span>
               <span className="mt-0.5 flex items-baseline justify-between gap-3 min-w-0 text-meta text-white/50">
                 <span className="min-w-0 truncate">
-                  {MODEL_KIND_LABELS[m.kind]} · {STAGE_LABELS[m.stage]} ·{' '}
+                  {/* 非文本模型种类词着色(映射语义见 modelTracking);文本类空串沿用本行灰 */}
+                  <span className={MODEL_KIND_COLOR_CLASSES[m.kind] || undefined}>
+                    {MODEL_KIND_LABELS[m.kind]}
+                  </span>{' '}
+                  · {STAGE_LABELS[m.stage]} ·{' '}
                   {m.availability.map((a) => AVAILABILITY_LABELS[a]).join('/')}
                 </span>
-                {latest && (
-                  <span className="shrink-0">{formatLatestEventBrief(latest)}</span>
+                {releaseBrief && (
+                  <span className="shrink-0 text-white/70">{releaseBrief}</span>
                 )}
               </span>
             </button>

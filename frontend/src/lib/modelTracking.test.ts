@@ -6,11 +6,13 @@ import {
   compareModelsByRelease,
   formatEvaluationScore,
   EVENT_KIND_LABELS,
+  MODEL_KIND_COLOR_CLASSES,
   MODEL_KIND_LABELS,
   PROVIDER_LABELS,
   STAGE_LABELS,
   formatModelPricing,
   formatLatestEventBrief,
+  formatReleaseBrief,
   isFreshModelEvent,
   modelEventAnchorMs,
 } from './modelTracking'
@@ -27,6 +29,24 @@ describe('模型追踪:展示语汇', () => {
     expect(MODEL_KIND_LABELS.embedding).toBe('向量')
     expect(MODEL_KIND_LABELS.rerank).toBe('重排')
     expect(MODEL_KIND_LABELS.moderation_classification).toBe('审核/分类')
+  })
+
+  it('种类着色分类全覆盖:文本世界不占色,媒体三类各一色,基础设施三类共色', () => {
+    const allKinds = Object.keys(MODEL_KIND_LABELS) as Array<keyof typeof MODEL_KIND_LABELS>
+    // 全覆盖(ModelKind 票扩漏配即红)
+    expect(Object.keys(MODEL_KIND_COLOR_CLASSES).sort()).toEqual([...allKinds].sort())
+    expect(MODEL_KIND_COLOR_CLASSES.text).toBe('') // 文本世界沿用默认灰
+    expect(MODEL_KIND_COLOR_CLASSES.multimodal_understanding).toBe('')
+    // 媒体生成三类暖色各一色(彼此时区分)
+    expect(MODEL_KIND_COLOR_CLASSES.image_generation).toBe('text-pink-300')
+    expect(MODEL_KIND_COLOR_CLASSES.video_generation).toBe('text-orange-300')
+    expect(MODEL_KIND_COLOR_CLASSES.audio_speech).toBe('text-lime-300')
+    // 检索/安全基础设施共冷色一档
+    expect(MODEL_KIND_COLOR_CLASSES.embedding).toBe('text-indigo-300')
+    expect(MODEL_KIND_COLOR_CLASSES.rerank).toBe(MODEL_KIND_COLOR_CLASSES.embedding)
+    expect(MODEL_KIND_COLOR_CLASSES.moderation_classification).toBe(
+      MODEL_KIND_COLOR_CLASSES.embedding,
+    )
   })
 
   it('阶段/开放方式/动态类型/厂家标签齐备', () => {
@@ -203,6 +223,24 @@ describe('评测展示语汇(issues/08)', () => {
 
   it('evaluated 动态有展示名(Record 键完整性由 tsc 保障)', () => {
     expect(EVENT_KIND_LABELS.evaluated).toBe('进入评测')
+  })
+})
+
+describe('模型追踪:发布简报(详情行尾,2026-08-26 行尾改发布轴)', () => {
+  it('可用类锚点标「发布」取最早;回退锚点标「见于」不谎称发布;无动态 null', () => {
+    // GPT-5.6 Sol 场景:最新动态 08-21 降价,行尾仍显发布 07-09(排序轴同源)
+    const sol = mkModel(89, {
+      events: [
+        { id: 1, kind: 'updated', occurredOn: '2026-08-21', title: '降价', sourceUrl: 'u' },
+        { id: 2, kind: 'api_available', occurredOn: '2026-07-09', title: '上线 API', sourceUrl: 'u' },
+      ],
+    })
+    expect(formatReleaseBrief(sol)).toBe('发布 · 2026-07-09')
+    const cyber = mkModel(92, {
+      events: [{ id: 1, kind: 'updated', occurredOn: '2026-08-07', title: 't', sourceUrl: 'u' }],
+    })
+    expect(formatReleaseBrief(cyber)).toBe('见于 · 2026-08-07')
+    expect(formatReleaseBrief(mkModel(1))).toBeNull()
   })
 })
 

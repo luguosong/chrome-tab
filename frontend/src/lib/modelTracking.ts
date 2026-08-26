@@ -27,6 +27,26 @@ export const MODEL_KIND_LABELS: Record<ModelKind, string> = {
   moderation_classification: '审核/分类',
 }
 
+/**
+ * 种类标签着色分类(2026-08-26):非文本模型彩色区分,染**种类标签**而非模型名——
+ * 颜色挂在语义上(与展开区「值按语义着色」同纲),名称保持白色不破榜单扫读。
+ * 分组而非逐类配色(八色不可记):文本世界(文本/多模态理解,输出以文字为中心)保持
+ * 灰不占色;媒体生成三类暖色(pink/orange/lime,产出非文本内容);检索/安全基础设施
+ * 三类冷色 indigo(向量/重排/审核,文本的配套管道)。色相全避开已占用语义色
+ * (amber 价格/cyan 限额/violet 参数/emerald 成绩/accent 交互蓝/red 鲜度)。
+ * 空串 = 沿用调用方默认灰。ModelKind 票扩时补映射(测试守全覆盖)。
+ */
+export const MODEL_KIND_COLOR_CLASSES: Record<ModelKind, string> = {
+  text: '',
+  multimodal_understanding: '',
+  image_generation: 'text-pink-300',
+  video_generation: 'text-orange-300',
+  audio_speech: 'text-lime-300',
+  embedding: 'text-indigo-300',
+  rerank: 'text-indigo-300',
+  moderation_classification: 'text-indigo-300',
+}
+
 /** 发布阶段展示名(厂家原文风格保留,不硬译)。 */
 export const STAGE_LABELS: Record<ReleaseStage, string> = {
   experimental: 'Experimental',
@@ -89,7 +109,8 @@ export function modelEventIso(occurredOn: string): string | null {
 }
 
 /**
- * 最近动态简报「类型 · 相对时间」:模型行右下角共用文案(小块滚动榜与详情 Modal 列表)。
+ * 最近动态简报「类型 · 相对时间」:小块滚动榜(ModelIcon)行尾文案(详情 Modal 列表
+ * 2026-08-26 起改用 formatReleaseBrief 发布简报,动态明细展开区可看)。
  * 类型锚定防裸相对时间被读作发布时间——2026-08-26 线上症状:GPT-5.6 Sol 真实发布
  * 2026-07-09,行尾裸「5 天前」(= 08-21 降价动态)被读成「5 天前发布」。
  * occurredOn 非法(理论不可达,后端恒产日期串)时显示原串,不吞信息。
@@ -111,19 +132,34 @@ const RELEASE_KINDS: ReadonlySet<ModelEventKind> = new Set([
 ])
 
 /**
- * 发布锚点(YYYY-MM-DD,空串 = 无):可用类动态(released/api/产品/权重)中最早者 =
- * 「上线发布时间」;无可用类动态的模型(如 gpt-5.6-cyber 仅 updated 行)回退最早动态
- * ——首条可证动态即最接近上线的时刻;无动态 → ''(排序沉底)。events 按 occurred_on
- * 倒序返回,遍历结束时各变量即持有该类中日期最小者。
+ * 发布锚点(YYYY-MM-DD + 是否精确):可用类动态(released/api/产品/权重)中最早者 =
+ * 「上线发布时间」(exact);无可用类动态的模型(如 gpt-5.6-cyber 仅 updated 行)回退
+ * 最早动态(exact=false)——首条可证动态即最接近上线的时刻;无动态 → null(排序沉底)。
+ * events 按 occurred_on 倒序返回,遍历结束时各变量即持有该类中日期最小者。
+ * 排序(compareModelsByRelease)与详情行尾发布简报(formatReleaseBrief)共用。
  */
-function releaseAnchor(m: TrackedModel): string {
+export function releaseAnchorOf(m: TrackedModel): { date: string; exact: boolean } | null {
   let fallback = ''
   let avail = ''
   for (const e of m.events) {
     if (RELEASE_KINDS.has(e.kind)) avail = e.occurredOn
     fallback = e.occurredOn
   }
-  return avail !== '' ? avail : fallback
+  if (avail !== '') return { date: avail, exact: true }
+  return fallback !== '' ? { date: fallback, exact: false } : null
+}
+
+/**
+ * 详情 Modal 未展开行的右下角发布简报:绝对日期而非相对时间——发布轴即列表排序轴,
+ * 行尾日期与排位单调一致可直接扫读比对,「48 天前」类相对表述对老模型信息量低。
+ * 回退锚点(无可用类动态)标「见于」不标「发布」——首条可证动态 ≠ 发布,不谎称。
+ * 无动态 → null(行尾留空)。2026-08-26 行尾由「最新动态简报」改为发布简报:更新动态
+ * 抢占发布位使行尾被读作「最近才发布」;动态事件与时间在展开区时间线全量可看。
+ */
+export function formatReleaseBrief(m: TrackedModel): string | null {
+  const anchor = releaseAnchorOf(m)
+  if (anchor === null) return null
+  return `${anchor.exact ? '发布' : '见于'} · ${anchor.date}`
 }
 
 /**
@@ -131,15 +167,15 @@ function releaseAnchor(m: TrackedModel): string {
  * 降序、退役沉底(CONTEXT.md「可用在前、已退役在后」),同日按 id 升序稳定。
  * 2026-08-26 排序轴由最新动态改为发布时间——按动态排使老模型(GPT-5.6 Sol 发布
  * 07-09)因降价等更新动态(08-21)被顶到新发布模型之前,读作「刚发布」;发布锚点
- * 取法见 releaseAnchor。无发布锚点与无动态模型均沉底(id 序在末段稳定)。
+ * 取法见 releaseAnchorOf。无发布锚点与无动态模型均沉底(id 序在末段稳定)。
  * sort 原位排序,调用方须传拷贝(filter 返回的新数组可直接排)。
  */
 export function compareModelsByRelease(a: TrackedModel, b: TrackedModel): number {
   const ra = a.stage === 'retired' ? 1 : 0
   const rb = b.stage === 'retired' ? 1 : 0
   if (ra !== rb) return ra - rb
-  const da = releaseAnchor(a)
-  const db = releaseAnchor(b)
+  const da = releaseAnchorOf(a)?.date ?? ''
+  const db = releaseAnchorOf(b)?.date ?? ''
   if (da !== db) return da < db ? 1 : -1
   return a.id - b.id
 }
