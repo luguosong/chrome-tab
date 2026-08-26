@@ -41,7 +41,9 @@ export function TodoDetailPanel({ task }: { task: TodoTask }) {
         </div>
       )}
       <div className="mt-3 pt-3 border-t border-white/10 min-h-0 overflow-y-auto modal-scroll">
-        {task.content.trim() ? (
+        {/* ?. 防御:类型声明 content: string 只对「新版后端」成立,版本错开窗口期
+            (如后端镜像未随前端同批部署)该键缺失,裸 .trim() 会炸整棵 React 树 */}
+        {task.content?.trim() ? (
           <div className="md-note">
             <Markdown remarkPlugins={[remarkGfm]}>{task.content}</Markdown>
           </div>
