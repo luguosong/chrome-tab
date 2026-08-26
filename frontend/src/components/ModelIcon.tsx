@@ -3,6 +3,7 @@ import { useModelArchive } from '../hooks/useModelArchive'
 import { tileFont } from '../lib/iconLayout'
 import {
   AVAILABILITY_LABELS,
+  MODEL_KIND_COLOR_CLASSES,
   MODEL_KIND_LABELS,
   PROVIDER_LABELS,
   STAGE_LABELS,
@@ -87,7 +88,11 @@ export default function ModelIconBody({
                 </span>
                 <span className="flex items-baseline justify-between gap-2 min-w-0">
                   <span className="min-w-0 truncate text-white/45" style={{ fontSize }}>
-                    {MODEL_KIND_LABELS[m.kind]} · {STAGE_LABELS[m.stage]} ·{' '}
+                    {/* 非文本模型种类词着色(映射语义见 modelTracking);文本类空串沿用本行灰 */}
+                    <span className={MODEL_KIND_COLOR_CLASSES[m.kind] || undefined}>
+                      {MODEL_KIND_LABELS[m.kind]}
+                    </span>{' '}
+                    · {STAGE_LABELS[m.stage]} ·{' '}
                     {m.availability.map((a) => AVAILABILITY_LABELS[a]).join('/')}
                   </span>
                   {latest && (
