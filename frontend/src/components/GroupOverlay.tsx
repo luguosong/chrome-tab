@@ -4,7 +4,9 @@ import { SortableContext, rectSortingStrategy, useSortable } from '@dnd-kit/sort
 import { CSS } from '@dnd-kit/utilities'
 import { useConfig, useDeleteIcon, useUpdateIconData } from '../api/config'
 import { useEditMode } from '../context/EditModeContext'
+import { get } from '../lib/iconTypeRegistry'
 import ConfirmButton from './ConfirmButton'
+import { EditForm } from './Icon'
 import { groupMembers, groupPageCount, groupPageSlice } from '../lib/groupReducer'
 import { extractString, navIconSrc } from '../lib/iconData'
 import type { Icon } from '../lib/types'
@@ -25,7 +27,7 @@ import type { Icon } from '../lib/types'
  *
  * 交互:滚轮翻组内页(原生非被动监听吃掉事件,不透传;≤9 个成员也吃)与页点指示器;
  * 点组名行内改名(任意模式,CONTEXT.md「分组改名除外」;清空回落「新建分组」);
- * 查看态点子图标 = 新标签打开后关闭;编辑态子图标可拖排序 + × 删除。
+ * 查看态点子图标 = 新标签打开后关闭;编辑态子图标可拖排序 + ✎ 编辑配置 + × 删除。
  */
 export default function GroupOverlay({
   group,
@@ -217,12 +219,18 @@ export function parseGroupContainerId(containerId: string): number | null {
 
 /**
  * 弹层内单个子图标(组成员恒为 nav,后端把关)。查看态 = `<a>` 新标签打开后关弹层
- * (sortable disabled);编辑态 = 可拖排序(listeners)+ × 删除(DELETE,乐观移除;
- * 组因此变空由服务端删组行 → openGroup 落空 → 弹层随 Dashboard 卸载)。
+ * (sortable disabled);编辑态 = 可拖排序(listeners)+ ✎ 编辑配置(EditForm popover,
+ * 复用网格 Icon.tsx 同款——编辑图标配置是编辑模式通用能力,CONTEXT.md「编辑模式」)
+ * + × 删除(DELETE,乐观移除;组因此变空由服务端删组行 → openGroup 落空 → 弹层随
+ * Dashboard 卸载)。
  */
 function MemberTile({ member, onClose }: { member: Icon; onClose: () => void }) {
   const { editing } = useEditMode()
   const del = useDeleteIcon()
+  const editIcon = useUpdateIconData()
+  // 组成员恒 nav(editor=name+url+icon 非空),仍按注册表驱动与网格同构
+  const editor = get(member.type)?.editor ?? []
+  const [editOpen, setEditOpen] = useState(false)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: member.id,
     data: { pageId: member.pageId },
@@ -280,20 +288,48 @@ function MemberTile({ member, onClose }: { member: Icon; onClose: () => void }) 
       className="relative flex flex-col items-center gap-1.5 rounded-2xl p-1.5 editing-jiggle cursor-grab active:cursor-grabbing select-none focus-visible:outline-2 focus-visible:outline-white/60"
     >
       {body}
-      {/* 删除:ConfirmButton 二次确认(首击武装「确认?」再击执行),替换原 bg-accent
-          实色角标——红系武装态自表意,误触即删由此兜住。外层 span 持有
-          onPointerDown stopPropagation 防误启拖拽(同网格 EditActions 角标;共享组件
-          不收事件 props,守卫上提一层)。 */}
+      {/* 角标:✎ 编辑配置 + × 删除(对齐网格 Icon.tsx EditActions)。删除走 ConfirmButton
+          二次确认(首击武装「确认?」再击执行),红系武装态自表意,误触即删由此兜住。
+          外层 span 持有 onPointerDown/onClick/onContextMenu stopPropagation 防误启拖拽
+          与误触发右键切编辑(同网格 EditActions 角标;共享组件不收事件 props,守卫上提一层)。 */}
       <span
-        className="absolute -top-1.5 -right-1.5 z-10"
+        className="absolute -top-1.5 -right-1.5 z-10 flex items-center gap-1"
         onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        onContextMenu={(e) => e.stopPropagation()}
       >
+        {editor.length > 0 && (
+          <button
+            type="button"
+            disabled={del.isPending || editIcon.isPending}
+            onClick={() => setEditOpen(!editOpen)}
+            onContextMenu={(e) => e.stopPropagation()}
+            className="glass-panel w-8 h-8 rounded-full text-meta leading-none text-white/90 flex items-center justify-center hover:bg-white/40 active:bg-white/40 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-white/60"
+            title="编辑"
+          >
+            ✎
+          </button>
+        )}
         <ConfirmButton
           label={name ? `删除 ${name}` : '删除图标'}
           title="删除"
           onConfirm={() => del.mutate(member.id)}
         />
       </span>
+      {/* 编辑配置 popover(Icon.tsx 导出的同款):保存走 PATCH /api/icons/{id},
+          遮罩 z-[60] 盖住本弹层(z-40),点弹层任意处取消 */}
+      {editor.length > 0 && editOpen && (
+        <EditForm
+          fields={editor}
+          icon={member}
+          busy={del.isPending || editIcon.isPending}
+          onCancel={() => setEditOpen(false)}
+          onSave={(data) => {
+            editIcon.mutate({ id: member.id, data })
+            setEditOpen(false)
+          }}
+        />
+      )}
     </div>
   )
 }

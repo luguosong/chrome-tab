@@ -356,10 +356,13 @@ function EditActions({
  * (nav=name+url / stock=symbol+name),保存走 useUpdateIconData(PATCH /api/icons/{id} body={data}),
  * 取消直接关闭。与 AddDrawer 共用 buildIconData 归一化 + 输入样式,使「新增」与「编辑」表单一致。
  *
- * 容器用 `fixed inset-0` 透明遮罩(z-30,click-outside 取消)+ absolute 面板(z-40)。
+ * 容器用 `fixed inset-0` 透明遮罩(z-[60],click-outside 取消)+ absolute 面板(z-[61])。
  * onPointerDown stopPropagation 防止冒泡到 Tag 触发拖拽(同 EditActions 角标,见 06)。
+ * z 取 60/61:分组弹层容器 fixed z-40,遮罩须盖住弹层面板(点弹层任意处取消)才在
+ * GroupOverlay 的 MemberTile 场景可用;网格场景无更高层,提升无副作用。
+ * 导出供 GroupOverlay 的 MemberTile 复用(组内子图标编辑,2026-08-26)。
  */
-function EditForm({
+export function EditForm({
   fields,
   icon,
   busy,
@@ -401,12 +404,12 @@ function EditForm({
           onCancel()
         }}
         onPointerDown={(e) => e.stopPropagation()}
-        className="fixed inset-0 z-30 cursor-default"
+        className="fixed inset-0 z-[60] cursor-default"
       />
       <div
         // glass-panel-readable:面板叠在壁纸/其他玻璃层上仍保文字对比(与 SymbolPicker/
         // LocationPicker 下拉对齐);min-w-[240px] 容纳统一输入族(px-3 py-2 text-sm 变宽)
-        className="absolute top-5 right-0 z-40 glass-panel glass-panel-readable rounded-lg p-2 min-w-[240px] space-y-2"
+        className="absolute top-5 right-0 z-[61] glass-panel glass-panel-readable rounded-lg p-2 min-w-[240px] space-y-2"
         onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
