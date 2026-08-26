@@ -1,13 +1,13 @@
 import type { TrackedModel } from 'chrome-tab-shared'
 import { useModelArchive } from '../hooks/useModelArchive'
 import { tileFont } from '../lib/iconLayout'
-import { timeAgo } from '../lib/timeAgo'
 import {
   AVAILABILITY_LABELS,
   MODEL_KIND_LABELS,
   PROVIDER_LABELS,
   STAGE_LABELS,
-  compareModelsByLatestEvent,
+  compareModelsByRelease,
+  formatLatestEventBrief,
   isFreshModelEvent,
   modelEventIso,
 } from '../lib/modelTracking'
@@ -40,9 +40,9 @@ export default function ModelIconBody({
   const { data } = useModelArchive()
   const { iconScale } = useLayoutSettings()
   const fontSize = tileFont(iconScale, 'secondary')
-  // 展示序 = 最新动态优先(退役沉底):slice(30) 截断前先排,否则入库 id 序让单一
-  // 厂家(智谱 44 个)占满截断窗,其余厂家与带红点的新动态在块内永不可见
-  const models = [...(data?.models ?? [])].sort(compareModelsByLatestEvent)
+  // 展示序 = 上线发布时间优先(退役沉底,2026-08-26 轴改):slice(30) 截断前先排,否则
+  // 入库 id 序让单一厂家(智谱 44 个)占满截断窗,其余厂家在块内永不可见
+  const models = [...(data?.models ?? [])].sort(compareModelsByRelease)
   const fresh = latestEventIso(models)
 
   return (
@@ -92,7 +92,7 @@ export default function ModelIconBody({
                   </span>
                   {latest && (
                     <span className="shrink-0 font-mono text-white/35" style={{ fontSize }}>
-                      {timeAgo(modelEventIso(latest.occurredOn))}
+                      {formatLatestEventBrief(latest)}
                     </span>
                   )}
                 </span>

@@ -10,11 +10,11 @@ import {
   PROVIDER_LABELS,
   STAGE_LABELS,
   benchmarkLabel,
-  compareModelsByLatestEvent,
+  compareModelsByRelease,
+  formatLatestEventBrief,
   formatModelPricing,
   formatEvaluationScore,
   isFreshModelEvent,
-  modelEventIso,
 } from '../lib/modelTracking'
 
 /**
@@ -123,11 +123,11 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
               </div>
             )}
             <ModelList
-              // filter 返回新数组,直接原位排(不动 React Query 缓存)——最新动态优先,
-              // 防「全部」被单一厂家的入库序垄断(2026-08-25 智谱 44 模型连排数屏)
+              // filter 返回新数组,直接原位排(不动 React Query 缓存)——上线发布时间优先
+              //(2026-08-26 轴改),防「全部」被单一厂家的入库序垄断(2026-08-25 智谱 44 模型连排数屏)
               models={data.models
                 .filter((m) => tab === 'all' || m.provider === tab)
-                .sort(compareModelsByLatestEvent)}
+                .sort(compareModelsByRelease)}
               evaluationStatus={data.evaluations}
               expandedId={expandedId}
               onToggle={(id) => setExpandedId((cur) => (cur === id ? null : id))}
@@ -192,10 +192,7 @@ function ModelList({
                   {m.availability.map((a) => AVAILABILITY_LABELS[a]).join('/')}
                 </span>
                 {latest && (
-                  <span className="shrink-0">
-                    {EVENT_KIND_LABELS[latest.kind]} ·{' '}
-                    {timeAgo(modelEventIso(latest.occurredOn)) || latest.occurredOn}
-                  </span>
+                  <span className="shrink-0">{formatLatestEventBrief(latest)}</span>
                 )}
               </span>
             </button>

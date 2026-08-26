@@ -3,13 +3,14 @@ import type { TrackedModel } from 'chrome-tab-shared'
 import {
   AVAILABILITY_LABELS,
   benchmarkLabel,
-  compareModelsByLatestEvent,
+  compareModelsByRelease,
   formatEvaluationScore,
   EVENT_KIND_LABELS,
   MODEL_KIND_LABELS,
   PROVIDER_LABELS,
   STAGE_LABELS,
   formatModelPricing,
+  formatLatestEventBrief,
   isFreshModelEvent,
   modelEventAnchorMs,
 } from './modelTracking'
@@ -93,24 +94,56 @@ const mkModel = (id: number, over: Partial<TrackedModel> = {}): TrackedModel => 
 })
 
 describe('模型追踪:列表排序(全部 tab 与块内列表共用)', () => {
-  it('最新动态优先——id 序垫底但昨天有动态的模型,排在 id 序靠前但无动态的智谱模型之前', () => {
-    // 线上症状:智谱 44 个按入库 id 连排最前,其余厂家被压数屏之后(2026-08-25)
-    const zhipuOld = mkModel(1) // 无动态,id 最小
-    const openaiFresh = mkModel(100, {
+  it('发布时间降序——gpt-5.6-sol 场景:发布 07-09、最新动态 08-21 降价,排位按 07-09 不因更新被顶前', () => {
+    // 2026-08-26 需求:排序轴 = 上线发布时间(可用类事件最早者),非最新动态——
+    // 按动态排使老模型因降价动态压过新发布模型,读作「刚发布」
+    const sol = mkModel(89, {
       provider: 'openai',
-      events: [{ id: 1, kind: 'updated', occurredOn: '2026-08-24', title: 't', sourceUrl: 'u' }],
+      events: [
+        { id: 1, kind: 'updated', occurredOn: '2026-08-21', title: '降价', sourceUrl: 'u' },
+        { id: 2, kind: 'api_available', occurredOn: '2026-07-09', title: '上线 API', sourceUrl: 'u' },
+      ],
     })
-    expect([zhipuOld, openaiFresh].sort(compareModelsByLatestEvent)[0]).toBe(openaiFresh)
+    const newerRelease = mkModel(120, {
+      provider: 'zhipu',
+      events: [{ id: 1, kind: 'api_available', occurredOn: '2026-08-10', title: '上线', sourceUrl: 'u' }],
+    })
+    expect([sol, newerRelease].sort(compareModelsByRelease)[0]).toBe(newerRelease)
   })
 
-  it('动态日期降序;同日按 id 升序稳定', () => {
-    const a = mkModel(10, { events: [{ id: 1, kind: 'updated', occurredOn: '2026-08-01', title: 't', sourceUrl: 'u' }] })
-    const b = mkModel(2, { events: [{ id: 1, kind: 'updated', occurredOn: '2026-08-25', title: 't', sourceUrl: 'u' }] })
-    const c = mkModel(3, { events: [{ id: 1, kind: 'updated', occurredOn: '2026-08-25', title: 't', sourceUrl: 'u' }] })
-    expect([a, b, c].sort(compareModelsByLatestEvent).map((m) => m.id)).toEqual([2, 3, 10])
+  it('发布锚点 = 可用类事件(api/产品/权重)最早者;多条可用取最早,更新动态不参与', () => {
+    const m = mkModel(1, {
+      events: [
+        { id: 1, kind: 'updated', occurredOn: '2026-08-25', title: 't', sourceUrl: 'u' },
+        { id: 2, kind: 'first_party_available', occurredOn: '2026-06-01', title: 't', sourceUrl: 'u' },
+        { id: 3, kind: 'api_available', occurredOn: '2026-05-01', title: 't', sourceUrl: 'u' },
+      ],
+    })
+    const laterAvail = mkModel(2, {
+      events: [{ id: 1, kind: 'api_available', occurredOn: '2026-05-02', title: 't', sourceUrl: 'u' }],
+    })
+    expect([m, laterAvail].sort(compareModelsByRelease).map((x) => x.id)).toEqual([2, 1]) // 05-01 早于 05-02,降序在后
   })
 
-  it('退役模型沉底(CONTEXT.md「可用在前、已退役在后」),退役内部仍按动态降序', () => {
+  it('无可用类事件的模型回退最早动态为锚点(gpt-5.6-cyber 仅 updated 行);无事件沉底', () => {
+    const cyber = mkModel(92, {
+      events: [{ id: 1, kind: 'updated', occurredOn: '2026-08-07', title: 't', sourceUrl: 'u' }],
+    })
+    const noEvents = mkModel(1) // 智谱无动态模型不因 id 靠前垄断首屏(2026-08-25 症状延续防护)
+    const released = mkModel(3, {
+      events: [{ id: 1, kind: 'api_available', occurredOn: '2026-08-20', title: 't', sourceUrl: 'u' }],
+    })
+    expect([noEvents, cyber, released].sort(compareModelsByRelease).map((x) => x.id)).toEqual([3, 92, 1])
+  })
+
+  it('发布日期同日按 id 升序稳定', () => {
+    const a = mkModel(10, { events: [{ id: 1, kind: 'api_available', occurredOn: '2026-08-01', title: 't', sourceUrl: 'u' }] })
+    const b = mkModel(2, { events: [{ id: 1, kind: 'api_available', occurredOn: '2026-08-01', title: 't', sourceUrl: 'u' }] })
+    const c = mkModel(3, { events: [{ id: 1, kind: 'api_available', occurredOn: '2026-08-01', title: 't', sourceUrl: 'u' }] })
+    expect([a, b, c].sort(compareModelsByRelease).map((m) => m.id)).toEqual([2, 3, 10])
+  })
+
+  it('退役模型沉底(CONTEXT.md「可用在前、已退役在后」),退役内部仍按发布降序', () => {
     const retiredFresh = mkModel(5, {
       stage: 'retired',
       events: [{ id: 1, kind: 'retired', occurredOn: '2026-08-25', title: 't', sourceUrl: 'u' }],
@@ -120,7 +153,7 @@ describe('模型追踪:列表排序(全部 tab 与块内列表共用)', () => {
       events: [{ id: 1, kind: 'retired', occurredOn: '2025-01-01', title: 't', sourceUrl: 'u' }],
     })
     const active = mkModel(1)
-    expect([retiredStale, retiredFresh, active].sort(compareModelsByLatestEvent).map((m) => m.id)).toEqual([
+    expect([retiredStale, retiredFresh, active].sort(compareModelsByRelease).map((m) => m.id)).toEqual([
       1,
       5,
       6,
@@ -170,5 +203,21 @@ describe('评测展示语汇(issues/08)', () => {
 
   it('evaluated 动态有展示名(Record 键完整性由 tsc 保障)', () => {
     expect(EVENT_KIND_LABELS.evaluated).toBe('进入评测')
+  })
+})
+
+describe('模型追踪:最近动态简报', () => {
+  // now 固定 2026-08-26 中午(北京时间):08-21 锚点零点起 5 天 12 小时 → 「5 天前」
+  const NOW = Date.parse('2026-08-26T12:00:00+08:00')
+
+  it('动态简报带类型锚定——降价更新不被读作发布时间(2026-08-26 线上症状)', () => {
+    // GPT-5.6 Sol 真实发布 2026-07-09,最新动态是 08-21 降价:
+    // 小块行此前裸显「5 天前」被读成「5 天前发布」,补「更新」锚定后歧义消除
+    expect(formatLatestEventBrief({ kind: 'updated', occurredOn: '2026-08-21' }, NOW)).toBe('更新 · 5 天前')
+  })
+
+  it('发布类动态如实标注;非法日期回原串不吞信息(对齐 Modal 原 || occurredOn 兜底)', () => {
+    expect(formatLatestEventBrief({ kind: 'api_available', occurredOn: '2026-07-09' }, NOW)).toBe('API 上线 · 48 天前')
+    expect(formatLatestEventBrief({ kind: 'updated', occurredOn: 'oops' }, NOW)).toBe('oops')
   })
 })

@@ -1,5 +1,6 @@
 import type {
   AvailabilityMode,
+  ModelEvent,
   ModelEventKind,
   ModelKind,
   ModelPricing,
@@ -7,6 +8,7 @@ import type {
   ReleaseStage,
   TrackedModel,
 } from 'chrome-tab-shared'
+import { timeAgo } from './timeAgo'
 
 /**
  * 模型追踪的展示语汇(CONTEXT.md「模型种类/发布阶段/开放方式/模型动态」的中文标签)
@@ -87,19 +89,57 @@ export function modelEventIso(occurredOn: string): string | null {
 }
 
 /**
- * 模型列表展示排序(详情 Modal「全部」tab 与块内列表共用):可用模型按最新动态日期
- * 降序、退役沉底(CONTEXT.md「可用在前、已退役在后」),同日按 id 升序稳定。排序键对齐
- * 产品语汇(红点/鲜度/最近动态行皆以动态为轴)——修复 2026-08-25 线上症状:按入库 id
- * 排序使智谱 44 模型连排数屏,其余厂家在「全部」与块内 slice(0,30) 中不可见。
- * events[0] 即最新动态(archive() 按 occurred_on 倒序返回);sort 原位排序,调用方
- * 须传拷贝(filter 返回的新数组可直接排)。
+ * 最近动态简报「类型 · 相对时间」:模型行右下角共用文案(小块滚动榜与详情 Modal 列表)。
+ * 类型锚定防裸相对时间被读作发布时间——2026-08-26 线上症状:GPT-5.6 Sol 真实发布
+ * 2026-07-09,行尾裸「5 天前」(= 08-21 降价动态)被读成「5 天前发布」。
+ * occurredOn 非法(理论不可达,后端恒产日期串)时显示原串,不吞信息。
  */
-export function compareModelsByLatestEvent(a: TrackedModel, b: TrackedModel): number {
+export function formatLatestEventBrief(
+  event: Pick<ModelEvent, 'kind' | 'occurredOn'>,
+  now = Date.now(),
+): string {
+  const ago = timeAgo(modelEventIso(event.occurredOn), now)
+  return ago === '' ? event.occurredOn : `${EVENT_KIND_LABELS[event.kind]} · ${ago}`
+}
+
+/** 「上线发布」类动态:发布锚点只认这些 kind(released 无产生点但预留,产生即纳入)。 */
+const RELEASE_KINDS: ReadonlySet<ModelEventKind> = new Set([
+  'released',
+  'api_available',
+  'first_party_available',
+  'weights_available',
+])
+
+/**
+ * 发布锚点(YYYY-MM-DD,空串 = 无):可用类动态(released/api/产品/权重)中最早者 =
+ * 「上线发布时间」;无可用类动态的模型(如 gpt-5.6-cyber 仅 updated 行)回退最早动态
+ * ——首条可证动态即最接近上线的时刻;无动态 → ''(排序沉底)。events 按 occurred_on
+ * 倒序返回,遍历结束时各变量即持有该类中日期最小者。
+ */
+function releaseAnchor(m: TrackedModel): string {
+  let fallback = ''
+  let avail = ''
+  for (const e of m.events) {
+    if (RELEASE_KINDS.has(e.kind)) avail = e.occurredOn
+    fallback = e.occurredOn
+  }
+  return avail !== '' ? avail : fallback
+}
+
+/**
+ * 模型列表展示排序(详情 Modal「全部」tab 与块内列表共用):可用模型按**上线发布时间**
+ * 降序、退役沉底(CONTEXT.md「可用在前、已退役在后」),同日按 id 升序稳定。
+ * 2026-08-26 排序轴由最新动态改为发布时间——按动态排使老模型(GPT-5.6 Sol 发布
+ * 07-09)因降价等更新动态(08-21)被顶到新发布模型之前,读作「刚发布」;发布锚点
+ * 取法见 releaseAnchor。无发布锚点与无动态模型均沉底(id 序在末段稳定)。
+ * sort 原位排序,调用方须传拷贝(filter 返回的新数组可直接排)。
+ */
+export function compareModelsByRelease(a: TrackedModel, b: TrackedModel): number {
   const ra = a.stage === 'retired' ? 1 : 0
   const rb = b.stage === 'retired' ? 1 : 0
   if (ra !== rb) return ra - rb
-  const da = a.events[0]?.occurredOn ?? ''
-  const db = b.events[0]?.occurredOn ?? ''
+  const da = releaseAnchor(a)
+  const db = releaseAnchor(b)
   if (da !== db) return da < db ? 1 : -1
   return a.id - b.id
 }
