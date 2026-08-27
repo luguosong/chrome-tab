@@ -200,4 +200,32 @@ describe('TrendingService 描述译制(ADR-0030/0036)', () => {
     expect(res.repos[0]!.description).toBe('A fast build tool')
     expect(res.repos[0]!.descriptionZh).toBeNull()
   })
+
+  it('手动重试(ADR-0036 显式入口):缓存内直接补译缺行;幂等——已入库行不再进批', async () => {
+    let failTranslation = true
+    const attempts: ('fail' | 'ok')[] = [] // 批译台账:fail 也会记(先记后抛),供轮询确认
+    const db = freshDb()
+    const svc = new TrendingService(db, {
+      fetchText: async () => page(ARTICLE_EN),
+      translateDescriptions: async (texts) => {
+        if (failTranslation) {
+          attempts.push('fail')
+          throw new Error('网关挂了')
+        }
+        attempts.push('ok')
+        return texts.map((t) => `译(${t})`)
+      },
+    })
+    const q = { since: 'daily', language: '', spoken: '' } as const
+    await svc.get(q)
+    await until(async () => attempts.includes('fail')) // 首轮自动补译已发起且被吞
+    expect(await zhRows(db)).toBe(0)
+
+    failTranslation = false
+    await svc.retryTranslations(q) // 显式补译:立即 resolve(fire-and-forget),落表异步
+    await until(async () => attempts.includes('ok') && (await zhRows(db)) > 0)
+    expect((await svc.get(q)).repos[0]!.descriptionZh).toBe('译(A fast build tool)')
+    await svc.retryTranslations(q) // 已入库后重复重试:ensure load 先滤掉,零新批
+    expect(attempts.filter((a) => a === 'ok')).toHaveLength(1)
+  })
 })

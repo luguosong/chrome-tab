@@ -6,7 +6,7 @@ import {
   type TrendingSince,
 } from 'chrome-tab-shared'
 import { timeAgo } from '../lib/timeAgo'
-import { useTrending } from '../hooks/useTrending'
+import { retryTrendingTranslation, useTrending, TRENDING_TRANSLATE_FRESH_MS } from '../hooks/useTrending'
 import ModalShell from './ModalShell'
 
 /**
@@ -15,6 +15,8 @@ import ModalShell from './ModalShell'
  * 与 ModelModal 种类胶囊同语汇——胶囊 = 叠加筛条件,区别于 tab 的切视图)。筛选即
  * queryKey:切组合自动按需现拉(后端内存缓存 1h,非默认组合首拉 ~2.4s)。
  * 行 = repo 名 + 总 star / 描述(完整换行永不省略,非中文后台译中、悬停原文)/ 语言色点·语言名 + 周期内增量,点行新开 tab。
+ * 译制状态分两段呈现:补译新鲜窗内 = 行内「译文生成中」徽章(在途);超窗仍有缺口 =
+ * 「暂未译出」聚合提示条 + 重试翻译钮(诚实失败态,POST 触发后端补一轮,轮询收果)。
  * 不持久化筛选状态:每次打开回到默认 Today 视图(trending 语义即「此刻什么热」)。
  * 容器:ModalShell 统一壳(ADR-0031)。
  */
@@ -24,8 +26,26 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
   /** 空串 = 不限(与 GitHub 原生参数缺省一致)。 */
   const [language, setLanguage] = useState('')
   const [spoken, setSpoken] = useState('')
-  const { data, isError, refetch, isFetching } = useTrending({ since, language, spoken })
+  /** 最近一次「重试翻译」点击时刻:把补译新鲜窗从 fetchedAt 拉回当下(轮询随它复活)。 */
+  const [retryAt, setRetryAt] = useState(0)
+  const [retryState, setRetryState] = useState<'idle' | 'sending' | 'error'>('idle')
+  const { data, isError, refetch, isFetching } = useTrending({ since, language, spoken }, { retryAt })
   const repos = data?.repos ?? []
+  // 有原文无译文的条数(wire 上 null 不分原因,以新鲜窗折算成 在途/暂未译出 两态)
+  const untranslated = repos.filter((r) => r.description != null && r.descriptionZh == null).length
+  const translateFresh =
+    data != null && Date.now() - Math.max(Date.parse(data.fetchedAt), retryAt) < TRENDING_TRANSLATE_FRESH_MS
+
+  const onRetryTranslation = async () => {
+    setRetryState('sending')
+    try {
+      await retryTrendingTranslation({ since, language, spoken })
+      setRetryAt(Date.now())
+      setRetryState('idle')
+    } catch {
+      setRetryState('error')
+    }
+  }
 
   return (
     <ModalShell onClose={onClose} ariaLabel="GitHub 趋势" className="p-6">
@@ -65,7 +85,27 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
         ) : repos.length === 0 ? (
           <div className="py-8 text-center text-sm text-white/50">该组合下暂无趋势仓库</div>
         ) : (
-          <ol className="mt-2 flex flex-col gap-0.5">
+          <>
+            {/* 暂未译出(新鲜窗外仍有缺口):聚合提示条 + 重试入口。不逐行标红——
+                行动出口只有一个(重试本组),逐行重复按钮是噪音;中性 white-alpha
+                保持深色面唯一交互色纪律,按钮语汇与上方「刷新失败,重试」同款。 */}
+            {!translateFresh && untranslated > 0 && (
+              <div className="mt-2 mb-1 flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                <span className="text-xs text-white/50">
+                  {untranslated} 条描述暂未译出
+                  {retryState === 'error' && ' · 重试发送失败,检查网络后可再试'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void onRetryTranslation()}
+                  disabled={retryState === 'sending'}
+                  className="shrink-0 border border-white/30 text-white/80 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent disabled:opacity-50"
+                >
+                  {retryState === 'sending' ? '正在发起…' : '重试翻译'}
+                </button>
+              </div>
+            )}
+            <ol className="mt-2 flex flex-col gap-0.5">
             {repos.map((r) => (
               <li key={r.repo} className="min-w-0">
                 <a
@@ -84,13 +124,15 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
                   </span>
                   {/* 描述独立成行、完整换行:它是了解项目的第一途径,永不省略。
                       层级仿 GitHub Trending:名字 → 描述 → 语言/增量元数据行。
-                      译文(ADR-0030)优先展示,悬停 title 放英文原文供核对(同新闻范式)。 */}
-                  {(r.descriptionZh ?? r.description) && (
+                      译文(ADR-0030)优先展示,悬停 title 放英文原文供核对(同新闻范式);
+                      有原文无译文 = 补译暂态,随文徽章声明「非终态」+ useTrending 轮询接力。 */}
+                  {r.description && (
                     <p
                       className="text-xs leading-snug text-white/60"
                       title={r.descriptionZh ? (r.description ?? undefined) : undefined}
                     >
                       {r.descriptionZh ?? r.description}
+                      {!r.descriptionZh && translateFresh && <TranslatingBadge />}
                     </p>
                   )}
                   <span className="flex min-w-0 items-baseline justify-between gap-3">
@@ -111,9 +153,25 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
                 </a>
               </li>
             ))}
-          </ol>
+            </ol>
+          </>
         )}
     </ModalShell>
+  )
+}
+
+/** 「译文生成中」徽章(ADR-0030 补译暂态的行内标记):随文小标声明当前原文不是
+ *  终态,译文由 useTrending 到达轮询送来后消失。呼吸点是唯一动律,motion-reduce 静态;
+ *  文字直出(非纯图标),读屏与色觉两类场景都不依赖颜色。 */
+function TranslatingBadge() {
+  return (
+    <span className="ml-1.5 inline-flex translate-y-px items-center gap-1 rounded-full border border-white/15 px-1.5 text-meta leading-none text-white/40">
+      <span
+        className="h-1 w-1 animate-pulse rounded-full bg-accent motion-reduce:animate-none"
+        aria-hidden="true"
+      />
+      译文生成中
+    </span>
   )
 }
 

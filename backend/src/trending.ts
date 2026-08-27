@@ -144,6 +144,21 @@ export class TrendingService {
     await this.get({ since: 'daily', language: '', spoken: '' })
   }
 
+  /** 手动重试译制(ADR-0030 补译的显式入口,前端「重试翻译」钮):取组合最新榜
+   *  (缓存有效即用,否则现抓并落缓存),强制补一轮缺失描述——ensure 内部 load
+   *  先滤已入库行,幂等(重复点击/与抓取后的自动轮不双译)。端点侧 fire-and-forget
+   *  (LLM 批译最坏跨分钟,同步等待必撞 HTTP 超时),译文到库由前端 15s 到达轮询
+   *  收果。 */
+  async retryTranslations(q: TrendingQuery): Promise<void> {
+    const key = queryKey(q)
+    let entry = this.cache.get(key)
+    if (!entry || Date.now() - entry.fetchedAt >= CACHE_TTL_MS) {
+      entry = { repos: await fetchTrending(this.deps, q), fetchedAt: Date.now() }
+      this.cache.set(key, entry)
+    }
+    void this.translateMissingDescriptions(entry.repos)
+  }
+
   /** 描述译文拼装(读侧内存 join,同 news feed 范式;25 哈希一次 in 查询,毫秒级)。 */
   private async toResponse(e: Entry): Promise<TrendingResponse> {
     const descriptions = e.repos.map((r) => r.description).filter((d): d is string => d != null)
@@ -177,16 +192,19 @@ export class TrendingService {
 // ---- HTTP 路由 ----
 
 export function trendingRoutes(service: TrendingService): Hono<AuthEnv> {
-  return new Hono<AuthEnv>().get('/api/trending', async (c) => {
+  /** 组合参数解析 + 白名单校验(参数直接进抓取 URL,拒绝任意值;GET/POST 共用)。 */
+  const parseQuery = (c: { req: { query: (k: string) => string | undefined } }): TrendingQuery => {
     const since = c.req.query('since') ?? 'daily'
     const language = c.req.query('language') ?? ''
     const spoken = c.req.query('spoken') ?? ''
-    // 白名单校验:参数直接进抓取 URL,拒绝任意值(精选词表即有效集)
     if (!SINCE_SET.has(since)) throw new BadRequest('since: 非法的时间范围')
     if (language && !LANG_SET.has(language)) throw new BadRequest('language: 未收录的语言')
     if (spoken && !SPOKEN_SET.has(spoken)) throw new BadRequest('spoken: 未收录的口语语言')
-    return c.json(await service.get({ since: since as TrendingSince, language, spoken }))
-  })
+    return { since: since as TrendingSince, language, spoken }
+  }
+  return new Hono<AuthEnv>()
+    .get('/api/trending', (c) => c.json(service.get(parseQuery(c))))
+    .post('/api/trending/retry-translation', (c) => service.retryTranslations(parseQuery(c)).then(() => c.json({ started: true })))
 }
 
 // ---- 调度 ----
