@@ -32,6 +32,9 @@ node_modules.root-broken/
 # mimosa 安全扫描插件的会话/hook 状态（仅本地，不入库）
 .mimosa/
 
+# AI 工作票与临时物料（仅本地，不入库）
+.scratch/
+
 # 本地诊断/复现脚本（依赖 npx 缓存 playwright、含机器相关绝对路径）
 frontend/scripts/clip-repro.mjs
 frontend/scripts/scale-repro.mjs
