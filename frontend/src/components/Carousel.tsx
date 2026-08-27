@@ -17,7 +17,8 @@ import { pageTransitionFrame } from '../lib/pageTransition'
 /**
  * 走马灯：基于 CSS scroll-snap，原生顺滑、自带触控/触控板支持。
  * - 横向滚动 + snap-x mandatory，每页宽度 = 容器宽度
- * - 左右玻璃箭头、常驻 PageTabs 页签条(切换/重排/管理,见 PageTabs)
+ * - 常驻 PageTabs 页签条(切换/重排/管理,见 PageTabs);翻页入口 = 页签/滚轮/键盘/触控滑动
+ *   (全局 ‹ › 箭头已移除——与页签同功能冗余,2026-08-27 测试报告 #8)
  * - 滚轮纵向 → 翻页(阻止页面内滚动,见 CONTEXT.md「页面」:固定画布;例外——
  *   跨格大 tile 的滚动主体内部优先消化滚轮、到边即停,不链式翻页,见 wheel 守卫)
  * - 键盘 ←/→ 翻页
@@ -82,9 +83,6 @@ interface CarouselProps {
 export default function Carousel({ labels, children, onActiveChange }: CarouselProps) {
   const ref = useRef<HTMLDivElement>(null)
   const [active, setActive] = useState(0)
-  // 拖拽态:拖拽中隐藏左右箭头,让位给 EdgeDropZone 的翻页方块(避免同位重叠)。
-  // Carousel 渲染在 DndContext 内,故可读 useDndContext;非拖拽时 active=null,箭头照常显示。
-  const { active: dragActive } = useDndContext()
 
   // 回弹翻页动画的 rAF 句柄。goTo 不再用原生 scrollTo(smooth),而是 rAF 驱动的
   // easeOutBack 弹簧曲线:到达目标后略微越界再回弹,「落定」手感更灵动。
@@ -312,13 +310,6 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
     return () => window.removeEventListener('keydown', onKey)
   }, [active, goTo])
 
-  // 翻页箭头:裸箭头悬浮壁纸,无壳;hover 圆形高光作反馈,active:scale-95 几何压感。
-  const arrowBtn =
-    'absolute top-1/2 -translate-y-1/2 z-20 ' +
-    'w-11 h-11 rounded-full flex items-center justify-center text-white/90 text-xl ' +
-    'hover:bg-white/40 dark:hover:bg-white/20 active:scale-95 transition ' +
-    'focus:outline-none focus-visible:ring-2 focus-visible:ring-accent'
-
   return (
     <CarouselApiContext.Provider value={{ active, count: labels.length, goTo }}>
       {/* h-full + flex-col:翻页区 flex-1 填满,PageTabs 在底部常驻。
@@ -350,30 +341,6 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
           ))}
           <CloneSlot ref={rightSlotRef} />
         </div>
-
-        {/* 左箭头(环形,ADR-0008):不再在首页隐藏——首页点此环形跳到末页。
-            仅单页时无处可去(环形=自身 no-op)才隐藏,避免死按钮。拖拽中隐藏让位给 EdgeDropZone。 */}
-        {labels.length > 1 && !dragActive && (
-          <button
-            type="button"
-            onClick={() => goTo(active - 1)}
-            className={`left-1 sm:left-4 ${arrowBtn}`}
-            aria-label="上一页"
-          >
-            ‹
-          </button>
-        )}
-        {/* 右箭头(环形,ADR-0008):不再在末页隐藏——末页点此环形跳到首页。 */}
-        {labels.length > 1 && !dragActive && (
-          <button
-            type="button"
-            onClick={() => goTo(active + 1)}
-            className={`right-1 sm:right-4 ${arrowBtn}`}
-            aria-label="下一页"
-          >
-            ›
-          </button>
-        )}
 
         {/* 常驻页签条:切换/重排/增删改页面(替换原圆点指示器,页签条信息更丰富) */}
         <PageTabs />
