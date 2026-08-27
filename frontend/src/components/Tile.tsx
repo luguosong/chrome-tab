@@ -14,14 +14,16 @@ import { ICON_SCALE, faviconPx, ghostWidth3Cols, labelBlockPx, LABEL_LINE_HEIGHT
  * TILE_FONT_TIERS——调字号只改一处。
  */
 
-/** 名称行(私有):显隐/字号/颜色随「布局设置」,行高与 lib 常数同源(见 labelBlockPx)。 */
-function IconLabel({ children }: { children: ReactNode }) {
+/** 名称行(私有):显隐/字号/颜色随「布局设置」,行高与 lib 常数同源(见 labelBlockPx)。
+ *  colorOverride:个别类型可强制覆盖用户设置色(天气名称行落在壁纸上,用户暗色
+ *  设置下不可读——2026-08-27 测试报告 #11;目前仅天气用)。 */
+function IconLabel({ colorOverride, children }: { colorOverride?: string; children: ReactNode }) {
   const { labelVisible, labelSize, labelColor } = useLayoutSettings()
   if (!labelVisible) return null
   return (
     <span
       className="shrink-0 max-w-full truncate text-center"
-      style={{ fontSize: labelSize, lineHeight: LABEL_LINE_HEIGHT, color: labelColor }}
+      style={{ fontSize: labelSize, lineHeight: LABEL_LINE_HEIGHT, color: colorOverride ?? labelColor }}
     >
       {children}
     </span>
@@ -145,6 +147,7 @@ export default function Tile({
   padPx = 0,
   bare = false,
   fill = false,
+  labelColor,
   children,
 }: {
   /** 名称行文本;空串不渲染行(显隐仍由「布局设置」管)。 */
@@ -155,6 +158,8 @@ export default function Tile({
   bare?: boolean
   /** 跨格撑满块(天气 3×1):块撑满画格,名称行照旧外置;与 bare 正交。 */
   fill?: boolean
+  /** 名称行颜色覆盖(默认随「布局设置」;见 IconLabel colorOverride)。 */
+  labelColor?: string
   children: ReactNode
 }) {
   return (
@@ -169,7 +174,7 @@ export default function Tile({
       >
         {children}
       </TileFrame>
-      {label ? <IconLabel>{label}</IconLabel> : null}
+      {label ? <IconLabel colorOverride={labelColor}>{label}</IconLabel> : null}
     </>
   )
 }

@@ -23,7 +23,8 @@ export default function WeatherIconBody({ icon, overlay = false }: { icon: Icon;
 
   return (
     // padPx=8:块内容(图标/文字)与玻璃边缘留呼吸;fill 模式 padding 直接生效,不参与钳制。
-    <Tile label={loc?.name || '天气'} overlay={overlay} fill padPx={8}>
+    // 名称行强制 white/90:用户暗色 labelColor 下城市名直叠壁纸不可读(报告 #11)。
+    <Tile label={loc?.name || '天气'} overlay={overlay} fill padPx={8} labelColor="rgba(255,255,255,0.9)">
       {hours.length ? (
         <div className="flex w-full h-full items-stretch gap-[3%]">
           {hours.map((h, i) => (
