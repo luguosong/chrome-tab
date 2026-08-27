@@ -12,7 +12,7 @@ import ModalShell from './ModalShell'
  * 标注(宁旧勿空,与后端口径一致);从未取到则整页「离线」。
  */
 export default function ServersModal({ onClose }: { onClose: () => void }) {
-  const { data } = useServers()
+  const { data, isError } = useServers()
   const entries = data ?? []
   // tab 初值随首波数据回落(entries 到达前 active 为 undefined → 空态)
   const [tab, setTab] = useState('')
@@ -22,7 +22,8 @@ export default function ServersModal({ onClose }: { onClose: () => void }) {
   return (
     <ModalShell onClose={onClose} ariaLabel="服务器状态详情" width="2xl" className="p-5">
       {entries.length === 0 ? (
-        <EmptyState text={hist.isError ? '服务器数据不可用' : '暂无监控机器(未配置 exporter)'} />
+        // 空态判据是快照请求(useServers)的成败:后端不可达 vs 真未配置
+        <EmptyState text={isError ? '服务器数据不可用' : '暂无监控机器(未配置 exporter)'} />
       ) : (
         <>
           <TabBar

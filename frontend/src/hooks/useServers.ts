@@ -17,7 +17,8 @@ export function useServers() {
   })
 }
 
-/** 24h 数值曲线(10min 粒度采样;Modal sparkline 用)。 */
+/** 24h 数值曲线(10min 粒度采样;Modal sparkline 用)。machine 空(清单未到/
+ * 未配置)时禁用——后端 machine 必填,空发必 400。 */
 export function useServerHistory(machine: string) {
   return useQuery({
     queryKey: ['server-history', machine],
@@ -25,6 +26,7 @@ export function useServerHistory(machine: string) {
       apiFetch<{ machine: string; points: ServerMonHistoryPoint[] }>(
         `/api/servers/history?machine=${encodeURIComponent(machine)}`,
       ),
+    enabled: machine !== '',
     staleTime: 5 * 60_000,
   })
 }
