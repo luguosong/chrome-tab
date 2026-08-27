@@ -45,9 +45,10 @@ const newsService = new NewsService(db, prodNewsDeps())
 // 不落库;描述译文按哈希落 trending_translations 终身复用(ADR-0030)
 const trendingService = new TrendingService(db, prodTrendingDeps())
 // 服务器状态(CONTEXT.md「服务器状态」):exporter URL(含 token)经 env 注入,两键
-// 均可缺省(本地 dev 无监控机 → 空清单,快照返回 [] 不炸)。thinkpad 走 frp
-// (localhost:10001,NO_PROXY 的 localhost 已覆盖);aliyun 走 host-gateway
-// (host.docker.internal,已加 NO_PROXY——误走 mihomo 代理必失败,同国内源事故口径)
+// 均可缺省(本地 dev 无监控机 → 空清单,快照返回 [] 不炸)。两台均走 host-gateway
+// (host.docker.internal):容器内 127.0.0.1 是容器自身——thinkpad 的 frp remotePort
+// (10001)与 aliyun 的 exporter(7800)都监听在宿主命名空间;域名已加 NO_PROXY
+// (误走 mihomo 代理必失败,同国内源事故口径)
 const servermonMachines: ServerMonMachine[] = (
   [
     ['thinkpad', process.env.SERVERMON_THINKPAD_URL],
