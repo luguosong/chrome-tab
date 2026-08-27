@@ -31,6 +31,15 @@ const ARTICLE_EN =
   '<span class="d-inline-block float-sm-right">5 stars today</span>' +
   '</article>'
 
+/** 混排描述条目(2026-08-27 线上周榜实抓形态:awesome-gpt-image-2,英文开头+汉字主体;
+ *  曾被汉字启发式整条跳过致 UI 观感「未翻译」,ADR-0036 的引子)。 */
+const ARTICLE_MIXED =
+  '<article class="Box-row">' +
+  '<h2><a href="/mix/repo">mix / repo</a></h2>' +
+  '<p>Prompt as Code 工业级提示词引擎与模板库</p>' +
+  '<span class="d-inline-block float-sm-right">7 stars this week</span>' +
+  '</article>'
+
 const page = (...articles: string[]) =>
   `<main><div class="Box"><div data-hpc="">${articles.join('')}</div></div></main>`
 
@@ -128,7 +137,7 @@ describe('TrendingService 缓存', () => {
   })
 })
 
-describe('TrendingService 描述译制(ADR-0030)', () => {
+describe('TrendingService 描述译制(ADR-0030/0036)', () => {
   /** fire-and-forget 补译落表的小轮询(真实 timer,本 describe 无 fake timers)。 */
   const until = async (cond: () => boolean | Promise<boolean>) => {
     for (let i = 0; i < 200 && !(await cond()); i++) await new Promise((r) => setTimeout(r, 5))
@@ -150,21 +159,23 @@ describe('TrendingService 描述译制(ADR-0030)', () => {
   const zhRows = async (db: ReturnType<typeof freshDb>) =>
     (await db.selectFrom('trending_translations').selectAll().execute()).length
 
-  it('英文描述后台补译:首批先回原文,落表后缓存命中路径 join 出译文;中文描述不送译', async () => {
-    const { deps, translationCalls } = makeDeps(page(ARTICLE_FULL, ARTICLE_EN))
+  it('英/中/混排描述全量送译(混排条是否译文由 prompt 约束 LLM 裁决):首批先回原文,落表后 join 出译文', async () => {
+    const { deps, translationCalls } = makeDeps(page(ARTICLE_MIXED, ARTICLE_EN))
     const db = freshDb()
     const svc = new TrendingService(db, deps)
     const first = await svc.get({ since: 'daily', language: '', spoken: '' })
-    // 汉字启发式:中文条 descriptionZh null 且不进译制集;英文条首批未及译文(null)
+    // 全量送译:不再有「含汉字即跳过」(0036 修订);首批 fire-and-forget 未及译文(恒 null)
     expect(first.repos.map((r) => [r.description, r.descriptionZh])).toEqual([
-      ['一个描述', null],
+      ['Prompt as Code 工业级提示词引擎与模板库', null],
       ['A fast build tool', null],
     ])
-    expect(translationCalls).toEqual([['A fast build tool']])
+    expect(translationCalls).toEqual([['Prompt as Code 工业级提示词引擎与模板库', 'A fast build tool']])
     await until(async () => (await zhRows(db)) > 0)
     const second = await svc.get({ since: 'daily', language: '', spoken: '' })
-    expect(second.repos[1]!.descriptionZh).toBe('译(A fast build tool)')
-    expect(second.repos[0]!.descriptionZh).toBeNull()
+    expect(second.repos.map((r) => r.descriptionZh)).toEqual([
+      '译(Prompt as Code 工业级提示词引擎与模板库)',
+      '译(A fast build tool)',
+    ])
   })
 
   it('同描述跨组合哈希复用,不重译', async () => {

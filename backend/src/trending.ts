@@ -20,8 +20,9 @@ import { BadRequest, FETCH_TIMEOUT, chromeHeaders, fetchText } from './common'
  * - 默认组合(今日 + 不限)由 cron 1h 保热,图标卡片读缓存零等待;
  * - 其余组合 GET 时现抓,后端内存缓存 TTL 1h,不落库(低频探察,不值得建表)。
  * 抓取失败降级:有过期缓存则照发(fetchedAt 如实陈旧),无缓存才 500。
- * 描述译制(ADR-0030):非中文描述(汉字启发式判定)后台批量译成中文、按描述哈希
- * 落 trending_translations 终身复用——榜单不落库,译文是「原文→中文」永久事实。
+ * 描述译制(ADR-0030/0036):描述后台批量译成中文(已是简体中文的由 prompt 约束
+ * 原样回显)、按描述哈希落 trending_translations 终身复用——榜单不落库,译文是
+ * 「原文→中文」永久事实。
  */
 
 /** 内存缓存 TTL;与 cron 保热节奏(1h)同量级。 */
@@ -37,18 +38,14 @@ const SPOKEN_SET = new Set(TRENDING_SPOKEN.map((l) => l.slug))
 const queryKey = (q: TrendingQuery) => `${q.since}|${q.language}|${q.spoken}`
 const starNumber = (s: string): number => Number(s.replace(/,/g, '')) || 0
 
-/** 汉字启发式(ADR-0030):描述含汉字 → 视为中文不译(零依赖零成本);无汉字的日文假名/
- *  韩文/西里尔等照送译成中文,正合「非中文都译」。误判形态温和——最坏是含汉字的日文
- *  描述保留原样,而非错译。 */
-const HAS_HAN = /[\u4e00-\u9fff]/
-
 /** 描述译制系统提示(对齐 news prompt 口径,域语境换为项目描述)。 */
-const TRENDING_SYSTEM_PROMPT = `你是专业技术编辑。把用户给出的编号英文项目描述列表逐条译成简体中文,输出同样编号的中文列表。
+const TRENDING_SYSTEM_PROMPT = `你是专业技术编辑。把用户给出的编号项目描述列表逐条处理,输出同样编号的中文列表。
 严格约束：
 1. 输出与输入逐条对应：每行「序号. 译文」,不添加任何解释、前后缀,也不要代码围栏。
 2. 专有名词、产品名、公司名、代码标识符、库名、API 名保留英文原样。
 3. emoji、数字、定价词（$5、free 等）、命令与代码片段原样保留。
-4. 译文简洁贴近原文长度,不扩写不解释。`
+4. 译文简洁贴近原文长度,不扩写不解释。
+5. 已是简体中文的条目原样输出该条；英中混杂的条目整体译成连贯中文（不保留未译的英文句子）。`
 
 /** 解析 trending 页 HTML(纯函数,fixture 见 trending.test.ts)。 */
 export function parseTrending(html: string): TrendingRepo[] {
@@ -161,7 +158,8 @@ export class TrendingService {
     }
   }
 
-  /** 非中文描述补译(ADR-0029 新闻范式移植):汉字启发式过滤(域过滤)→ 译文仓
+  /** 描述补译(ADR-0029 新闻范式移植;ADR-0036 起全量送译,已是中文的原样回显由
+   *  prompt 约束裁决——混排条目曾因汉字启发式整条跳过而 UI 观感「未翻译」)→ 译文仓
    *  ensure 收编骨架(去重/滤缺/批译/onConflict,ADR-0034)。整体 try 吞错:译制
    *  失败不冒泡进 get——那里会误伤正常取数路径。失败哈希未写,下次该组合缓存过期
    *  重抓(或 cron 1h)自然重试。 */
@@ -169,7 +167,7 @@ export class TrendingService {
     try {
       const descriptions = repos.map((r) => r.description).filter((d): d is string => d != null)
       if (descriptions.length === 0) return
-      await this.translations.ensure(descriptions, this.deps.translateDescriptions, (d) => !HAS_HAN.test(d))
+      await this.translations.ensure(descriptions, this.deps.translateDescriptions, () => true)
     } catch (e) {
       console.warn('趋势描述译制失败,保持原文:', e)
     }
