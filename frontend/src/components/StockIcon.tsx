@@ -22,8 +22,14 @@ export default function StockIconBody({ icon, overlay = false }: { icon: Icon; o
     <Tile label={name || symbol || '—'} overlay={overlay}>
       <TilePrimary className="font-mono text-white">{symbol || '—'}</TilePrimary>
       {q && (
-        <TileSecondary className="font-mono" style={{ color: toneVar(q) }}>
-          {q.price.toFixed(2)}
+        // 方向符号 + 百分比双编码(报告 2026-08-27 #2:裸红绿数字读不出涨跌);
+        // 1×1 块宽放不下「▲+2.35% 3917.28」全量,精确价进 hover title(详情 Modal 有全量)
+        <TileSecondary
+          className="font-mono"
+          style={{ color: toneVar(q) }}
+          title={`${q.price.toFixed(2)} ${q.change >= 0 ? '+' : ''}${q.pct.toFixed(2)}%`}
+        >
+          {q.change >= 0 ? '▲' : '▼'}{Math.abs(q.pct).toFixed(2)}%
         </TileSecondary>
       )}
     </Tile>

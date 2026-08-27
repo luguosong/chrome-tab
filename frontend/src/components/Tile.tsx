@@ -109,11 +109,12 @@ function TileFrame({
 }
 
 /** 主/次行共用渲染(私有):字号档 + 截断;mono/颜色由调用方 className/style 追加。 */
-type TileTextProps = { className?: string; style?: CSSProperties; children: ReactNode }
+type TileTextProps = { className?: string; style?: CSSProperties; children: ReactNode; title?: string }
 
-function TileText({ tier, className = '', style, children }: TileTextProps & { tier: TileFontTier }) {
+function TileText({ tier, className = '', style, children, title }: TileTextProps & { tier: TileFontTier }) {
   return (
     <span
+      title={title}
       className={`leading-none max-w-full truncate ${className}`}
       style={{ fontSize: tileFont(ICON_SCALE, tier), ...style }}
     >
