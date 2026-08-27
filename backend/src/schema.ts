@@ -183,6 +183,20 @@ CREATE TABLE IF NOT EXISTS model_evaluation_status (
     last_success_at TEXT,
     last_attempt_at TEXT
 );
+-- 待核验线索(2026-08-27 千问/智谱漏检事故):轮询解析出但基线未认领的条目——ADR-0025
+-- 「跳过待人工核验」的落地形态,跳过不再静默。upsert-only:基线收录后条目不再被写入,
+-- last_seen_at 停更,读侧只取 7 天内仍出现的(滚动信源翻页周期内漏检可见);月之暗面
+-- 双页各自 upsert 天然共存。行翻走前线索已可见,「漏了什么」不再不可考。
+CREATE TABLE IF NOT EXISTS model_pending_clues (
+    provider      TEXT NOT NULL,
+    occurred_on   TEXT NOT NULL,
+    model_key     TEXT NOT NULL, -- 条目最强标识(千问=模型ID串、智谱=文档链接),provider 内唯一
+    title         TEXT NOT NULL,
+    source_url    TEXT NOT NULL,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at  TEXT NOT NULL,
+    UNIQUE (provider, model_key)
+);
 -- 新闻(CONTEXT.md「新闻/新闻源」;ADR-0027:源定义移植 newsnow + cron 预取落库)。
 -- news_sources = 账号级勾选注册表 + 取数状态(48 轮失败标 failing,同 video_bloggers 口径);
 -- news_items = 源级共享条目池(无 user_id,同源全部勾选用户共享;published_at NULL = 热榜
@@ -425,6 +439,16 @@ export interface ModelEvaluationStatusTable {
   last_attempt_at: string | null
 }
 
+export interface ModelPendingCluesTable {
+  provider: string
+  occurred_on: string
+  model_key: string
+  title: string
+  source_url: string
+  first_seen_at: string
+  last_seen_at: string
+}
+
 export interface NewsSourcesTable {
   user_id: number
   source: string
@@ -474,6 +498,7 @@ export interface SchemaDatabase {
   model_fetch_status: ModelFetchStatusTable
   model_evaluations: ModelEvaluationsTable
   model_evaluation_status: ModelEvaluationStatusTable
+  model_pending_clues: ModelPendingCluesTable
   news_sources: NewsSourcesTable
   news_items: NewsItemsTable
   news_translations: NewsTranslationsTable

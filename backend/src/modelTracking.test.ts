@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ModelKind } from 'chrome-tab-shared'
 import { SINGLETON_TYPES, TYPE_SPANS } from './icons'
 import { createApp } from './app'
@@ -605,6 +605,33 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
     expect(source('zhipu')!.stale).toBe(true)
     expect(source('anthropic')!.stale).toBe(false) // 验收:单厂家陈旧不牵连另一家
     expect(a.models).toHaveLength(TOTAL_BASELINE)
+  })
+
+  it('待核验线索:基线外块落线索库、30 天窗口挡历史块、幂等不翻倍、7 天未见滚出读侧', async () => {
+    // 回归(2026-08-27 千问/智谱漏检):ADR-0025「跳过待核验」不再静默——基线外
+    // 块须落 model_pending_clues 可见。时间钉 2026-03-01:GLM-9.9 块(02-03)落
+    // 30 天窗内,Vidu 块(2025-06-18)被窗口挡掉(滚动信源的历史块非漏检信号)。
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-01T02:41:00Z'))
+    try {
+      const { db } = openDb(':memory:')
+      const svc = await makeService(db, makeDeps(ZHIPU_MD))
+      await svc.pollZhipu()
+      const clueTitles = async () => (await svc.archive()).pendingClues.map((c) => c.title)
+      expect((await clueTitles()).some((t) => t.includes('GLM-9.9'))).toBe(true)
+      expect((await clueTitles()).some((t) => t.includes('Vidu'))).toBe(false)
+      await svc.pollZhipu() // 二轮幂等:同行不翻倍
+      expect((await clueTitles()).filter((t) => t.includes('GLM-9.9'))).toHaveLength(1)
+      // 模拟条目从页面消失:last_seen_at 停更 8 天 → 滚出读侧(基线收录自愈同路径)
+      await db
+        .updateTable('model_pending_clues')
+        .set({ last_seen_at: new Date(Date.now() - 8 * 86400_000).toISOString() })
+        .where('title', 'like', '%GLM-9.9%')
+        .execute()
+      expect((await clueTitles()).some((t) => t.includes('GLM-9.9'))).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('Anthropic 信源失败只标记该厂家陈旧:智谱档案与源状态不受影响', async () => {

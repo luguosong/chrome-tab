@@ -160,6 +160,26 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
                   .join('；')}
               </div>
             )}
+            {/* 待核验线索(ADR-0025「跳过待核验」的可见形态):发布源出现基线不认识的
+                新条目——非故障,提示人工核验纳入;核验后下轮自愈消失。 */}
+            {(data?.pendingClues ?? []).length > 0 && (
+              <details className="py-1.5 text-meta text-white/50">
+                <summary className="cursor-pointer select-none hover:text-white/70">
+                  待核验线索 {data!.pendingClues.length} 条(发布源新条目不在跟踪名单,核验后消失)
+                </summary>
+                <ul className="mt-1 space-y-0.5 pl-1">
+                  {data!.pendingClues.map((c) => (
+                    <li key={`${c.provider}|${c.date}|${c.url}`} className="truncate">
+                      <span className="text-white/40">{PROVIDER_LABELS[c.provider]}</span>{' '}
+                      <span className="text-white/30">{c.date.slice(5)}</span>{' '}
+                      <a href={c.url} target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-accent">
+                        {c.title}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
             {tab === 'leaderboard' ? (
               <LeaderboardPanel models={data.models} status={data.evaluations} />
             ) : (

@@ -535,6 +535,21 @@ export function matchOpenAIEvents(
 
 // ---- 服务(档案读写 + 轮询;IO 经 ModelTrackingDeps 注入,测试零真网)----
 
+/** 待核验线索(解析出但基线未认领的条目;ADR-0025「跳过待核验」的可见形态)。 */
+export interface PendingClue {
+  occurredOn: string
+  title: string
+  sourceUrl: string
+  /** provider 内条目唯一键(文档链接/模型ID串),upsert 幂等去重。 */
+  modelKey: string
+}
+
+/** 一轮解析产物:认领事件 + 待核验线索(月暗文章流等无线索信源 clues 恒空)。 */
+export interface ParsedFeed {
+  hits: Array<{ officialId: string; event: Omit<ModelEvent, 'id'> }>
+  clues: PendingClue[]
+}
+
 export interface ModelTrackingDeps {
   /** init 可选透传(AA 评测 x-api-key header;生产 fetchText 原生支持,测试桩忽略)。 */
   fetchText: (url: string, timeoutMs: number, init?: RequestInit) => Promise<string>
@@ -678,7 +693,22 @@ export class ModelTrackingService {
       .selectAll()
       .where('evaluator', '=', AA_EVALUATOR)
       .executeTakeFirst()
+    // 线索只读「7 天内仍出现」的(基线收录后条目停写,last_seen_at 停更自然滚出)
+    const clueCutoff = new Date(Date.now() - 7 * 86400_000).toISOString()
+    const clueRows = await this.db
+      .selectFrom('model_pending_clues')
+      .selectAll()
+      .where('last_seen_at', '>=', clueCutoff)
+      .execute()
     return {
+      pendingClues: clueRows
+        .sort((a, b) => (a.occurred_on < b.occurred_on ? 1 : -1))
+        .map((r) => ({
+          provider: r.provider as ModelProviderId,
+          date: r.occurred_on,
+          title: r.title,
+          url: r.source_url,
+        })),
       models: models.map((r) => ({
         id: r.id,
         provider: r.provider as ModelProviderId,
@@ -721,21 +751,41 @@ export class ModelTrackingService {
     void this.pollEvaluations().catch((e) => console.error('模型追踪(评测)取数失败:', e))
   }
 
-  /** DeepSeek 一轮:Change Log HTML 日期段 h3 小节 → 标题匹配基线(解析器/匹配器随
-   *  基线收在 deepseekBaseline.ts;匹配器可为多命中,flatMap 展开;零小节 = 上游改版)。 */
+  /** DeepSeek 一轮:Change Log HTML 日期段 h3 小节 → 标题匹配基线;未认领小节落线索。 */
   async pollDeepSeek(): Promise<void> {
     await this.pollOne('deepseek', DEEPSEEK_UPDATES_URL, (html) => {
       const sections = parseDeepSeekUpdates(html)
-      return sections.length === 0 ? null : sections.flatMap(matchDeepSeekEvent)
+      if (sections.length === 0) return null
+      const hits = []
+      const clues: PendingClue[] = []
+      for (const s of sections) {
+        const matched = matchDeepSeekEvent(s)
+        if (matched.length > 0) hits.push(...matched)
+        else clues.push({ occurredOn: s.date, title: s.title, sourceUrl: s.anchorUrl, modelKey: s.anchorUrl })
+      }
+      return { hits, clues }
     })
   }
 
-  /** 通义一轮:百炼「模型上下架与更新」首表行 → 模型ID 匹配基线(解析器/匹配器随基线
-   *  收在 qwenBaseline.ts;零行 = 上游改版,同 pollOne 口径)。 */
+  /** 通义一轮:百炼「模型上下架与更新」首表行 → 模型ID 匹配基线;未认领行落线索
+   *  (表为滚动窗口,行翻走即失证——线索须当轮可见,2026-08-27 千问漏检教训)。 */
   async pollAlibaba(): Promise<void> {
     await this.pollOne('alibaba', QWEN_RELEASES_URL, (html) => {
       const rows = parseBailianReleases(html)
-      return rows.length === 0 ? null : matchQwenEvents(rows)
+      if (rows.length === 0) return null
+      const hits = []
+      const clues: PendingClue[] = []
+      for (const r of rows) {
+        const matched = matchQwenEvents([r])
+        if (matched.length > 0) hits.push(...matched)
+        else clues.push({
+          occurredOn: r.date,
+          title: `${r.modelIds.join(' ')}:${r.description.slice(0, 60)}`,
+          sourceUrl: QWEN_RELEASES_URL,
+          modelKey: r.modelIds.join(' '),
+        })
+      }
+      return { hits, clues }
     })
   }
 
@@ -787,19 +837,20 @@ export class ModelTrackingService {
   /**
    * 一轮取数的公共失败口径(fetch 抛错与「200 但零结构化条目」= 上游改版,均抛错标
    * 陈旧、保留库内最后成功结果,不静默清零;markSource 自身失败不吞原始错误——极端:
-   * DB 写挂,原始信源错误更值得上抛/记日志)。结构差异(解析器/匹配器)由调用方闭合,
-   * 返回 null 即「解析不出任何结构化条目」。
+   * DB 写挂,原始信源错误更值得上抛/记日志)。结构差异(解析器/匹配器/线索提取)由
+   * 调用方闭合,返回 null 即「解析不出任何结构化条目」。
    */
   private async pollOne(
     provider: ModelProviderId,
     url: string,
-    parseAndMatch: (md: string) => Array<{ officialId: string; event: Omit<ModelEvent, 'id'> }> | null,
+    parseAndMatch: (md: string) => ParsedFeed | null,
   ): Promise<void> {
     try {
       const md = await this.deps.fetchText(url, 30_000)
-      const hits = parseAndMatch(md)
-      if (hits === null) throw new Error('发布源无结构化条目(疑似上游改版)')
-      await this.ingest(provider, hits)
+      const feed = parseAndMatch(md)
+      if (feed === null) throw new Error('发布源无结构化条目(疑似上游改版)')
+      await this.ingest(provider, feed.hits)
+      await this.ingestClues(provider, feed.clues)
       await this.markSource(provider, true)
     } catch (e) {
       await this.markSource(provider, false).catch(() => {})
@@ -807,39 +858,117 @@ export class ModelTrackingService {
     }
   }
 
-  /** 智谱一轮:发布页 `<Update>` 块 → 双条件匹配基线(零块 = 上游改版,同 pollOne 口径)。 */
+  /**
+   * 线索 upsert-only(2026-08-27 千问/智谱漏检):30 天内条目才入;基线收录后该条目
+   * 不再被写入,last_seen_at 停更,读侧 7 天未见即滚出——收录自愈无需删行。滚动信源
+   * (百炼)翻走前线索已可见,「漏了什么」不再不可考。
+   */
+  private async ingestClues(provider: ModelProviderId, clues: PendingClue[]): Promise<void> {
+    const cutoff = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10)
+    const now = nowIso()
+    for (const c of clues) {
+      if (c.occurredOn < cutoff) continue
+      await this.db
+        .insertInto('model_pending_clues')
+        .values({
+          provider,
+          occurred_on: c.occurredOn,
+          model_key: c.modelKey,
+          title: c.title,
+          source_url: c.sourceUrl,
+          first_seen_at: now,
+          last_seen_at: now,
+        })
+        .onConflict((oc) =>
+          oc
+            .columns(['provider', 'model_key'])
+            .doUpdateSet({ occurred_on: c.occurredOn, title: c.title, source_url: c.sourceUrl, last_seen_at: now }),
+        )
+        .execute()
+    }
+  }
+
+  /** 智谱一轮:发布页 `<Update>` 块 → 双条件匹配基线;未认领块落线索(零块 = 上游改版)。 */
   async pollZhipu(): Promise<void> {
     await this.pollOne('zhipu', ZHIPU_RELEASES_URL, (md) => {
       const updates = parseZhipuReleases(md)
-      return updates.length === 0
-        ? null
-        : updates.map(matchZhipuEvent).filter(nonNull)
+      if (updates.length === 0) return null
+      const hits = []
+      const clues: PendingClue[] = []
+      for (const u of updates) {
+        const hit = matchZhipuEvent(u)
+        if (hit !== null) hits.push(hit)
+        else clues.push({
+          occurredOn: u.date,
+          title: u.description,
+          sourceUrl: u.docUrl ?? ZHIPU_RELEASES_URL,
+          modelKey: u.docUrl ?? `${u.date}|${u.description}`,
+        })
+      }
+      return { hits, clues }
     })
   }
 
-  /** Anthropic 一轮:release notes `### 日期` 段条目 → 双条件匹配基线(零段 = 上游改版)。 */
+  /** Anthropic 一轮:release notes `### 日期` 段条目 → 双条件匹配基线;未认领条目落线索。 */
   async pollAnthropic(): Promise<void> {
     await this.pollOne('anthropic', ANTHROPIC_RELEASES_URL, (md) => {
       const notes = parseAnthropicReleases(md)
-      return notes.length === 0
-        ? null
-        : notes.map(matchAnthropicEvent).filter(nonNull)
+      if (notes.length === 0) return null
+      const hits = []
+      const clues: PendingClue[] = []
+      for (const n of notes) {
+        const hit = matchAnthropicEvent(n)
+        if (hit !== null) hits.push(hit)
+        else clues.push({
+          occurredOn: n.date,
+          title: anthropicNoteTitle(n.text),
+          sourceUrl: n.links[0] ?? ANTHROPIC_RELEASES_URL,
+          modelKey: n.links[0] ?? `${n.date}|${n.text.slice(0, 80)}`,
+        })
+      }
+      return { hits, clues }
     })
   }
 
-  /** xAI 一轮:发布流 `## 月份`/`### 条目` → 标题匹配基线(零条目 = 上游改版)。 */
+  /** xAI 一轮:发布流 `## 月份`/`### 条目` → 标题匹配基线;未认领条目落线索。 */
   async pollXai(): Promise<void> {
     await this.pollOne('xai', XAI_RELEASES_URL, (md) => {
       const entries = parseXaiReleaseNotes(md)
-      return entries.length === 0 ? null : entries.flatMap(matchXaiEvent)
+      if (entries.length === 0) return null
+      const hits = []
+      const clues: PendingClue[] = []
+      for (const e of entries) {
+        const matched = matchXaiEvent(e)
+        if (matched.length > 0) hits.push(...matched)
+        else clues.push({
+          occurredOn: `${e.yearMonth}-01`,
+          title: e.title,
+          sourceUrl: e.linkUrl ?? XAI_RELEASES_URL,
+          modelKey: e.linkUrl ?? e.title,
+        })
+      }
+      return { hits, clues }
     })
   }
 
-  /** OpenAI 一轮:changelog 类型行 `Model:` 字段精确/前缀匹配基线(零条目 = 上游改版)。 */
+  /** OpenAI 一轮:changelog 类型行 `Model:` 字段精确/前缀匹配基线;基线外模型 ID 落线索。 */
   async pollOpenAI(): Promise<void> {
     await this.pollOne('openai', OPENAI_CHANGELOG_URL, (md) => {
       const entries = parseOpenAIChangelog(md)
-      return entries.length === 0 ? null : matchOpenAIEvents(entries)
+      if (entries.length === 0) return null
+      const clues: PendingClue[] = []
+      for (const e of entries) {
+        // 无 `Model:` 字段的平台/SDK 条目非模型线索,不落
+        if (e.models.length === 0) continue
+        if (e.models.some((id) => resolveOpenAIModelId(id) !== null)) continue
+        clues.push({
+          occurredOn: e.date,
+          title: openaiEntryTitle(e.firstLine !== '' ? e.firstLine : e.typeLine),
+          sourceUrl: openaiChangelogAnchor(e.date),
+          modelKey: `${e.date}|${e.models.join('+')}`,
+        })
+      }
+      return { hits: matchOpenAIEvents(entries), clues }
     })
   }
 
@@ -847,7 +976,8 @@ export class ModelTrackingService {
    * 月之暗面一轮:资讯 + Blog 两页独立取数(研究 §3)。两页都尝试——单页失败上抛首个
    * 错误,另一页照常入库(单页失败不清空该页既有动态);两页各自的「零卡片 = 上游
    * 改版」口径由 pollOne 统一处理。**任一页失败即标陈旧**:pollOne 按页标记,后一页
-   * 的成功会覆盖前一页的失败标记,故循环后统一补压终态(失败优先),再上抛。
+   * 的成功会覆盖前一页的失败标记,故循环后统一补压终态(失败优先),再上抛。线索
+   * 恒空:两页为文章流,非模型条目为主(线索即洪水);信源不滚动,漏检可事后核页。
    */
   async pollMoonshot(): Promise<void> {
     const errs: unknown[] = []
@@ -855,7 +985,7 @@ export class ModelTrackingService {
       try {
         await this.pollOne('moonshot', url, (html) => {
           const articles = parseKimiArticles(html)
-          return articles.length === 0 ? null : articles.map(matchKimiEvent).filter(nonNull)
+          return articles.length === 0 ? null : { hits: articles.map(matchKimiEvent).filter(nonNull), clues: [] }
         })
       } catch (e) {
         errs.push(e)
