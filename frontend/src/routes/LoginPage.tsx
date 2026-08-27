@@ -9,6 +9,7 @@ export default function LoginPage() {
   const nav = useNavigate()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [showPwd, setShowPwd] = useState(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -45,14 +46,39 @@ export default function LoginPage() {
             autoComplete="username"
             className="bg-white/20 text-white placeholder-white/50 px-3 py-2 rounded-lg outline-none transition focus:ring-2 focus:ring-accent"
           />
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="密码"
-            autoComplete="current-password"
-            className="bg-white/20 text-white placeholder-white/50 px-3 py-2 rounded-lg outline-none transition focus:ring-2 focus:ring-accent"
-          />
+          <div className="relative">
+            <input
+              type={showPwd ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="密码"
+              autoComplete="current-password"
+              className="w-full bg-white/20 text-white placeholder-white/50 px-3 py-2 pr-10 rounded-lg outline-none transition focus:ring-2 focus:ring-accent"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPwd((v) => !v)}
+              aria-label={showPwd ? '隐藏密码' : '显示密码'}
+              aria-pressed={showPwd}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-white/50 hover:text-white/90 transition focus-visible:outline-2 focus-visible:outline-white/60"
+            >
+              {showPwd ? (
+                // 睁眼(MIT Tabler icons)
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+                  <path d="M21 12c-2.4 4-5.4 6-9 6c-3.6 0-6.6-2-9-6c2.4-4 5.4-6 9-6c3.6 0 6.6 2 9 6" />
+                </svg>
+              ) : (
+                // 闭眼(MIT Tabler icons)
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 3l18 18" />
+                  <path d="M10.585 10.587a2 2 0 0 0 2.829 2.828" />
+                  <path d="M18.364 18.364c-1.481 1.126-3.391 1.885-5.864 1.885c-3.6 0-6.6-2-9-6a19 19 0 0 1 3.198-4.094" />
+                  <path d="M9.88 5.09a9.6 9.6 0 0 1 1.62-.49c3.6 0 6.6 2 9 6a19 19 0 0 1 -.564 1.05" />
+                </svg>
+              )}
+            </button>
+          </div>
           {err && <div className="text-down text-sm text-center">{err}</div>}
           <button
             disabled={busy}
