@@ -87,6 +87,20 @@ export const PROVIDER_LABELS: Record<ModelProviderId, string> = {
 }
 
 /**
+ * 厂家识别色(跑分榜行文字与头部图例):同锁 tailwind-300 亮度档,视觉重量一致,
+ * hue 两两间隔 ≥30° 保证深底可辨。Record 全键约束 = 厂家票扩时缺色直接编译失败。
+ */
+export const PROVIDER_ACCENT_COLORS: Record<ModelProviderId, string> = {
+  zhipu: '#7dd3fc', // sky-300(智谱蓝)
+  openai: '#6ee7b7', // emerald-300(ChatGPT 绿)
+  anthropic: '#fdba74', // orange-300(clay 橙)
+  xai: '#c4b5fd', // violet-300
+  moonshot: '#f0abfc', // fuchsia-300(月晕)
+  deepseek: '#fcd34d', // amber-300
+  alibaba: '#fda4af', // rose-300
+}
+
+/**
  * 动态发生时刻的锚点(ms):occurredOn 只有日期粒度(信源即如此),按**北京时间
  * 当日零点**锚定——日期粒度下的最诚实表达(对齐 AI 日报按出刊时刻推定的先例)。
  * 非法日期 → null。

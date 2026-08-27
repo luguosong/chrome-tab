@@ -25,6 +25,7 @@ import {
   formatModelPricing,
   formatEvaluationScore,
   isFreshModelEvent,
+  PROVIDER_ACCENT_COLORS,
 } from '../lib/modelTracking'
 
 /**
@@ -497,8 +498,22 @@ function LeaderboardPanel({
   if (rows.length === 0) {
     return <div className="text-meta text-white/50 py-6 text-center">暂无跑分数据</div>
   }
+  const presentProviders = [...new Set(models.map((m) => m.provider))]
   return (
     <div>
+      {/* 厂家识别色图例:行内模型名与厂家位按此着色,色即分组轴(色彩语义唯一,数值列一律中性白)。 */}
+      <div className="text-meta flex items-center gap-x-3 gap-y-1 flex-wrap pb-1.5">
+        {presentProviders.map((p) => (
+          <span key={p} className="flex items-center gap-1.5">
+            <span
+              aria-hidden
+              className="w-2 h-2 rounded-full inline-block"
+              style={{ backgroundColor: PROVIDER_ACCENT_COLORS[p] }}
+            />
+            <span style={{ color: PROVIDER_ACCENT_COLORS[p] }}>{PROVIDER_LABELS[p]}</span>
+          </span>
+        ))}
+      </div>
       <div className="text-meta text-white/45 flex items-baseline gap-2 flex-wrap pb-1.5">
         <span>{rows.length} 个模型</span>
         <span>· 按{benchmarkLabel(CODING_INDEX_BENCHMARK)}降序</span>
@@ -522,9 +537,16 @@ function LeaderboardPanel({
             <li key={model.id} className="rounded-xl px-3 py-2 hover:bg-white/10 transition">
               <div className="flex items-baseline gap-2 min-w-0">
                 <span className="w-6 shrink-0 text-right font-mono text-accent text-sm">{rank}</span>
-                <span className="min-w-0 flex-1 truncate text-sm text-white/90">{model.name}</span>
-                <span className="shrink-0 text-meta text-white/50">{PROVIDER_LABELS[model.provider]}</span>
-                <span className="w-12 shrink-0 text-right font-mono text-emerald-300">
+                <span className="min-w-0 flex-1 truncate text-sm" style={{ color: PROVIDER_ACCENT_COLORS[model.provider] }}>
+                  {model.name}
+                </span>
+                <span
+                  className="shrink-0 text-meta"
+                  style={{ color: `${PROVIDER_ACCENT_COLORS[model.provider]}88` }}
+                >
+                  {PROVIDER_LABELS[model.provider]}
+                </span>
+                <span className="w-12 shrink-0 text-right font-mono text-white/95">
                   {formatEvaluationScore(CODING_INDEX_BENCHMARK, codingIndex)}
                 </span>
               </div>
