@@ -84,11 +84,20 @@ describe('parse 共享小件', () => {
     // 回归(2026-08-26 cls/wallstreetcn 等多源空 tab 事故):新闻 16 源上线时无一进
     // NO_PROXY,国内上游被全局 HTTPS_PROXY(mihomo)绑架出境,延迟尖刺叠 10s 超时
     // → 首取连轮失败 → 条目池空。新源忘了配直连,这里立刻红。
+    // 回归(2026-08-27 智谱源陈旧事故):模型追踪上游同契约——bigmodel.cn 漏配,境外
+    // 节点访问国内站被 RST 连败、只标陈旧。fetch 上游 URL 常量所在文件一并纳入扫描。
     const here = dirname(fileURLToPath(import.meta.url))
     const compose = readFileSync(join(here, '../../../docker-compose.prod.yml'), 'utf8')
     const noProxy = /NO_PROXY: (.+)/.exec(compose)![1]!.split(',').map((s) => s.trim())
     // 确需走代理出境的源(GFW 阻断);新增须在此登记并在源文件注释说明
-    const proxied = ['github.com', 'news.ycombinator.com', 'producthunt.com']
+    const proxied = [
+      'github.com', 'news.ycombinator.com', 'producthunt.com',
+      // 模型追踪境外源:四家发布页 + AA 评测 API(issues/08;deepseek 基线内的 github
+      // 展示链接恰被 github.com 罩住)
+      'platform.claude.com', 'docs.x.ai', 'developers.openai.com', 'artificialanalysis.ai',
+    ]
+    // 仅作 sourceUrl/归因展示、不发起 fetch 的域(基线档案链接),与代理契约无关
+    const displayOnly = ['huggingface.co', 'openai.com']
     // 后缀匹配(条目剥前导点):`.sspai.com` 同时罩住裸域与任意子域
     const covers = (d: string, base: string) => d === base || d.endsWith(`.${base}`)
     const domains = new Set<string>()
@@ -97,9 +106,16 @@ describe('parse 共享小件', () => {
       for (const m of readFileSync(join(here, 'sources', f), 'utf8').matchAll(/https?:\/\/([a-z0-9.-]+)[/'"]/g))
         domains.add(m[1]!)
     }
+    // 模型追踪 fetch 上游 URL 常量所在文件(issues/08 后纳入;解析器/匹配器与 URL 同文件)
+    for (const f of ['../modelTracking.ts', '../aaEvaluations.ts', '../deepseekBaseline.ts', '../qwenBaseline.ts', '../openaiBaseline.ts']) {
+      for (const m of readFileSync(join(here, f), 'utf8').matchAll(/https?:\/\/([a-z0-9.-]+)[/'"]/g))
+        domains.add(m[1]!)
+    }
     expect(domains.size).toBeGreaterThanOrEqual(15) // 扫描坏了不许空集蒙混
     const uncovered = [...domains].filter(
-      (d) => !proxied.some((p) => covers(d, p)) && !noProxy.some((p) => covers(d, p.replace(/^\./, ''))),
+      (d) =>
+        !displayOnly.some((p) => covers(d, p)) &&
+        !proxied.some((p) => covers(d, p)) && !noProxy.some((p) => covers(d, p.replace(/^\./, ''))),
     )
     expect(uncovered).toEqual([])
   })
