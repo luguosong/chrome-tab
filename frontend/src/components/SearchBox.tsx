@@ -10,6 +10,9 @@ const ENGINES: Record<SearchEngineId, string> = {
   baidu: 'https://www.baidu.com/s?wd=',
 }
 
+/** 引擎显示名(占位符带引擎名:引擎选项只在设置里,主界面此前无感知——报告 #1 建议 3)。 */
+const ENGINE_LABEL: Record<SearchEngineId, string> = { google: 'Google', bing: '必应', baidu: '百度' }
+
 /** 搜索 / URL 跳转：像 URL 则直跳（补 https://），否则按「布局设置」的默认搜索引擎搜索。
  *  L2 折射壳(ADR-0012):近透明底靠背景遮罩保证对比。focus 反馈用 outline ——
  *  .lens-panel 的 background/border 是 unlayered CSS,恒胜 Tailwind 的 layered
@@ -51,7 +54,7 @@ export default function SearchBox() {
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="搜索或输入网址，回车跳转"
+          placeholder={`${ENGINE_LABEL[searchEngine]} 搜索或输入网址，回车跳转`}
           autoComplete="off"
           aria-label="搜索或输入网址"
           className="flex-1 min-w-0 ml-3 bg-transparent border-none outline-none text-sm text-white placeholder-white/50"
