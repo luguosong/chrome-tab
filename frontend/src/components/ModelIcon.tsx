@@ -20,7 +20,8 @@ const MAX_ROWS = 30
 
 /**
  * 模型追踪图标的专属网格渲染(见 CONTEXT.md「模型追踪」;3×2 大 tile,ADR-0021/0022
- * 范式):外壳/标头走 BigTile(标头鲜度 = 最新模型动态的发生时刻),主体 = 跟踪模型
+ * 范式):外壳/标头走 BigTile(标头鲜度 = 最新模型动态的发生时刻,「动态」前缀防读作
+ * 数据刷新时刻——2026-08-27 误读事故),主体 = 跟踪模型
  * 单列滚动榜(一行一模型:上行 = 名称 + 厂家,下行 = 种类 · 发布阶段 · 开放方式 +
  * 最近动态相对时间;24h 内新动态行首红点,时间驱动满窗自隐)。行不可点——基本资料与
  * 动态时间线都在「更多」Modal(行悬浮 title 透出最近动态标题)。空档案 BigTile 空态,
@@ -48,6 +49,7 @@ export default function ModelIconBody({
     <BigTile
       title="模型追踪"
       fresh={fresh}
+      freshLabel="动态"
       onOpenDetail={onOpenDetail}
       moreTitle="查看全部模型与动态"
       overlay={overlay}

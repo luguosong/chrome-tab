@@ -16,6 +16,7 @@ export default function BigTile({
   titleLinkHint,
   link,
   fresh,
+  freshLabel,
   onOpenDetail,
   moreTitle,
   overlay = false,
@@ -31,6 +32,9 @@ export default function BigTile({
   link?: { href: string; label: string; title: string }
   /** 榜首/最新版鲜度(ISO);null 不显示。 */
   fresh: string | null
+  /** 鲜度语义前缀(如「动态」);裸相对时间会被读作刷新时刻(2026-08-27 模型追踪
+   *  「1 天前」误读事故:鲜度轴是最新动态发生时刻,非数据抓取时刻)。 */
+  freshLabel?: string
   /** 「更多」按钮直调(ADR-0022);undefined = 编辑模式/overlay,按钮不渲染。 */
   onOpenDetail?: () => void
   /** 「更多」按钮悬浮提示。 */
@@ -74,6 +78,7 @@ export default function BigTile({
         <span className="flex shrink-0 items-baseline gap-3">
           {fresh && (
             <span className="font-mono text-white/50" style={{ fontSize }}>
+              {freshLabel ? `${freshLabel} ` : ''}
               {timeAgo(fresh)}
             </span>
           )}
