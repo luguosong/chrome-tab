@@ -169,7 +169,8 @@ export default function TodoIconBody({
                 }
               >
                 <span aria-hidden className="shrink-0 w-1 h-1 rounded-full bg-white/25" />
-                <span className="min-w-0 truncate text-white/90" style={{ fontSize }}>
+                {/* 单行截断的救济:快览卡外的兜底 hover 全文(报告 #14) */}
+                <span className="min-w-0 truncate text-white/90" style={{ fontSize }} title={t.title}>
                   {t.title}
                 </span>
               </li>
