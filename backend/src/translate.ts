@@ -28,12 +28,12 @@ export function extractContent(resp: unknown): string | null {
 }
 
 /**
- * 译制模型候选链(2026-08-25):free 优先,free 全不可用落到付费 coding-glm-5.3。
+ * 译制模型候选链(2026-08-27):free 优先(coding-glm-5.3-flash-free 打头),free 全不可用落到付费 coding-glm-5.3。
  * 候选失效 = 403/404(模型被禁/不存在)、429/5xx(限流/网关错)、400 no_available_channel(渠道没了)、超时(挂死)或 200 但响应无 content(空补全);其他错误(401 key/网络)换模型无益,直接抛。
  * CHANGELOG_LLM_MODEL 支持逗号分隔列表覆盖;Key 沿用 AIHUBMIX_API_KEY。
  */
 const DEFAULT_LLM_MODELS =
-  'coding-glm-5.1-free,coding-kimi-k3-free,gemini-3.6-flash-free,gemini-3.7-flash-free,gpt-5.5-free,coding-glm-5-free,coding-glm-5.3'
+  'coding-glm-5.3-flash-free,coding-glm-5.3-free,coding-kimi-k3-free,gemini-3.7-flash-free,gpt-5.5-free,coding-glm-5-free,coding-glm-5.3'
 
 export function modelCandidates(env: NodeJS.ProcessEnv = process.env): string[] {
   // 空串/纯分隔符(如 ",")回退默认:compose 引用行对 .env 缺省键注入的是 ''(非
@@ -56,6 +56,25 @@ export function isCandidateExhausted(e: unknown): boolean {
     err?.name === 'TimeoutError' ||
     /no_available_channel/.test(err?.body ?? '')
   )
+}
+
+/**
+ * 发请求闸门(free 渠道限额 2026-08-27 告示:5 次/分钟、500 次/天、100 万 Token/天):
+ * 进程级单例,连续网关请求至少间隔 interval——changelog/news/trending 三域共享同一闸门
+ * 主动避 429,而非全靠候选链事后换路(换路只在限额按模型计时有效,按账号计时换路无用)。
+ * 检查与占位之间无 await(JS 单线程原子),并发轮询亦正确排队;间隔按「发起时刻」计,
+ * 请求耗时算在外,实际速率恒 ≤ 上限。付费兜底同受此闸约束——兜底一天碰不了几次,代价可忽略。
+ */
+let nextRequestAt = 0
+export async function gateRequest(intervalMs: number): Promise<void> {
+  for (;;) {
+    const now = Date.now()
+    if (now >= nextRequestAt) {
+      nextRequestAt = now + intervalMs
+      return
+    }
+    await new Promise((r) => setTimeout(r, nextRequestAt - now))
+  }
 }
 
 /**
@@ -136,6 +155,8 @@ export function makeBatchTranslator(
 ): BatchTranslator {
   const apiKey = env.AIHUBMIX_API_KEY ?? ''
   const models = modelCandidates(env)
+  // 0/空/非数回默认 12_000ms(5 次/分钟的安全间隔);测试注入小值跳过等待
+  const minInterval = Number(env.LLM_MIN_REQUEST_INTERVAL_MS) || 12_000
   return async (texts) => {
     const out: (string | null)[] = texts.map(() => null)
     // 有声拒绝(对齐 changelog「译制被拒绝(Key 缺失?)」范式):静默 return 会与其他
@@ -157,6 +178,7 @@ export function makeBatchTranslator(
         const log = (outcome: string, extra = '') =>
           console.warn(`[${logTag}] 批 ${start / BATCH_SIZE + 1} 候选 ${i + 1}/${models.length} ${model} ${outcome}${extra}`)
         try {
+          await gateRequest(minInterval)
           const beganAt = Date.now()
           const { content, resp } = await callModel(model, apiKey, systemPrompt, user)
           // 200 但拿不到 content / 解析零配对:视同候选失效换下一个(changelog 同款静默失败形态)

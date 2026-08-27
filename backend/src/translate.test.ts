@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDb } from './db'
 import {
   buildNumberedList,
@@ -82,11 +82,11 @@ describe('extractContent(畸形响应 → null 触发降级,不抛)', () => {
 })
 
 describe('modelCandidates(free 优先,CHANGELOG_LLM_MODEL 逗号分隔覆盖)', () => {
-  it('默认:六 free + coding-glm-5.3 兜底', () => {
+  it('默认:coding-glm-5.3-flash-free 打头,其余 free + coding-glm-5.3 兜底', () => {
     expect(modelCandidates()).toEqual([
-      'coding-glm-5.1-free',
+      'coding-glm-5.3-flash-free',
+      'coding-glm-5.3-free',
       'coding-kimi-k3-free',
-      'gemini-3.6-flash-free',
       'gemini-3.7-flash-free',
       'gpt-5.5-free',
       'coding-glm-5-free',
@@ -106,10 +106,15 @@ describe('modelCandidates(free 优先,CHANGELOG_LLM_MODEL 逗号分隔覆盖)', 
 
 describe('makeBatchTranslator 候选链(真链路 mock fetch;no_key/换候选/401 fatal/部分成果)', () => {
   const realFetch = globalThis.fetch
+  // 节流闸门默认 12s(free 5rpm),测试注入 1ms 跳过等待;节流行为本身单测见末尾用例
+  beforeEach(() => {
+    process.env.LLM_MIN_REQUEST_INTERVAL_MS = '1'
+  })
   afterEach(() => {
     globalThis.fetch = realFetch
     delete process.env.AIHUBMIX_API_KEY
     delete process.env.CHANGELOG_LLM_MODEL
+    delete process.env.LLM_MIN_REQUEST_INTERVAL_MS
     vi.restoreAllMocks()
   })
 
@@ -160,6 +165,24 @@ describe('makeBatchTranslator 候选链(真链路 mock fetch;no_key/换候选/40
     expect(models).toEqual(['m1', 'm1'])
     expect(out.slice(0, 20)).toEqual(Array.from({ length: 20 }, () => '一'))
     expect(out.slice(20)).toEqual([null, null, null, null, null])
+  })
+
+  it('节流闸门:连续两次网关请求至少间隔 LLM_MIN_REQUEST_INTERVAL_MS(free 5rpm 限额)', async () => {
+    process.env.AIHUBMIX_API_KEY = 'k'
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const times: number[] = []
+    globalThis.fetch = vi.fn(async () => {
+      times.push(Date.now())
+      return new Response(JSON.stringify(OK('1. 甲').body), { status: 200 })
+    }) as typeof fetch
+    const t = makeBatchTranslator('sys', 'tag-gate', {
+      AIHUBMIX_API_KEY: 'k',
+      LLM_MIN_REQUEST_INTERVAL_MS: '80',
+    })
+    await t(['a'])
+    await t(['b'])
+    expect(times.length).toBe(2)
+    expect(times[1] - times[0]).toBeGreaterThanOrEqual(80)
   })
 })
 
