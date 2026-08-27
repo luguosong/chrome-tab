@@ -26,7 +26,9 @@ import {
   formatEvaluationScore,
   isFreshModelEvent,
   PROVIDER_ACCENT_COLORS,
+  PROVIDER_LOGO_DOMAINS,
 } from '../lib/modelTracking'
+import { faviconUrl } from '../lib/iconData'
 
 /**
  * 模型追踪详情 Modal(见 CONTEXT.md「模型追踪」,ADR-0022「更多」标头唯一入口):
@@ -501,14 +503,16 @@ function LeaderboardPanel({
   const presentProviders = [...new Set(models.map((m) => m.provider))]
   return (
     <div>
-      {/* 厂家识别色图例:行内模型名与厂家位按此着色,色即分组轴(色彩语义唯一,数值列一律中性白)。 */}
+      {/* 厂家识别图例:logo + 着色厂名建立「颜色↔厂商」字典(色即分组轴,数值列一律中性白)。 */}
       <div className="text-meta flex items-center gap-x-3 gap-y-1 flex-wrap pb-1.5">
         {presentProviders.map((p) => (
           <span key={p} className="flex items-center gap-1.5">
-            <span
-              aria-hidden
-              className="w-2 h-2 rounded-full inline-block"
-              style={{ backgroundColor: PROVIDER_ACCENT_COLORS[p] }}
+            <img
+              src={faviconUrl(`https://${PROVIDER_LOGO_DOMAINS[p]}`)}
+              alt=""
+              loading="lazy"
+              onError={(e) => (e.currentTarget.style.visibility = 'hidden')}
+              className="w-3.5 h-3.5 shrink-0 rounded-[4px] ring-1 ring-white/15"
             />
             <span style={{ color: PROVIDER_ACCENT_COLORS[p] }}>{PROVIDER_LABELS[p]}</span>
           </span>
@@ -537,8 +541,18 @@ function LeaderboardPanel({
             <li key={model.id} className="rounded-xl px-3 py-2 hover:bg-white/10 transition">
               <div className="flex items-baseline gap-2 min-w-0">
                 <span className="w-6 shrink-0 text-right font-mono text-accent text-sm">{rank}</span>
-                <span className="min-w-0 flex-1 truncate text-sm" style={{ color: PROVIDER_ACCENT_COLORS[model.provider] }}>
-                  {model.name}
+                <span
+                  className="min-w-0 flex-1 flex items-center gap-1.5 text-sm"
+                  style={{ color: PROVIDER_ACCENT_COLORS[model.provider] }}
+                >
+                  <img
+                    src={faviconUrl(`https://${PROVIDER_LOGO_DOMAINS[model.provider]}`)}
+                    alt=""
+                    loading="lazy"
+                    onError={(e) => (e.currentTarget.style.visibility = 'hidden')}
+                    className="w-4 h-4 shrink-0 rounded-[4px] ring-1 ring-white/15"
+                  />
+                  <span className="truncate">{model.name}</span>
                 </span>
                 <span
                   className="shrink-0 text-meta"

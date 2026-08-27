@@ -100,6 +100,17 @@ export const PROVIDER_ACCENT_COLORS: Record<ModelProviderId, string> = {
   alibaba: '#fda4af', // rose-300
 }
 
+/** 厂家官网域(跑分榜行内 logo,走 lib/iconData 的 google s2 favicon 服务,与 nav 图标同源)。 */
+export const PROVIDER_LOGO_DOMAINS: Record<ModelProviderId, string> = {
+  zhipu: 'zhipuai.cn',
+  openai: 'openai.com',
+  anthropic: 'anthropic.com',
+  xai: 'x.ai',
+  moonshot: 'moonshot.cn',
+  deepseek: 'deepseek.com',
+  alibaba: 'alibaba.com',
+}
+
 /**
  * 动态发生时刻的锚点(ms):occurredOn 只有日期粒度(信源即如此),按**北京时间
  * 当日零点**锚定——日期粒度下的最诚实表达(对齐 AI 日报按出刊时刻推定的先例)。
