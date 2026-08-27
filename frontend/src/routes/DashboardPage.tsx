@@ -287,6 +287,13 @@ function Dashboard() {
     // 落 over 位序,图标拖拽中即现身目标页网格。落回弹层
     // 已被上方守卫早退;搬移后 parentId 变 null,后续 onDragOver 走顶层同页早退,
     // 不往复搬移(防渲染循环,#735/#1421)。dwell 已挡成员(hook 判 parentId),不冲突。
+    // 查看态守卫:组内排序两模式均可拖,但**移出分组仍仅编辑模式**(CONTEXT.md「分组」)——
+    // 不做乐观搬出,松手走 onDragEnd 的组内重排分支(over 非组内成员 → findIndex=-1
+    // 不提交),图标自然弹回原位,弹层保持开。
+    if (dragged.parentId != null && !editing) {
+      showNotice('移出分组需先右键进入编辑模式')
+      return
+    }
     if (dragged.parentId != null) {
       const targetPageId = overIsPage ? overData.pageId : Number(overContainer)
       if (!overIsPage && (overContainer == null || Number.isNaN(targetPageId))) return

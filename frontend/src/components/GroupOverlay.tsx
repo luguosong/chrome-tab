@@ -27,7 +27,9 @@ import type { Icon } from '../lib/types'
  *
  * 交互:滚轮翻组内页(原生非被动监听吃掉事件,不透传;≤9 个成员也吃)与页点指示器;
  * 点组名行内改名(任意模式,CONTEXT.md「分组改名除外」;清空回落「新建分组」);
- * 查看态点子图标 = 新标签打开后关闭;编辑态子图标可拖排序 + ✎ 编辑配置 + × 删除。
+ * 查看态点子图标 = 新标签打开后关闭;子图标两种模式均可拖组内排序(对齐页面网格
+ * 06「查看/编辑均启用拖拽」先例;移出分组仍仅编辑模式,见 DashboardPage 守卫),
+ * 编辑态另有 ✎ 编辑配置 + × 删除。
  */
 export default function GroupOverlay({
   group,
@@ -218,11 +220,13 @@ export function parseGroupContainerId(containerId: string): number | null {
 }
 
 /**
- * 弹层内单个子图标(组成员恒为 nav,后端把关)。查看态 = `<a>` 新标签打开后关弹层
- * (sortable disabled);编辑态 = 可拖排序(listeners)+ ✎ 编辑配置(EditForm popover,
- * 复用网格 Icon.tsx 同款——编辑图标配置是编辑模式通用能力,CONTEXT.md「编辑模式」)
- * + × 删除(DELETE,乐观移除;组因此变空由服务端删组行 → openGroup 落空 → 弹层随
- * Dashboard 卸载)。
+ * 弹层内单个子图标(组成员恒为 nav,后端把关)。查看态 = div role=link,点击/中键/
+ * Enter 显式 window.open 新标签打开后关弹层(见下方查看态分支注释);编辑态 =
+ * ✎ 编辑配置(EditForm popover,复用网格 Icon.tsx 同款——编辑图标配置是编辑模式
+ * 通用能力,CONTEXT.md「编辑模式」)+ × 删除(DELETE,乐观移除;组因此变空由服务端
+ * 删组行 → openGroup 落空 → 弹层随 Dashboard 卸载)。组内排序两种模式均可拖
+ * (对齐网格 Icon.tsx「查看/编辑均启用」:listeners 恒注入,点击/拖拽分流靠传感器
+ * 激活策略——鼠标 8px、触控长按 250ms)。
  */
 function MemberTile({ member, onClose }: { member: Icon; onClose: () => void }) {
   const { editing } = useEditMode()
@@ -234,7 +238,6 @@ function MemberTile({ member, onClose }: { member: Icon; onClose: () => void }) 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: member.id,
     data: { pageId: member.pageId },
-    disabled: !editing, // 组内排序/移出仅编辑模式(CONTEXT.md「分组」)
   })
 
   const name = extractString(member.data, 'name')
@@ -245,12 +248,15 @@ function MemberTile({ member, onClose }: { member: Icon; onClose: () => void }) 
   const body = (
     <>
       {/* squircle 玻璃底板 + 居中 favicon。固定迷你尺寸、不随图标缩放(ICON_SCALE):
-          组内是统一迷你渲染(CONTEXT.md「分组」) */}
+          组内是统一迷你渲染(CONTEXT.md「分组」)。img 须 draggable={false}:原生 drag
+          判定会先派 pointercancel 掐断 dnd-kit 指针流(慢速拖拽必中,dragstart 上
+          preventDefault 为时已晚),须从判定层禁掉。 */}
       <span className="glass-soft rounded-[24%] flex items-center justify-center w-[60px] h-[60px] mx-auto">
         {src && (
           <img
             src={src}
             alt=""
+            draggable={false}
             className="w-10 h-10 rounded-[22%]"
             referrerPolicy="no-referrer"
           />
@@ -262,22 +268,47 @@ function MemberTile({ member, onClose }: { member: Icon; onClose: () => void }) 
     </>
   )
 
-  if (!editing) {
-    return (
-      <a
-        ref={setNodeRef}
-        href={url}
-        onClick={onClose}
-        className="flex flex-col items-center gap-1.5 rounded-2xl p-1.5 cursor-pointer hover:bg-white/10 active:scale-95 transition focus-visible:outline-2 focus-visible:outline-white/60"
-      >
-        {body}
-      </a>
-    )
-  }
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
     ...(isDragging ? { opacity: 0.4 } : null),
+  }
+
+  if (!editing) {
+    // 查看态用 div role=link 而非 <a href>:拖拽松手的 click 会被 dnd-kit 在 document
+    // capture 层 stopPropagation(只停传播、不阻 defaultAction),<a> 的原生激活仍会当前
+    // 标签导航走——无 href 即无原生 defaultAction,「新标签打开」由显式 window.open
+    // 承接(中键 onAuxClick、键盘 Enter 同路),与 CONTEXT.md 组内语义一致。
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        role="link"
+        tabIndex={0}
+        aria-label={name || '打开链接'}
+        onClick={() => {
+          window.open(url, '_blank', 'noopener')
+          onClose()
+        }}
+        onAuxClick={(e) => {
+          if (e.button === 1) {
+            window.open(url, '_blank', 'noopener')
+            onClose()
+          }
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            window.open(url, '_blank', 'noopener')
+            onClose()
+          }
+        }}
+        draggable={false}
+        {...listeners}
+        className="flex flex-col items-center gap-1.5 rounded-2xl p-1.5 cursor-pointer hover:bg-white/10 active:scale-95 transition focus-visible:outline-2 focus-visible:outline-white/60"
+      >
+        {body}
+      </div>
+    )
   }
   return (
     <div
