@@ -20,7 +20,9 @@ export default function MoreButton({
       type="button"
       onClick={onClick}
       title={title}
-      className="shrink-0 rounded-full bg-white/15 px-2.5 py-1 min-h-8 text-white/70 hover:bg-white/30 hover:text-accent active:bg-white/40 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
+      // min-h-[26px]:瘦于历史 32px——标头是大 tile 高度预算最贵的一行,触达保
+      // WCAG 2.5.8 的 24px 底线即可(2026-08-27 压缩标头、让高给主体榜单纯列表)
+      className="shrink-0 rounded-full bg-white/15 px-2.5 py-1 min-h-[26px] text-white/70 hover:bg-white/30 hover:text-accent active:bg-white/40 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
       style={{ fontSize }}
     >
       更多

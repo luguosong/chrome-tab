@@ -58,7 +58,9 @@ export default function BigTile({
           : undefined
       }
     >
-      <div className="flex items-baseline justify-between gap-3 px-4 pt-2.5 pb-2 border-b border-white/10">
+      {/* 标头垂直预算压缩(2026-08-27):pt-2/pb-1.5 + 按钮 26px 触达,共省 ~10px
+          给主体榜单纯列表——标头是一行 chrome,信息密度该让位内容 */}
+      <div className="flex items-baseline justify-between gap-3 px-4 pt-2 pb-1.5 border-b border-white/10">
         {titleHref ? (
           <a
             href={titleHref}
@@ -88,7 +90,7 @@ export default function BigTile({
               target="_blank"
               rel="noreferrer"
               title={link.title}
-              className="shrink-0 rounded-full bg-white/15 px-2.5 py-1 min-h-8 flex items-center text-white/70 hover:bg-white/30 hover:text-accent active:bg-white/40 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
+              className="shrink-0 rounded-full bg-white/15 px-2.5 py-1 min-h-[26px] flex items-center text-white/70 hover:bg-white/30 hover:text-accent active:bg-white/40 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
               style={{ fontSize }}
             >
               {link.label}
