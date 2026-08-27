@@ -397,6 +397,29 @@ export const ZHIPU_BASELINE: BaselineModel[] = [
   // ---- 多模态理解(模型广场「视觉模型」表)----
   {
     provider: 'zhipu',
+    officialId: 'glm-5.3-flash',
+    name: 'GLM-5.3-Flash',
+    kind: 'multimodal_understanding',
+    stage: 'ga',
+    availability: ['api', 'open_weights'], // 权重已放出(HuggingFace zai-org/GLM-5.3-Flash,2026-08-27 核验)
+    summary: 'GLM-5 系列首个原生多模态模型:视觉原生融入 Coding 循环,稀疏+线性混合注意力大幅压低 1M 上下文成本',
+    sources: [
+      { title: 'GLM-5.3-Flash 模型文档', url: DOC('/cn/guide/models/vlm/glm-5.3-flash') },
+      { title: 'GLM-5.3-Flash 发布文章(z.ai)', url: 'https://z.ai/blog/glm-5.3-flash' },
+      PRICING_PAGE,
+    ],
+    pricing: null, // 价格页 JS 渲染,2026-08-27 核验日未取得一手现价;核到后补(基线口径:未核验 → null)
+    limits: ctx('1M', '128K'),
+    trainingParams: { total: '320B', active: '18B' },
+    matchAliases: ['GLM-5.3-Flash'],
+    matchSlugs: ['/guide/models/vlm/glm-5.3-flash'],
+    events: [
+      { kind: 'api_available', occurredOn: '2026-08-25', title: 'GLM-5.3-Flash 轻量高速视觉模型上线', sourceUrl: DOC('/cn/guide/models/vlm/glm-5.3-flash') },
+      { kind: 'updated', occurredOn: '2026-08-26', title: 'GLM-5.3-Flash 原生多模态模型上线', sourceUrl: DOC('/cn/guide/models/vlm/glm-5.3-flash') },
+    ],
+  },
+  {
+    provider: 'zhipu',
     officialId: 'glm-5v-turbo',
     name: 'GLM-5V-Turbo',
     kind: 'multimodal_understanding',

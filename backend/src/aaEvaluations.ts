@@ -43,6 +43,7 @@ export const aaModelUrl = (slug: string) => `https://artificialanalysis.ai/model
 export const AA_MODEL_MAP: Record<string, { provider: ModelProviderId; officialId: string }> = {
   // 智谱
   'glm-5-3': { provider: 'zhipu', officialId: 'glm-5.3' },
+  'glm-5-3-flash': { provider: 'zhipu', officialId: 'glm-5.3-flash' }, // 2026-08-27 sitemap 核验(08-25 发布、08-26 AA 收录)
   'glm-5-2': { provider: 'zhipu', officialId: 'glm-5.2' },
   'glm-5-1': { provider: 'zhipu', officialId: 'glm-5.1' },
   'glm-5': { provider: 'zhipu', officialId: 'glm-5' },

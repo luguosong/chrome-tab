@@ -353,6 +353,24 @@ describe('模型追踪:智谱发布页解析(纯函数)', () => {
     expect(matchZhipuEvent(updates[3]!)).toBeNull() // GLM-9.9(基线外,待核验)
   })
 
+  it('家族 Flash 变体独立认领:GLM-5.3-Flash 块归 glm-5.3-flash 而非家族行 glm-5.3', () => {
+    // 回归(2026-08-27 漏检事故):GLM-5.3-Flash 08-26 上线,块被家族 alias 词边界
+    // 正确排除(「GLM-5.3」不认领「GLM-5.3-Flash」)后须由独立基线行认领——
+    // 基线缺行时整块静默跳过,即用户症状「新模型没检测到」。fixture 为发布页原文。
+    const [u] = parseZhipuReleases(
+      '<Update label="2026-08-26" description="GLM-5.3-Flash 原生多模态模型上线">\n  👀 [**GLM-5.3-Flash**](/cn/guide/models/vlm/glm-5.3-flash)\n</Update>',
+    )
+    expect(matchZhipuEvent(u!)).toEqual({
+      officialId: 'glm-5.3-flash',
+      event: {
+        kind: 'updated',
+        occurredOn: '2026-08-26',
+        title: 'GLM-5.3-Flash 原生多模态模型上线',
+        sourceUrl: 'https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash',
+      },
+    })
+  })
+
   it('防上游张冠李戴:描述不含基线 alias 时,即便链接 slug 相同也不归属', () => {
     // 实测坑:GLM-Image 块误链 glm-4.7 文档页——描述与链接双条件缺一不可
     const [u] = parseZhipuReleases(
