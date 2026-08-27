@@ -203,7 +203,7 @@ export function trendingRoutes(service: TrendingService): Hono<AuthEnv> {
     return { since: since as TrendingSince, language, spoken }
   }
   return new Hono<AuthEnv>()
-    .get('/api/trending', (c) => c.json(service.get(parseQuery(c))))
+    .get('/api/trending', async (c) => c.json(await service.get(parseQuery(c))))
     .post('/api/trending/retry-translation', (c) => service.retryTranslations(parseQuery(c)).then(() => c.json({ started: true })))
 }
 

@@ -41,10 +41,14 @@ export function useTrending(
     staleTime: 5 * 60_000,
     retry: 1,
     refetchInterval: (q) => {
-      const d = q.state.data
-      if (!d) return false
-      const pending = d.repos.some((x) => x.description != null && x.descriptionZh == null)
-      const fresh = Date.now() - Math.max(Date.parse(d.fetchedAt), retryAt) < TRENDING_TRANSLATE_FRESH_MS
+      // wire 形状防御(2026-08-27 白屏事故):data 形状由后端决定,repos 非数组时
+      // 绝不裸调方法——响应层契约错位只应表现为「无数据」,不能崩整页 React 树
+      const list = q.state.data?.repos
+      if (!Array.isArray(list)) return false
+      const pending = list.some((x) => x.description != null && x.descriptionZh == null)
+      const fresh =
+        q.state.data != null &&
+        Date.now() - Math.max(Date.parse(q.state.data.fetchedAt ?? ''), retryAt) < TRENDING_TRANSLATE_FRESH_MS
       return pending && fresh ? 15_000 : false
     },
   })

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { openDb } from './db'
-import { TrendingService, parseTrending, type TrendingDeps } from './trending'
+import { TrendingService, parseTrending, trendingRoutes, type TrendingDeps } from './trending'
 
 /** 解析层 fixture 测试(锚点 2026-08-26 实抓 github.com/trending 核验;class 精简保留语义)。 */
 
@@ -42,6 +42,52 @@ const ARTICLE_MIXED =
 
 const page = (...articles: string[]) =>
   `<main><div class="Box"><div data-hpc="">${articles.join('')}</div></div></main>`
+
+describe('trendingRoutes(HTTP wire)', () => {
+  it('GET /api/trending 返回完整 response(repos/fetchedAt 在场)——c.json 不吃 Promise', async () => {
+    // 2026-08-27 线上事故:c.json(service.get(...)) 把 Promise 同步序列化成 {},
+    // 前端 data.repos 裸调 .some 崩整页。router 层从此处锁 wire 形状。
+    const deps: TrendingDeps = {
+      fetchText: async () => page(ARTICLE_EN),
+      translateDescriptions: async (texts) => texts.map((t) => `译(${t})`),
+    }
+    const app = trendingRoutes(new TrendingService(openDb(':memory:').db, deps))
+    const res = await app.request('/api/trending')
+    const body = (await res.json()) as { repos?: { repo: string }[]; fetchedAt?: string }
+    expect(Array.isArray(body.repos)).toBe(true)
+    expect(body.repos?.[0]).toMatchObject({ repo: 'en/repo' })
+    expect(typeof body.fetchedAt).toBe('string')
+  })
+
+  it('POST retry-translation 未带组合参数时走默认 daily 形状并立即应答 started', async () => {
+    const deps: TrendingDeps = {
+      fetchText: async () => page(ARTICLE_EN),
+      translateDescriptions: async (texts) => texts.map((t) => `译(${t})`),
+    }
+    const app = trendingRoutes(new TrendingService(openDb(':memory:').db, deps))
+    const res = await app.request('/api/trending/retry-translation', { method: 'POST' })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ started: true })
+  })
+
+  it('参数白名单:非法 since 拒绝且不出站抓取(BadRequest→400 由 app.ts 全局 onError 转换)', async () => {
+    let fetched = false
+    const deps: TrendingDeps = {
+      fetchText: async () => {
+        fetched = true
+        return page(ARTICLE_EN)
+      },
+      translateDescriptions: async (texts) => texts.map((t) => `译(${t})`),
+    }
+    const app = trendingRoutes(new TrendingService(openDb(':memory:').db, deps))
+    // 裸子 app 无全局 onError,BadRequest 兜底 500;锁的行为是「拒绝 + 零出站」
+    expect((await app.request('/api/trending?since=yearly')).status).toBeGreaterThanOrEqual(400)
+    expect(
+      (await app.request('/api/trending/retry-translation?since=yearly', { method: 'POST' })).status,
+    ).toBeGreaterThanOrEqual(400)
+    expect(fetched).toBe(false)
+  })
+})
 
 describe('parseTrending', () => {
   it('全字段:repo/url/描述/语言/色/总 star/周期增量', () => {
