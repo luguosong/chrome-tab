@@ -10,13 +10,16 @@ import { timeAgo } from '../lib/timeAgo'
 import ModalShell from './ModalShell'
 import {
   AVAILABILITY_LABELS,
+  CODING_INDEX_BENCHMARK,
   EVALUATION_ATTRIBUTION,
   EVENT_KIND_LABELS,
+  LEADERBOARD_DETAIL_BENCHMARKS,
   MODEL_KIND_COLOR_CLASSES,
   MODEL_KIND_LABELS,
   PROVIDER_LABELS,
   STAGE_LABELS,
   benchmarkLabel,
+  codingLeaderboard,
   compareModelsByRelease,
   formatReleaseBrief,
   formatModelPricing,
@@ -26,22 +29,24 @@ import {
 
 /**
  * 模型追踪详情 Modal(见 CONTEXT.md「模型追踪」,ADR-0022「更多」标头唯一入口):
- * 「全部」+ 各「跟踪厂家」tab;tab 下挂一行「模型种类」过滤胶囊(与厂家 tab 正交
- * AND 组合,单选互斥;种类词着色与行内种类词同纲——颜色即导航)。模型行在**当前
+ * 「全部」+ 各「跟踪厂家」tab,末位固定「跑分榜」tab(ADR-0035);厂家 tab 下挂
+ * 一行「模型种类」过滤胶囊(与厂家 tab 正交 AND 组合,单选互斥;种类词着色与行内
+ * 种类词同纲——颜色即导航)。模型行在**当前
  * Modal 内就地展开**(摘要 + 限额/训练参数/价格/评测四张规格卡——值按语义着色,
  * 动态时间线与信源全宽,不套第二层 Modal),24h 新动态行首红点(时间驱动,无已读
  * 概念)。信源失败保留最后成功结果并标记陈旧(CONTEXT.md「模型档案」)——头部给
  * 一行陈旧提示。容器:ModalShell 统一壳(ADR-0031),tab 为 TodoModal
  * 同款下划线式(过滤行用胶囊形态以区分「切视图/筛条件」两个维度)。
  */
-/** tab 维度 = 全部 + 各跟踪厂家(自 PROVIDER_LABELS 派生,厂家票扩 shared 时 tab 随动)。 */
-type Tab = 'all' | ModelProviderId
+/** tab 维度 = 全部 + 各跟踪厂家(自 PROVIDER_LABELS 派生,厂家票扩 shared 时 tab 随动)+ 固定「跑分榜」(ADR-0035,末位不打乱派生序)。 */
+type Tab = 'all' | ModelProviderId | 'leaderboard'
 const TABS: { key: Tab; label: string }[] = [
   { key: 'all', label: '全部' },
   ...(Object.keys(PROVIDER_LABELS) as ModelProviderId[]).map((p) => ({
     key: p,
     label: PROVIDER_LABELS[p],
   })),
+  { key: 'leaderboard', label: '跑分榜' },
 ]
 
 /** 种类过滤维度 = 全部种类 + 八类(自 MODEL_KIND_LABELS 派生,种类票扩时随动)。 */
@@ -94,7 +99,9 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
 
         {/* 种类过滤胶囊:单选互斥,与厂家 tab AND 组合。不是 tab(不切换视图,
             只叠加过滤条件)——role=group + aria-pressed。种类词着色与行内种类词
-            同纲(MODEL_KIND_COLOR_CLASSES):chip 与行内同色互证,颜色即导航。 */}
+            同纲(MODEL_KIND_COLOR_CLASSES):chip 与行内同色互证,颜色即导航。
+            跑分榜不消费该过滤轴(CONTEXT.md:跑分榜无种类过滤),整行隐藏。 */}
+        {tab !== 'leaderboard' && (
         <div
           role="group"
           aria-label="按模型种类过滤"
@@ -124,6 +131,7 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
             )
           })}
         </div>
+        )}
 
         {isError ? (
           <div className="flex items-center gap-3">
@@ -152,24 +160,28 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
                   .join('；')}
               </div>
             )}
-            <ModelList
-              // filter 返回新数组,直接原位排(不动 React Query 缓存)——上线发布时间优先
-              //(2026-08-26 轴改),防「全部」被单一厂家的入库序垄断(2026-08-25 智谱 44 模型连排数屏)
-              models={data.models
-                .filter(
-                  (m) =>
-                    (tab === 'all' || m.provider === tab) &&
-                    (kindFilter === 'all' || m.kind === kindFilter),
-                )
-                .sort(compareModelsByRelease)}
-              // 组合过滤可命中空集(如 智谱×视频生成),与档案真空区分文案
-              emptyText={
-                tab !== 'all' || kindFilter !== 'all' ? '当前筛选下暂无模型' : undefined
-              }
-              evaluationStatus={data.evaluations}
-              expandedId={expandedId}
-              onToggle={(id) => setExpandedId((cur) => (cur === id ? null : id))}
-            />
+            {tab === 'leaderboard' ? (
+              <LeaderboardPanel models={data.models} status={data.evaluations} />
+            ) : (
+              <ModelList
+                // filter 返回新数组,直接原位排(不动 React Query 缓存)——上线发布时间优先
+                //(2026-08-26 轴改),防「全部」被单一厂家的入库序垄断(2026-08-25 智谱 44 模型连排数屏)
+                models={data.models
+                  .filter(
+                    (m) =>
+                      (tab === 'all' || m.provider === tab) &&
+                      (kindFilter === 'all' || m.kind === kindFilter),
+                  )
+                  .sort(compareModelsByRelease)}
+                // 组合过滤可命中空集(如 智谱×视频生成),与档案真空区分文案
+                emptyText={
+                  tab !== 'all' || kindFilter !== 'all' ? '当前筛选下暂无模型' : undefined
+                }
+                evaluationStatus={data.evaluations}
+                expandedId={expandedId}
+                onToggle={(id) => setExpandedId((cur) => (cur === id ? null : id))}
+              />
+            )}
           </>
         )}
     </ModalShell>
@@ -436,6 +448,80 @@ function EvaluationCard({
           </li>
         ))}
       </ul>
+    </div>
+  )
+}
+
+/**
+ * 跑分榜(ADR-0035,CONTEXT.md「评测结果」边界):档案内带 AA 编程指数的模型按该
+ * 原生指数降序——评测方自己的聚合,我方只做已存分数的原样排序视图,非自制综合分;
+ * 全量列出不截 top-N(截断线会随 AA 覆盖漂移)。行内跟编程类明细 benchmark(固定
+ * 顺序,缺评测显「-」,不参与排序);归因链接卡头挂一次(AA 免费 API 使用条款);
+ * 只读——不展开模型行、无种类过滤,数据与厂家 tab 同源(同一份 archive 快照)。
+ */
+function LeaderboardPanel({
+  models,
+  status,
+}: {
+  models: TrackedModel[]
+  status: ModelEvaluationsStatus
+}) {
+  if (!status.configured) {
+    return (
+      <div className="text-meta text-white/50 py-6 text-center">
+        评测:未配置({EVALUATION_ATTRIBUTION.label} Key)
+      </div>
+    )
+  }
+  const rows = codingLeaderboard(models)
+  if (rows.length === 0) {
+    return <div className="text-meta text-white/50 py-6 text-center">暂无跑分数据</div>
+  }
+  return (
+    <div>
+      <div className="text-meta text-white/45 flex items-baseline gap-2 flex-wrap pb-1.5">
+        <span>{rows.length} 个模型</span>
+        <span>· 按{benchmarkLabel(CODING_INDEX_BENCHMARK)}降序</span>
+        <a
+          href={EVALUATION_ATTRIBUTION.url}
+          target="_blank"
+          rel="noreferrer"
+          className="underline underline-offset-2 hover:text-accent"
+        >
+          {EVALUATION_ATTRIBUTION.label}
+        </a>
+        {status.stale && <span className="text-white/40">(同步失败,展示最近快照)</span>}
+      </div>
+      <ol className="space-y-1">
+        {rows.map(({ model, rank, codingIndex }) => {
+          const details = LEADERBOARD_DETAIL_BENCHMARKS.map((b) => ({
+            benchmark: b,
+            hit: model.evaluations.find((e) => e.benchmark === b),
+          }))
+          return (
+            <li key={model.id} className="rounded-xl px-3 py-2 hover:bg-white/10 transition">
+              <div className="flex items-baseline gap-2 min-w-0">
+                <span className="w-6 shrink-0 text-right font-mono text-accent text-sm">{rank}</span>
+                <span className="min-w-0 flex-1 truncate text-sm text-white/90">{model.name}</span>
+                <span className="shrink-0 text-meta text-white/50">{PROVIDER_LABELS[model.provider]}</span>
+                <span className="w-12 shrink-0 text-right font-mono text-emerald-300">
+                  {formatEvaluationScore(CODING_INDEX_BENCHMARK, codingIndex)}
+                </span>
+              </div>
+              {details.some((d) => d.hit !== undefined) && (
+                <div className="pl-8 mt-0.5 text-meta text-white/45 truncate">
+                  {details
+                    .map(
+                      (d) =>
+                        `${benchmarkLabel(d.benchmark)} ${d.hit ? formatEvaluationScore(d.benchmark, d.hit.score) : '-'}`,
+                    )
+                    .join(' · ')}
+                </div>
+              )}
+            </li>
+          )
+        })}
+      </ol>
     </div>
   )
 }

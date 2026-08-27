@@ -266,3 +266,35 @@ export function formatEvaluationScore(benchmark: string, score: number): string 
   if (RATIO_BENCHMARKS.has(benchmark)) return `${(score * 100).toFixed(1)}%`
   return (Math.round(score * 10) / 10).toFixed(1)
 }
+
+/**
+ * 跑分榜(ADR-0035,CONTEXT.md「评测结果」边界):排序键只认评测方**原生**单维度
+ * 指数——AA 编程指数是评测方自己的聚合,我方只做已存分数的原样排序视图,不自行
+ * 跨 Benchmark 合成。全集 = 档案内带该指数的全部模型(不截 top-N,截断线随 AA
+ * 覆盖漂移);同分按 id 升序稳定。
+ */
+export const CODING_INDEX_BENCHMARK = 'artificial_analysis_coding_index'
+
+/** 跑分榜行内编程类明细 benchmark(展示顺序恒定,缺该模型评测则显「-」,不参与排序)。 */
+export const LEADERBOARD_DETAIL_BENCHMARKS = [
+  'terminalbench_v2_1',
+  'terminalbench_hard',
+  'livecodebench',
+] as const
+
+export interface LeaderboardRow {
+  model: TrackedModel
+  rank: number
+  codingIndex: number
+}
+
+/** 跑分榜派生:过滤出带编程指数的模型,按指数降序,rank 从 1 起。纯函数可直测。 */
+export function codingLeaderboard(models: TrackedModel[]): LeaderboardRow[] {
+  return models
+    .flatMap((model) => {
+      const hit = model.evaluations.find((e) => e.benchmark === CODING_INDEX_BENCHMARK)
+      return hit ? [{ model, codingIndex: hit.score }] : []
+    })
+    .sort((a, b) => b.codingIndex - a.codingIndex || a.model.id - b.model.id)
+    .map((row, i) => ({ ...row, rank: i + 1 }))
+}

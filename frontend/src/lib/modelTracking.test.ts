@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import type { TrackedModel } from 'chrome-tab-shared'
 import {
   AVAILABILITY_LABELS,
+  CODING_INDEX_BENCHMARK,
   benchmarkLabel,
+  codingLeaderboard,
   compareModelsByRelease,
   formatEvaluationScore,
   EVENT_KIND_LABELS,
@@ -257,5 +259,44 @@ describe('模型追踪:最近动态简报', () => {
   it('发布类动态如实标注;非法日期回原串不吞信息(对齐 Modal 原 || occurredOn 兜底)', () => {
     expect(formatLatestEventBrief({ kind: 'api_available', occurredOn: '2026-07-09' }, NOW)).toBe('API 上线 · 48 天前')
     expect(formatLatestEventBrief({ kind: 'updated', occurredOn: 'oops' }, NOW)).toBe('oops')
+  })
+})
+
+describe('模型追踪:跑分榜派生(ADR-0035)', () => {
+  const ev = (benchmark: string, score: number) => ({
+    evaluator: 'Artificial Analysis',
+    benchmark,
+    score,
+    version: '',
+    date: '2026-08-25',
+    url: 'u',
+  })
+
+  it('只收带 AA 编程指数的模型;按指数降序、同分 id 升序,rank 从 1 起', () => {
+    const low = mkModel(1, { evaluations: [ev(CODING_INDEX_BENCHMARK, 40)] })
+    const noIndex = mkModel(4) // 无指数模型不入榜(档案外维度不参与)
+    const tieHigh = mkModel(2, { evaluations: [ev(CODING_INDEX_BENCHMARK, 60)] })
+    const tieLowId = mkModel(3, { evaluations: [ev(CODING_INDEX_BENCHMARK, 60)] })
+    const rows = codingLeaderboard([low, noIndex, tieHigh, tieLowId])
+    expect(rows.map((r) => [r.model.id, r.rank])).toEqual([
+      [2, 1],
+      [3, 2],
+      [1, 3],
+    ])
+  })
+
+  it('排序键只认评测方原生指数——明细 benchmark 分再高也不参与排序(不自制综合分)', () => {
+    const byDetail = mkModel(1, {
+      evaluations: [ev(CODING_INDEX_BENCHMARK, 10), ev('terminalbench_v2_1', 0.99)],
+    })
+    const byIndex = mkModel(2, { evaluations: [ev(CODING_INDEX_BENCHMARK, 20)] })
+    expect(codingLeaderboard([byDetail, byIndex]).map((r) => r.model.id)).toEqual([2, 1])
+  })
+
+  it('全量列出不截 top-N:超过 20 个带指数模型全部入榜(截断线随 AA 覆盖漂移,不设)', () => {
+    const models = Array.from({ length: 25 }, (_, i) =>
+      mkModel(i + 1, { evaluations: [ev(CODING_INDEX_BENCHMARK, 50 - i)] }),
+    )
+    expect(codingLeaderboard(models)).toHaveLength(25)
   })
 })
