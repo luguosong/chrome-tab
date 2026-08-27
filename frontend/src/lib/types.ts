@@ -16,6 +16,7 @@ export type IconTypeId =
   | 'model'
   | 'news'
   | 'trending'
+  | 'servers'
   | 'group'
 
 /** 走马灯一屏:图标的容器(见 CONTEXT.md「页面」)。 */

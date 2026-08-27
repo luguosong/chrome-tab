@@ -11,6 +11,7 @@ import VideoIconBody from './VideoIcon'
 import ModelIconBody from './ModelIcon'
 import NewsIconBody from './NewsIcon'
 import TrendingIconBody from './TrendingIcon'
+import ServersIconBody from './ServersIcon'
 import LocationPicker from './LocationPicker'
 import SymbolPicker from './SymbolPicker'
 import Tile from './Tile'
@@ -185,6 +186,8 @@ export default function Icon({
         <NewsIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
       ) : icon.type === 'trending' ? (
         <TrendingIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
+      ) : icon.type === 'servers' ? (
+        <ServersIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
       ) : (
         <>
           {/* nav:裸 favicon 直出(ADR-0015 注记 2026-08-23c,回归 ADR-0013):Tile bare

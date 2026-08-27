@@ -239,6 +239,22 @@ CREATE TABLE IF NOT EXISTS trending_translations (
     translated   TEXT NOT NULL,
     created_at   TEXT NOT NULL
 );
+-- 服务器状态(CONTEXT.md「服务器状态」):cron 10min 采样落库的数值曲线,全局共享
+-- (机器是全局资产,同 model_archive 口径,无 user_id)。services/containers 快照
+-- 不落库——展示实时即可,无历史诉求;无保留策略(年增 ~10 万行,SQLite 无压力)。
+CREATE TABLE IF NOT EXISTS server_samples (
+    id          INTEGER PRIMARY KEY,
+    machine     TEXT NOT NULL,
+    ts          TEXT NOT NULL,
+    cpu_pct     REAL NOT NULL,
+    load1       REAL NOT NULL,
+    mem_total   INTEGER NOT NULL,
+    mem_avail   INTEGER NOT NULL,
+    disk_total  INTEGER NOT NULL,
+    disk_free   INTEGER NOT NULL,
+    uptime_s    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_server_samples_machine_ts ON server_samples (machine, ts);
 `
 
 /** openDb 打开连接后即执行;幂等(IF NOT EXISTS + 增量加列)。 */
@@ -481,6 +497,19 @@ export interface TrendingTranslationsTable {
   created_at: string
 }
 
+export interface ServerSamplesTable {
+  id: Generated<number>
+  machine: string
+  ts: string
+  cpu_pct: number
+  load1: number
+  mem_total: number
+  mem_avail: number
+  disk_total: number
+  disk_free: number
+  uptime_s: number
+}
+
 export interface SchemaDatabase {
   users: UsersTable
   pages: PagesTable
@@ -503,4 +532,5 @@ export interface SchemaDatabase {
   news_items: NewsItemsTable
   news_translations: NewsTranslationsTable
   trending_translations: TrendingTranslationsTable
+  server_samples: ServerSamplesTable
 }

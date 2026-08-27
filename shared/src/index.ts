@@ -256,3 +256,47 @@ export type LayoutSettings = {
   /** 重要日子(寄放,ADR-0026;缺省 = 空列表,存量/旧客户端兼容)。 */
   importantDates: ImportantDate[]
 }
+
+/**
+ * 服务器状态 wire 契约(CONTEXT.md「服务器状态」):thinkpad/aliyun 各跑一个
+ * servermon exporter(thinkpad-ubuntu 仓库 scripts/servermon),backend 按需抓取
+ * + 60s TTL 快照、cron 10min 采样落库数值曲线。exporter 输出 snake_case,
+ * 本契约统一 camelCase(解析层映射,同 trending 口径)。
+ */
+export type ServerMonSnapshot = {
+  host: string
+  /** 采集时刻(exporter 侧 UTC ISO) */
+  ts: string
+  /** CPU 使用率(%,后台 10s 采样;首次启动 10s 内为 0) */
+  cpuPct: number
+  load1: number
+  memTotal: number
+  memAvail: number
+  diskTotal: number
+  diskFree: number
+  uptimeS: number
+  failedUnits: number
+  /** systemd 单元状态(units.txt 配置;timer 附 result = 上次触发结果) */
+  services: Record<string, { state: string; result?: string }>
+  /** docker 容器名 → 状态(running/exited/…) */
+  containers: Record<string, string>
+}
+
+/** GET /api/servers 单机条目:抓不到 = offline(可达性兼任拨测,无独立 ping)。 */
+export type ServerMonEntry = {
+  machine: string
+  status: 'online' | 'offline'
+  /** 最后成功快照;offline 时为旧数据(宁旧勿空),null = 从未成功过 */
+  snapshot: ServerMonSnapshot | null
+  /** backend 实际取到该快照的时间(降级时早于当前,前端据此示陈旧) */
+  fetchedAt: string | null
+}
+
+/** GET /api/servers/history 单点(server_samples 落库曲线,10min 粒度)。 */
+export type ServerMonHistoryPoint = {
+  ts: string
+  cpuPct: number
+  load1: number
+  memAvail: number
+  diskFree: number
+}

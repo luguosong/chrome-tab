@@ -55,7 +55,14 @@ services:
       # 留在代理侧;新增源须同步此清单(sources.test.ts 部署契约把关)
       NODE_USE_ENV_PROXY: "1"
       HTTPS_PROXY: http://mihomo:7890
-      NO_PROXY: localhost,127.0.0.1,.qweatherapi.com,registry.npmjs.org,.bing.com,.virxact.com,.dida365.com,.bilibili.com,.biliapi.net,.biliapi.com,.hdslb.com,.cls.cn,.wallstcn.com,.weibo.com,.baidu.com,.36kr.com,.ithome.com,.thepaper.cn,.v2ex.com,.zhihu.com,.sspai.com,.solidot.org,.cankaoxiaoxi.com,.zaochenbao.com,.kimi.com,.deepseek.com,.aliyun.com,.bigmodel.cn
+      NO_PROXY: localhost,127.0.0.1,host.docker.internal,.qweatherapi.com,registry.npmjs.org,.bing.com,.virxact.com,.dida365.com,.bilibili.com,.biliapi.net,.biliapi.com,.hdslb.com,.cls.cn,.wallstcn.com,.weibo.com,.baidu.com,.36kr.com,.ithome.com,.thepaper.cn,.v2ex.com,.zhihu.com,.sspai.com,.solidot.org,.cankaoxiaoxi.com,.zaochenbao.com,.kimi.com,.deepseek.com,.aliyun.com,.bigmodel.cn
+      # 服务器状态(CONTEXT.md「服务器状态」):exporter URL 含 token,两键均可缺省
+      # (dev → 空清单,快照 [])。thinkpad = frp(localhost:10001);aliyun = 宿主
+      # exporter(host.docker.internal:7800,须配合下方 extra_hosts 直连)
+      SERVERMON_THINKPAD_URL: ${SERVERMON_THINKPAD_URL}
+      SERVERMON_ALIYUN_URL: ${SERVERMON_ALIYUN_URL}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./backend/data:/app/backend/data
     expose:

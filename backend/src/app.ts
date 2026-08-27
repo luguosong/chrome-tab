@@ -15,6 +15,7 @@ import { createSiteInfoHandler } from './siteInfo'
 import { didaRoutes, type DidaConfig } from './dida'
 import { modelTrackingRoutes, type ModelTrackingService } from './modelTracking'
 import { newsRoutes, type NewsService } from './news/news'
+import { servermonRoutes, type ServerMonService } from './servermon'
 import { trendingRoutes, type TrendingService } from './trending'
 import { videoUpdatesRoutes, type VideoUpdatesService } from './videoUpdates'
 import { weatherRoutes, type WeatherConfig } from './weather'
@@ -35,6 +36,7 @@ export function createApp({
   modelTracking,
   news,
   trending,
+  servers,
 }: {
   db: Db
   cookieSecure?: boolean
@@ -45,6 +47,7 @@ export function createApp({
   modelTracking?: ModelTrackingService
   news?: NewsService
   trending?: TrendingService
+  servers?: ServerMonService
 }) {
   const app = new Hono<AuthEnv>()
     .get('/healthz', async (c) => {
@@ -81,6 +84,8 @@ export function createApp({
   if (news) app.route('/', newsRoutes(news))
   // GitHub 趋势(单例图标「GitHub 趋势」,ADR-0028):默认组合 cron 保热、其余组合按需现抓(内存缓存)
   if (trending) app.route('/', trendingRoutes(trending))
+  // 服务器状态(CONTEXT.md「服务器状态」):exporter 快照 + 采样曲线,降级见 servermon.ts
+  if (servers) app.route('/', servermonRoutes(servers))
   app.get('/api/wallpaper', createWallpaperHandler())
   // 站点信息抓取(CONTEXT.md「站点信息」):新增/编辑表单自动填充用,/api/* 鉴权横切覆盖
   app.get('/api/site-info', createSiteInfoHandler())

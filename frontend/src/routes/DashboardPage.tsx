@@ -43,6 +43,7 @@ import VideoModal from '../components/VideoModal'
 import ModelModal from '../components/ModelModal'
 import NewsModal from '../components/NewsModal'
 import TrendingModal from '../components/TrendingModal'
+import ServersModal from '../components/ServersModal'
 import ChangelogModal from '../components/ChangelogModal'
 import ControlDrawer from '../components/ControlDrawer'
 import { get } from '../lib/iconTypeRegistry'
@@ -606,6 +607,8 @@ function Dashboard() {
                     <NewsModal onClose={() => setDetail(null)} />
                   ) : detail.type === 'trending' ? (
                     <TrendingModal onClose={() => setDetail(null)} />
+                  ) : detail.type === 'servers' ? (
+                    <ServersModal onClose={() => setDetail(null)} />
                   ) : detail.type === 'changelog' ? (
                     <ChangelogModal
                       source={changelogSourceOf(detail.data)}

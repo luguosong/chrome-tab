@@ -34,7 +34,7 @@ export type EditorField =
 /** 刷新配置(spec §刷新策略):hook key + 间隔(ms)。0 = 不刷新。 */
 export type RefreshConfig = {
   /** 'quotes' = useQuotes 轮询(60s); 'changelog' = useChangelog staleTime(1h); 'weather' = useWeather(后端缓存 10/30/5min); 'aihot' = useAiHot 自持(后端缓存 300s,单例不入集中层); 'todo' = useTodo 自持(后端缓存 60s,单例不入集中层); 'video' = useVideoFeed 自持(后端 1h 轮询预取,前端 staleTime 5min,单例不入集中层); 'model' = useModelArchive 自持(后端 6h 轮询持久档案,前端 staleTime 5min,单例不入集中层); 'news' = useNewsFeed 自持(后端 30min 轮询预取,ADR-0027,前端 staleTime 5min,单例不入集中层); 'trending' = useTrending 自持(后端默认组合 1h 保热 + 组合现抓内存缓存,ADR-0028,前端 staleTime 5min,单例不入集中层); 'none' = 不刷新。 */
-  kind: 'quotes' | 'changelog' | 'weather' | 'aihot' | 'todo' | 'video' | 'model' | 'news' | 'trending' | 'none'
+  kind: 'quotes' | 'changelog' | 'weather' | 'aihot' | 'todo' | 'video' | 'model' | 'news' | 'trending' | 'servers' | 'none'
 }
 
 /** 实时摘要数据(见 summarize 注释:ADR-0001 契约字段,当前无网格消费方)。 */
@@ -318,6 +318,25 @@ export const TRENDING_DEF: IconTypeDefinition = {
   summarize: () => null, // 网格渲染走专属 TrendingIconBody,契约字段无消费方(同 nav/aihot/todo/video/model/news)
 }
 
+/** 服务器状态:扩展类型,单例(机器清单是 env 级全局配置,实例无可绑参数,见 CONTEXT.md「服务器状态」)。
+ *  data 无字段;3×2 大 tile(块内每台机器一行:状态点 + 机器名 + CPU/内存百分比,
+ *  简单信息;离线红点 + 陈旧提示),详情 Modal(tab 按机器分页:概览数字块 + CPU/
+ *  内存 24h sparkline + 服务/容器状态清单),「更多」标头唯一入口(ADR-0022)。
+ *  数据 = 两台机器上的 servermon exporter(thinkpad-ubuntu 仓库)→ 后端快照
+ *  60s TTL + 10min 采样落库,前端只读、hook 自持(同 aihot/todo/video/model/news/trending 先例)。 */
+export const SERVERS_DEF: IconTypeDefinition = {
+  id: 'servers',
+  label: '服务器',
+  kind: 'extension',
+  singleton: true,
+  refresh: { kind: 'servers' },
+  detail: 'modal',
+  size: { w: 3, h: 2 },
+  detailEntry: 'header',
+  editor: [],
+  summarize: () => null, // 网格渲染走专属 ServersIconBody,契约字段无消费方(同上先例)
+}
+
 /**
  * 分组(ADR-0011):iOS 文件夹式收纳容器(块内成员 favicon 3×2 迷你预览,ADR-0015)。
  * kind='group' 不属于 base/extension 任一分区,
@@ -347,4 +366,5 @@ register('video', VIDEO_DEF)
 register('model', MODEL_DEF)
 register('news', NEWS_DEF)
 register('trending', TRENDING_DEF)
+register('servers', SERVERS_DEF)
 register('group', GROUP_DEF)

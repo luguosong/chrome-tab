@@ -10,6 +10,7 @@ import { openDb } from './db'
 import { bootstrap } from './seed'
 import { ModelTrackingService, prodModelDeps, startModelTrackingScheduler } from './modelTracking'
 import { NewsService, prodNewsDeps, startNewsScheduler } from './news/news'
+import { ServerMonService, prodServerMonDeps, startServerMonScheduler, type ServerMonMachine } from './servermon'
 import { TrendingService, prodTrendingDeps, startTrendingScheduler } from './trending'
 import { VideoUpdatesService, prodVideoDeps, startVideoUpdatesScheduler } from './videoUpdates'
 
@@ -43,6 +44,19 @@ const newsService = new NewsService(db, prodNewsDeps())
 // GitHub 趋势(CONTEXT.md「GitHub 趋势」,ADR-0028):无凭据匿名抓取,榜单内存缓存
 // 不落库;描述译文按哈希落 trending_translations 终身复用(ADR-0030)
 const trendingService = new TrendingService(db, prodTrendingDeps())
+// 服务器状态(CONTEXT.md「服务器状态」):exporter URL(含 token)经 env 注入,两键
+// 均可缺省(本地 dev 无监控机 → 空清单,快照返回 [] 不炸)。thinkpad 走 frp
+// (localhost:10001,NO_PROXY 的 localhost 已覆盖);aliyun 走 host-gateway
+// (host.docker.internal,已加 NO_PROXY——误走 mihomo 代理必失败,同国内源事故口径)
+const servermonMachines: ServerMonMachine[] = (
+  [
+    ['thinkpad', process.env.SERVERMON_THINKPAD_URL],
+    ['aliyun', process.env.SERVERMON_ALIYUN_URL],
+  ] as [string, string | undefined][]
+)
+  .filter(([, url]) => url && url.trim() !== '')
+  .map(([machine, url]) => ({ machine, url: url! }))
+const servermonService = new ServerMonService(db, prodServerMonDeps(), servermonMachines)
 const app = createApp({
   db,
   cookieSecure,
@@ -60,6 +74,8 @@ const app = createApp({
   news: newsService,
   // GitHub 趋势(CONTEXT.md「GitHub 趋势」,ADR-0028):匿名抓取无凭据
   trending: trendingService,
+  // 服务器状态(CONTEXT.md「服务器状态」):exporter 快照 + 采样曲线
+  servers: servermonService,
 })
 
 const port = Number(process.env.PORT ?? 8080)
@@ -74,6 +90,8 @@ startModelTrackingScheduler(modelTrackingService)
 startNewsScheduler(newsService)
 // GitHub 趋势 1h 保热默认组合(ADR-0028;启动即预热,其余组合按需现抓)
 startTrendingScheduler(trendingService)
+// 服务器状态 10min 采样(3-53/10 错开整点;启动即采样,重启不空窗)
+startServerMonScheduler(servermonService)
 
 // 每日 03:17(UTC):WAL checkpoint + 过期 session 清理 + VACUUM INTO 备份(票 09;恢复 = 拷回文件)
 schedule('17 3 * * *', async () => {

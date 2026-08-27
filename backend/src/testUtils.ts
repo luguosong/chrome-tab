@@ -4,6 +4,7 @@ import { createApp } from './app'
 import type { ChangelogService, ChangelogServices } from './changelog'
 import { openDb, type Db } from './db'
 import type { NewsService } from './news/news'
+import type { ServerMonService } from './servermon'
 import { bootstrap } from './seed'
 
 /**
@@ -12,7 +13,11 @@ import { bootstrap } from './seed'
  * 每测试文件独立实例,互不串污染;测试可直接用 db 造边角 fixture(满格页等)。
  * changelog/news 透传注入桩 service(假 fetch,零外呼)。
  */
-export async function setupApp(changelog?: ChangelogService, newsFactory?: (db: Db) => NewsService) {
+export async function setupApp(
+  changelog?: ChangelogService,
+  newsFactory?: (db: Db) => NewsService,
+  servers?: ServerMonService,
+) {
   const { db } = openDb(':memory:')
   await bootstrap(db, { username: 'admin', password: 'admin-pw' })
   const app = createApp({
@@ -20,6 +25,7 @@ export async function setupApp(changelog?: ChangelogService, newsFactory?: (db: 
     // 计算键被推宽,断言回 map 类型;matt-skills 缺位时 pick 回落默认源,无碍
     changelog: (changelog && { [DEFAULT_CHANGELOG_SOURCE]: changelog }) as ChangelogServices | undefined,
     news: newsFactory?.(db),
+    servers,
   })
   const login = async () => {
     const res = await app.request('/api/login', {
