@@ -485,12 +485,19 @@ function Dashboard() {
     >
       <Background />
 
-      {/* 右键编辑提示条:全宽玻璃条 + 内嵌 glass-panel 胶囊(glass-panel 自带投影,
-          替代原实色 accent 块 + shadow——回归玻璃体系而非另起炉灶) */}
+      {/* 编辑模式提示条:玻璃胶囊 + 「完成」显式退出钮(右键/Esc 仍可用,但退出不再
+          依赖不可发现的右键语义——2026-08-27 测试报告 #5) */}
       {editing && (
-        <div className="fixed top-0 inset-x-0 z-50 text-center text-sm py-2 animate-drop-in">
-          <span className="glass-panel inline-block rounded-full px-4 py-1.5 text-accent">
-            编辑模式 · 右键退出
+        <div className="fixed top-0 inset-x-0 z-50 flex justify-center py-2 animate-drop-in">
+          <span className="glass-panel inline-flex items-center gap-3 rounded-full py-1.5 pl-4 pr-1.5 text-sm">
+            <span className="text-accent">编辑模式</span>
+            <button
+              type="button"
+              onClick={toggle}
+              className="rounded-full bg-accent/90 hover:bg-accent active:bg-accent/75 px-3.5 py-1 text-xs text-white transition focus-visible:outline-2 focus-visible:outline-white/60"
+            >
+              完成
+            </button>
           </span>
         </div>
       )}
@@ -659,6 +666,10 @@ function Dashboard() {
           existingTypeIds={existingTypeIds}
           layout={layout}
           onClose={() => setControlOpen(false)}
+          onEnterEdit={() => {
+            setControlOpen(false)
+            if (!editing) toggle()
+          }}
         />
       )}
     </div>

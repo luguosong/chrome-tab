@@ -23,6 +23,7 @@ export default function ControlDrawer({
   existingTypeIds,
   layout,
   onClose,
+  onEnterEdit,
 }: {
   /** 当前激活页 id——新图标落到此页末尾。undefined 时禁用提交(无页可加)。 */
   pageId: number | undefined
@@ -30,6 +31,8 @@ export default function ControlDrawer({
   existingTypeIds: IconTypeId[]
   layout: LayoutSettings
   onClose: () => void
+  /** 「布局」tab 的显式编辑入口:关抽屉 + 进编辑模式(调用方接线)。 */
+  onEnterEdit: () => void
 }) {
   const [tab, setTab] = useState<Tab>('add')
 
@@ -140,7 +143,7 @@ export default function ControlDrawer({
             aria-labelledby="tab-layout"
             hidden={tab !== 'layout'}
           >
-            <SettingsPane draft={draft} onApply={apply} onCommit={commit} />
+            <SettingsPane draft={draft} onApply={apply} onCommit={commit} onEnterEdit={onEnterEdit} />
           </div>
           <div
             id="panel-account"

@@ -15,10 +15,13 @@ export function SettingsPane({
   draft,
   onApply,
   onCommit,
+  onEnterEdit,
 }: {
   draft: LayoutSettings
   onApply: <K extends keyof LayoutSettings>(key: K, value: LayoutSettings[K]) => void
   onCommit: () => void
+  /** 显式进入编辑布局(长按/右键之外的可见入口;进入同时关抽屉,让编辑条可见)。 */
+  onEnterEdit: () => void
 }) {
   /** 离散控件(开关/下拉):改即提交,无需松手语义。 */
   function applyNow<K extends keyof LayoutSettings>(key: K, value: LayoutSettings[K]) {
@@ -155,6 +158,15 @@ export function SettingsPane({
       <p className="mt-4 text-xs text-white/60 leading-relaxed">
         设置随账号保存,其它设备登录即同步。
       </p>
+
+      {/* 编辑布局显式入口(2026-08-27 测试报告 #5:长按/右键不可发现) */}
+      <button
+        type="button"
+        onClick={onEnterEdit}
+        className="mt-4 w-full rounded-full bg-white/15 hover:bg-white/25 active:bg-white/30 px-4 py-2 text-xs text-white/90 transition focus-visible:outline-2 focus-visible:outline-white/60"
+      >
+        编辑布局(增删 / 拖动图标)
+      </button>
     </>
   )
 }
