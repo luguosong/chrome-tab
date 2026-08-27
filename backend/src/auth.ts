@@ -78,10 +78,10 @@ export function publicAuthRoutes(db: Db, cookieSecure: boolean) {
         const { username, password } = (body ?? {}) as Record<string, unknown>
         const u = typeof username === 'string' ? username : ''
         const p = typeof password === 'string' ? password : ''
-        // message 按 Java 逐字:@NotBlank 无中文 bundle,默认英文按实际失败字段拼接
-        const blank = [!u.trim() && 'username', !p.trim() && 'password'].filter(Boolean)
-        if (blank.length) {
-          return c.json({ status: 400, message: blank.map((f) => `${f}: must not be blank`).join('; ') }, 400)
+        // message 登录页原样直显(2026-08-27 测试报告 #3:不再暴露字段名,文案人话化)
+        const missing = [!u.trim() && '用户名', !p.trim() && '密码'].filter(Boolean)
+        if (missing.length) {
+          return c.json({ status: 400, message: `请输入${missing.join('和')}` }, 400)
         }
         const user = await db
           .selectFrom('users')

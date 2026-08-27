@@ -91,13 +91,13 @@ describe('POST /api/login', () => {
       expect(json.status).toBe(400)
       expect(typeof json.message).toBe('string')
     }
-    // 单字段空白只报该字段(照 Java @NotBlank 逐字段拼接,默认英文文案)
+    // 单字段空白只报该字段(登录页直显的中文文案,不暴露字段名)
     const one = await post('/api/login', { username: 'admin', password: '' })
-    await expect(one.json()).resolves.toEqual({ status: 400, message: 'password: must not be blank' })
+    await expect(one.json()).resolves.toEqual({ status: 400, message: '请输入密码' })
     const both = await post('/api/login', {})
     await expect(both.json()).resolves.toEqual({
       status: 400,
-      message: 'username: must not be blank; password: must not be blank',
+      message: '请输入用户名和密码',
     })
     const noBody = await app.request('/api/login', { method: 'POST' })
     expect(noBody.status).toBe(400)

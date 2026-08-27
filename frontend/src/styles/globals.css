@@ -10,6 +10,9 @@
   --color-accent: #2997ff;
   --color-up: #ff5c5c;
   --color-down: #3ddc97;
+  /* 错误/危险专职色(iOS 系统红暗面档);与涨跌 up 红语义隔离——
+     2026-08-27 测试报告 #3:错误文案曾误用涨跌绿 text-down */
+  --color-danger: #ff453a;
   --font-sans:
     system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei",
     "Noto Sans SC", sans-serif;

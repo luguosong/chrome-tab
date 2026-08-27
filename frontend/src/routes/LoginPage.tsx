@@ -44,6 +44,7 @@ export default function LoginPage() {
             onChange={(e) => setUsername(e.target.value)}
             placeholder="用户名"
             autoComplete="username"
+            required
             className="bg-white/20 text-white placeholder-white/50 px-3 py-2 rounded-lg outline-none transition focus:ring-2 focus:ring-accent"
           />
           <div className="relative">
@@ -53,6 +54,7 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="密码"
               autoComplete="current-password"
+              required
               className="w-full bg-white/20 text-white placeholder-white/50 px-3 py-2 pr-10 rounded-lg outline-none transition focus:ring-2 focus:ring-accent"
             />
             <button
@@ -79,7 +81,7 @@ export default function LoginPage() {
               )}
             </button>
           </div>
-          {err && <div className="text-down text-sm text-center">{err}</div>}
+          {err && <div className="text-danger text-sm text-center">{err}</div>}
           <button
             disabled={busy}
             className="bg-accent text-white py-2.5 rounded-full font-medium transition disabled:opacity-50 hover:bg-accent/90
