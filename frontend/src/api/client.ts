@@ -21,6 +21,9 @@ export async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise
     }
     throw new ApiError(r.status, msg)
   }
-  if (r.status === 204) return undefined as T
+  if (r.status === 204 || !r.headers.get('content-type')?.includes('json')) {
+    // 空体成功响应(如 logout 的幂等化 200 空体)不解析,否则 r.json() 对空串抛错
+    return undefined as T
+  }
   return (await r.json()) as T
 }
