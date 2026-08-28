@@ -26,7 +26,6 @@ describe('内置类型登记', () => {
     expect(get('trending')?.label).toBe('GitHub 趋势')
     expect(get('trending')?.singleton).toBe(true)
     expect(get('trending')?.size).toEqual({ w: 3, h: 2 })
-    expect(get('trending')?.detailEntry).toBe('header')
   })
 
   it('nav editor:url 先行(自动加载触发器)+ name + 可选 icon 覆盖', () => {
@@ -103,20 +102,18 @@ describe('summarize — 纯数据提取(无需 DOM)', () => {
 })
 
 describe('更新日志类型 changelog(多源,ADR-0020)', () => {
-  it('登记为扩展、非单例、detail=modal(ADR-0022),editor 声明 source 字段', () => {
+  it('登记为扩展、非单例,editor 声明 source 字段', () => {
     expect(get('changelog')?.kind).toBe('extension')
     expect(get('changelog')?.singleton).toBe(false)
-    expect(get('changelog')?.detail).toBe('modal')
     expect(get('changelog')?.editor.map((f) => f.name)).toEqual(['source'])
   })
 })
 
 describe('天气类型 weather(ADR-0009)', () => {
-  it('登记为扩展、非单例、detail=modal', () => {
+  it('登记为扩展、非单例', () => {
     expect(get('weather')?.label).toBe('天气')
     expect(get('weather')?.kind).toBe('extension')
     expect(get('weather')?.singleton).toBe(false)
-    expect(get('weather')?.detail).toBe('modal')
   })
 
   it('非单例:已有也允许新增(canAdd)', () => {
@@ -186,7 +183,6 @@ describe('register — 扩展点(spec 契约:register(typeId, definition))', () 
       kind: 'extension',
       singleton: false,
       refresh: { kind: 'none' },
-      detail: 'none',
       editor: [],
       summarize: () => null,
     }
@@ -198,11 +194,10 @@ describe('register — 扩展点(spec 契约:register(typeId, definition))', () 
 })
 
 describe('AI 热点类型 aihot(单例,CONTEXT.md「AI 热点」)', () => {
-  it('登记为扩展、单例、detail=modal', () => {
+  it('登记为扩展、单例', () => {
     expect(get('aihot')?.label).toBe('AI 热点')
     expect(get('aihot')?.kind).toBe('extension')
     expect(get('aihot')?.singleton).toBe(true)
-    expect(get('aihot')?.detail).toBe('modal')
   })
 
   it('声明跨格 size(ADR-0021):aihot/changelog/todo 3×2,weather 3×1(首个非 3×2),其余不声明', () => {
@@ -213,14 +208,6 @@ describe('AI 热点类型 aihot(单例,CONTEXT.md「AI 热点」)', () => {
     for (const t of ['nav', 'stock', 'group'] as const) {
       expect(get(t)?.size).toBeUndefined()
     }
-  })
-
-  it('detailEntry(ADR-0022 显式化):跨格滚动大 tile = header,其余(含跨格无滚动的天气)缺省 block', () => {
-    for (const t of ['aihot', 'changelog', 'todo'] as const) {
-      expect(get(t)?.detailEntry).toBe('header')
-    }
-    expect(get('weather')?.detailEntry).toBeUndefined()
-    expect(get('nav')?.detailEntry).toBeUndefined()
   })
 
   it('iconCells:weather 3×1 占 3 格', () => {
@@ -239,12 +226,10 @@ describe('AI 热点类型 aihot(单例,CONTEXT.md「AI 热点」)', () => {
 })
 
 describe('模型追踪类型 model(单例,issues/01;CONTEXT.md「模型追踪」)', () => {
-  it('登记为扩展、单例、detail=modal、「更多」标头唯一入口(ADR-0022)', () => {
+  it('登记为扩展、单例', () => {
     expect(get('model')?.label).toBe('模型追踪')
     expect(get('model')?.kind).toBe('extension')
     expect(get('model')?.singleton).toBe(true)
-    expect(get('model')?.detail).toBe('modal')
-    expect(get('model')?.detailEntry).toBe('header')
   })
 
   it('固定占 3×2 跨格(ADR-0021);无实例参数(单例,data 无字段)', () => {
@@ -260,12 +245,10 @@ describe('模型追踪类型 model(单例,issues/01;CONTEXT.md「模型追踪」
 })
 
 describe('新闻类型 news(单例;CONTEXT.md「新闻」,ADR-0027)', () => {
-  it('登记为扩展、单例、detail=modal、「更多」标头唯一入口(ADR-0022)', () => {
+  it('登记为扩展、单例', () => {
     expect(get('news')?.label).toBe('新闻')
     expect(get('news')?.kind).toBe('extension')
     expect(get('news')?.singleton).toBe(true)
-    expect(get('news')?.detail).toBe('modal')
-    expect(get('news')?.detailEntry).toBe('header')
   })
 
   it('固定占 3×2 跨格(ADR-0021);无实例参数(勾选是账号级后端数据,不进 data)', () => {

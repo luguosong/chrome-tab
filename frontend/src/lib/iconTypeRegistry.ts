@@ -7,15 +7,13 @@ import { DEFAULT_CHANGELOG_SOURCE } from 'chrome-tab-shared'
 /**
  * 图标类型注册表(见 CONTEXT.md「图标类型」/ ADR-0001)。
  *
- * 注册表存纯数据 + 纯函数(无 JSX):元数据(kind/singleton/refresh/detail/
- * editor/size) + 纯 summarize。实际渲染由组件层按 type/detail 分发,使本模块 DOM-free、
+ * 注册表存纯数据 + 纯函数(无 JSX):元数据(kind/singleton/refresh/editor/
+ * size) + 纯 summarize。实际渲染由静态 UI adapter(components/iconTypeUi.tsx)
+ * 按 type 分发,使本模块 DOM-free、
  * 可 Vitest 纯函数测试(spec §接缝2)。图标默认占 1 格;类型可声明 size 跨格
  * (ADR-0021,渲染层 CSS grid span,位置仍是纯顺序流)。
  */
 export type IconTypeKind = 'base' | 'extension' | 'group'
-
-/** 详情容器形态(stock/weather/changelog/aihot=Modal / nav=无;ADR-0022 起无 drawer)。 */
-export type DetailContainer = 'none' | 'modal'
 
 /** 画格跨度(ADR-0021):w 列 × h 行,缺省 1×1。渲染层据此 span,容量按 w×h 计。 */
 export type IconSpan = { w: number; h: number }
@@ -55,16 +53,9 @@ export interface IconTypeDefinition {
   kind: IconTypeKind
   singleton: boolean
   refresh: RefreshConfig
-  detail: DetailContainer
   editor: EditorField[]
   /** 画格跨度(ADR-0021):缺省(不声明)= 1×1。跨格类型的位置仍是顺序流,CSS span 排布。 */
   size?: IconSpan
-  /**
-   * 详情入口(ADR-0022 范式显式化):'block' = 整块点击打开(缺省,单格类型与跨格
-   * 但无滚动主体的类型——如天气 3×1 小时序列);'header' = 块内标头「更多」按钮是
-   * 唯一入口、整块点击无操作(跨格滚动大 tile,滚动主体与整块点击冲突)。
-   */
-  detailEntry?: 'block' | 'header'
   /**
    * 从图标 data + 实时数据取摘要。纯函数,无 DOM。返回 null 表示无摘要或刷新失败。
    * 注:ADR-0001 契约字段。票 10 换肤后四个内置类型的网格渲染全部走专属 body
@@ -127,7 +118,6 @@ export const NAV_DEF: IconTypeDefinition = {
   kind: 'base',
   singleton: false,
   refresh: { kind: 'none' },
-  detail: 'none',
   editor: [
     { name: 'url', label: '网址', placeholder: 'https://…' },
     { name: 'name', label: '名称', placeholder: '名称' },
@@ -143,7 +133,6 @@ export const STOCK_DEF: IconTypeDefinition = {
   kind: 'extension',
   singleton: false,
   refresh: { kind: 'quotes' },
-  detail: 'modal',
   editor: [
     { name: 'symbol', label: '符号', placeholder: '搜索或输代码,如 茅台 / usAAPL' },
     { name: 'name', label: '名称', placeholder: '名称' },
@@ -169,9 +158,7 @@ export const CHANGELOG_DEF: IconTypeDefinition = {
   kind: 'extension',
   singleton: false,
   refresh: { kind: 'changelog' },
-  detail: 'modal',
   size: { w: 3, h: 2 },
-  detailEntry: 'header',
   editor: [
     {
       name: 'source',
@@ -199,7 +186,6 @@ export const WEATHER_DEF: IconTypeDefinition = {
   kind: 'extension',
   singleton: false,
   refresh: { kind: 'weather' },
-  detail: 'modal',
   size: { w: 3, h: 1 },
   editor: [{ name: 'location', label: '城市', placeholder: '搜索城市' }],
   summarize: (data, live) => {
@@ -220,9 +206,7 @@ export const AIHOT_DEF: IconTypeDefinition = {
   kind: 'extension',
   singleton: true,
   refresh: { kind: 'aihot' },
-  detail: 'modal',
   size: { w: 3, h: 2 },
-  detailEntry: 'header',
   editor: [{ name: 'name', label: '名称', placeholder: '名称(默认 AI 热点)' }],
   summarize: () => null, // 网格渲染走专属 AiHotIconBody,契约字段无消费方(同 nav)
 }
@@ -237,9 +221,7 @@ export const TODO_DEF: IconTypeDefinition = {
   kind: 'extension',
   singleton: true,
   refresh: { kind: 'todo' },
-  detail: 'modal',
   size: { w: 3, h: 2 },
-  detailEntry: 'header',
   editor: [],
   summarize: () => null, // 网格渲染走专属 TodoIconBody,契约字段无消费方(同 nav/aihot)
 }
@@ -255,9 +237,7 @@ export const VIDEO_DEF: IconTypeDefinition = {
   kind: 'extension',
   singleton: true,
   refresh: { kind: 'video' },
-  detail: 'modal',
   size: { w: 3, h: 2 },
-  detailEntry: 'header',
   editor: [],
   summarize: () => null, // 网格渲染走专属 VideoIconBody,契约字段无消费方(同 nav/aihot/todo)
 }
@@ -273,9 +253,7 @@ export const MODEL_DEF: IconTypeDefinition = {
   kind: 'extension',
   singleton: true,
   refresh: { kind: 'model' },
-  detail: 'modal',
   size: { w: 3, h: 2 },
-  detailEntry: 'header',
   editor: [],
   summarize: () => null, // 网格渲染走专属 ModelIconBody,契约字段无消费方(同 nav/aihot/todo/video)
 }
@@ -292,9 +270,7 @@ export const NEWS_DEF: IconTypeDefinition = {
   kind: 'extension',
   singleton: true,
   refresh: { kind: 'news' },
-  detail: 'modal',
   size: { w: 3, h: 2 },
-  detailEntry: 'header',
   editor: [],
   summarize: () => null, // 网格渲染走专属 NewsIconBody,契约字段无消费方(同 nav/aihot/todo/video/model)
 }
@@ -311,9 +287,7 @@ export const TRENDING_DEF: IconTypeDefinition = {
   kind: 'extension',
   singleton: true,
   refresh: { kind: 'trending' },
-  detail: 'modal',
   size: { w: 3, h: 2 },
-  detailEntry: 'header',
   editor: [],
   summarize: () => null, // 网格渲染走专属 TrendingIconBody,契约字段无消费方(同 nav/aihot/todo/video/model/news)
 }
@@ -330,9 +304,7 @@ export const SERVERS_DEF: IconTypeDefinition = {
   kind: 'extension',
   singleton: true,
   refresh: { kind: 'servers' },
-  detail: 'modal',
   size: { w: 3, h: 2 },
-  detailEntry: 'header',
   editor: [],
   summarize: () => null, // 网格渲染走专属 ServersIconBody,契约字段无消费方(同上先例)
 }
@@ -350,7 +322,6 @@ export const GROUP_DEF: IconTypeDefinition = {
   kind: 'group',
   singleton: false,
   refresh: { kind: 'none' },
-  detail: 'none',
   editor: [],
   summarize: () => null,
 }

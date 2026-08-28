@@ -40,7 +40,9 @@ type IconDetailProps = {
 
 /**
  * 图标块与详情的静态全覆盖 UI seam。可选 detail 是有无详情的唯一运行时来源;
- * nav 链接、group 弹层、拖拽和编辑仍由 Icon 共享外壳处理。
+ * detailEntry(ADR-0022):'block' = 整块点击打开,'header' = 块内标头「更多」按钮
+ * 唯一入口(跨格滚动大 tile,滚动主体与整块点击冲突)。nav 链接、group 弹层、
+ * 拖拽和编辑仍由 Icon 共享外壳处理。
  */
 type IconTypeUiAdapter =
   | {

@@ -54,7 +54,7 @@ _Avoid_: 手抄 onMutate/onError/onSettled 三件套(漏取消在途或漏还原
 _Avoid_: Modal 框架(泛 UI 概念)、ModalShell(下层壳,非本层)、弹窗模板。
 
 **图标类型 (Icon Type)**:
-类型注册表中的一个条目,声明该类图标:详情容器形态、是否单例、配置表单,以及摘要纯函数(ADR-0001 契约;网格渲染已由各类型专属 body 承接,该字段暂无消费方)。类型分基础与扩展两类。
+类型注册表中的一个条目,声明该类图标:是否单例、配置表单、刷新、画格跨度,以及摘要纯函数(ADR-0001 契约;摘要暂无网格消费方)。图标块与详情的组件映射由静态全覆盖 UI adapter(前端 `components/iconTypeUi.tsx`)持有——有无详情由可选详情 renderer 表达,入口策略('block' 整块点击 / 'header' 标头「更多」,ADR-0022)随 adapter 声明(2026-08-28 起,原注册表 detail/detailEntry 字段退役)。类型分基础与扩展两类。
 _Avoid_: 组件、widget、block。
 
 **基础类型 / 扩展类型 (Base / Extension Type)**:
