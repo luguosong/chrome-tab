@@ -167,22 +167,21 @@ describe('makeBatchTranslator 候选链(真链路 mock fetch;no_key/换候选/40
     expect(out.slice(20)).toEqual([null, null, null, null, null])
   })
 
-  it('节流闸门:连续两次网关请求至少间隔 LLM_MIN_REQUEST_INTERVAL_MS(free 5rpm 限额)', async () => {
+  it('节流闸门:连续两次网关请求至少间隔 LLM_MIN_REQUEST_INTERVAL_MS(free 5rpm 限额;闸门住 callModel,ADR-0037)', async () => {
     process.env.AIHUBMIX_API_KEY = 'k'
+    process.env.LLM_MIN_REQUEST_INTERVAL_MS = '80' // 覆盖 beforeEach 的 1ms(闸门读 process.env,非构造参数)
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const times: number[] = []
     globalThis.fetch = vi.fn(async () => {
       times.push(Date.now())
       return new Response(JSON.stringify(OK('1. 甲').body), { status: 200 })
     }) as typeof fetch
-    const t = makeBatchTranslator('sys', 'tag-gate', {
-      AIHUBMIX_API_KEY: 'k',
-      LLM_MIN_REQUEST_INTERVAL_MS: '80',
-    })
+    const t = makeBatchTranslator('sys', 'tag-gate')
     await t(['a'])
     await t(['b'])
     expect(times.length).toBe(2)
-    expect(times[1] - times[0]).toBeGreaterThanOrEqual(80)
+    // 闸门间隔按「放行时刻」计,fetch 时刻差带 ±几 ms 微任务噪声(80 全额偶发 79);50 居中判别
+    expect(times[1] - times[0]).toBeGreaterThanOrEqual(50)
   })
 })
 

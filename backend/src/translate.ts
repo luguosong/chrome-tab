@@ -60,13 +60,16 @@ export function isCandidateExhausted(e: unknown): boolean {
 
 /**
  * 发请求闸门(free 渠道限额 2026-08-27 告示:5 次/分钟、500 次/天、100 万 Token/天):
- * 进程级单例,连续网关请求至少间隔 interval——changelog/news/trending 三域共享同一闸门
- * 主动避 429,而非全靠候选链事后换路(换路只在限额按模型计时有效,按账号计时换路无用)。
- * 检查与占位之间无 await(JS 单线程原子),并发轮询亦正确排队;间隔按「发起时刻」计,
- * 请求耗时算在外,实际速率恒 ≤ 上限。付费兜底同受此闸约束——兜底一天碰不了几次,代价可忽略。
+ * 进程级单例,连续网关请求至少间隔 env LLM_MIN_REQUEST_INTERVAL_MS(0/空/非数回默认
+ * 12_000ms;测试注入小值跳过等待)——住 callModel 原语内部(ADR-0037),任何走原语的
+ * 消费者(changelog 单段链 / news / trending 批量链)自动共享同一闸门主动避 429,而非
+ * 全靠候选链事后换路(换路只在限额按模型计时有效,按账号计时换路无用)。检查与占位
+ * 之间无 await(JS 单线程原子),并发轮询亦正确排队;间隔按「发起时刻」计,请求耗时算
+ * 在外,实际速率恒 ≤ 上限。付费兜底同受此闸约束——兜底一天碰不了几次,代价可忽略。
  */
 let nextRequestAt = 0
-export async function gateRequest(intervalMs: number): Promise<void> {
+async function gateRequest(): Promise<void> {
+  const intervalMs = Number(process.env.LLM_MIN_REQUEST_INTERVAL_MS) || 12_000
   for (;;) {
     const now = Date.now()
     if (now >= nextRequestAt) {
@@ -82,6 +85,8 @@ export async function gateRequest(intervalMs: number): Promise<void> {
  * { content, resp }。content = 解析出的译文或 null(200 无 content = 候选失效形态);
  * resp 总是带回,供外层失败日志附响应体切片。fetch 错误上抛(外层 isCandidateExhausted
  * 分类)。**不做日志**——日志格式是各外层的运维 interface,原语返回数据不打印。
+ * 发请求前先过闸门(ADR-0037:限流是「调一次模型」的内层时序纪律,进原语由构造保证,
+ * 不依赖调用方记得过闸——changelog 单段链此前即绕闸裸奔)。
  */
 export async function callModel(
   model: string,
@@ -89,6 +94,7 @@ export async function callModel(
   system: string,
   user: string,
 ): Promise<{ content: string | null; resp: string }> {
+  await gateRequest()
   const resp = await fetchText(`${LLM_BASE_URL}/chat/completions`, 60_000, {
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
@@ -155,8 +161,6 @@ export function makeBatchTranslator(
 ): BatchTranslator {
   const apiKey = env.AIHUBMIX_API_KEY ?? ''
   const models = modelCandidates(env)
-  // 0/空/非数回默认 12_000ms(5 次/分钟的安全间隔);测试注入小值跳过等待
-  const minInterval = Number(env.LLM_MIN_REQUEST_INTERVAL_MS) || 12_000
   return async (texts) => {
     const out: (string | null)[] = texts.map(() => null)
     // 有声拒绝(对齐 changelog「译制被拒绝(Key 缺失?)」范式):静默 return 会与其他
@@ -178,7 +182,6 @@ export function makeBatchTranslator(
         const log = (outcome: string, extra = '') =>
           console.warn(`[${logTag}] 批 ${start / BATCH_SIZE + 1} 候选 ${i + 1}/${models.length} ${model} ${outcome}${extra}`)
         try {
-          await gateRequest(minInterval)
           const beganAt = Date.now()
           const { content, resp } = await callModel(model, apiKey, systemPrompt, user)
           // 200 但拿不到 content / 解析零配对:视同候选失效换下一个(changelog 同款静默失败形态)

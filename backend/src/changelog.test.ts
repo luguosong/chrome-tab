@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_CHANGELOG_SOURCE, type ChangelogSourceId } from 'chrome-tab-shared'
 import { createApp } from './app'
 import { openDb, type Db } from './db'
@@ -461,10 +461,15 @@ describe('无原文源(codex:changelogUrl 缺省,版本流 npm 合成、零译�
 
 describe('translate 候选链(候选失效=403/404/429/5xx/no_available_channel/超时/200空content 换下一个,401等直接抛)', () => {
   const realFetch = globalThis.fetch
+  // 闸门住 callModel(ADR-0037):真链路用例过闸,注入 1ms 跳过等待;节流行为本身单测见末尾用例
+  beforeEach(() => {
+    process.env.LLM_MIN_REQUEST_INTERVAL_MS = '1'
+  })
   afterEach(() => {
     globalThis.fetch = realFetch
     delete process.env.AIHUBMIX_API_KEY
     delete process.env.CHANGELOG_LLM_MODEL
+    delete process.env.LLM_MIN_REQUEST_INTERVAL_MS
   })
 
   /** 依次返回 seq 响应(超出取末个),记录每次请求的 model 字段顺序;timeout: true 模拟超时拒绝。 */
@@ -562,6 +567,24 @@ describe('translate 候选链(候选失效=403/404/429/5xx/no_available_channel/
       ['m2', 2, 2],
     ])
   })
+
+  it('节流闸门:换候选的连续两次请求至少间隔 LLM_MIN_REQUEST_INTERVAL_MS(闸门住 callModel,三域共享)', async () => {
+    process.env.AIHUBMIX_API_KEY = 'k'
+    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
+    process.env.LLM_MIN_REQUEST_INTERVAL_MS = '80'
+    const times: number[] = []
+    globalThis.fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      times.push(Date.now())
+      const model = JSON.parse(String(init?.body)).model
+      if (model === 'm1') return new Response(JSON.stringify(NO_CHANNEL.body), { status: NO_CHANNEL.status })
+      return new Response(JSON.stringify(OK.body), { status: 200 })
+    }) as typeof fetch
+    await expect(prodChangelogDeps().translate('块')).resolves.toBe('译文')
+    expect(times.length).toBe(2)
+    // 闸门间隔按「放行时刻」计,fetch 时刻差带 ±几 ms 微任务噪声,80 全额会偶发 79——
+    // 无闸裸奔实测 0~3ms,50 居中判别(translate.test.ts 闸门用例同款)
+    expect(times[1] - times[0]).toBeGreaterThanOrEqual(50)
+  })
 })
 
 // ---- 分段译制(2026-08-26:2.1.246 块 9.2k 字符,非流式单请求生成 >60s,7 候选全超时)----
@@ -589,10 +612,15 @@ describe('splitSegments(段=行边界,单请求输出压小,稳离 60s 超时)',
 
 describe('translate 分段(大块逐段请求,段失败换候选只重试该段)', () => {
   const realFetch = globalThis.fetch
+  // 闸门住 callModel(ADR-0037):分段真链路多次过闸,注入 1ms 跳过等待
+  beforeEach(() => {
+    process.env.LLM_MIN_REQUEST_INTERVAL_MS = '1'
+  })
   afterEach(() => {
     globalThis.fetch = realFetch
     delete process.env.AIHUBMIX_API_KEY
     delete process.env.CHANGELOG_LLM_MODEL
+    delete process.env.LLM_MIN_REQUEST_INTERVAL_MS
   })
 
   /** mockFetchSeq 的分段版:另记录每次请求的 user content(断言段大小与内容)。 */
