@@ -4,11 +4,13 @@
  * (components/DetailModal.tsx)与本文件同源——调用方与骨架共享同一组函数,
  * 高亮与内容派生不会各说各话(组件零测试设施的仓约束下,语义测试面在此)。
  */
+import type { ReactNode } from 'react'
 
-/** tab 条的一个条目;key 由域自持(新闻源 id、分类 id、机器名……)。 */
+/** tab 条的一个条目;key 由域自持(新闻源 id、分类 id、机器名……),label 可带
+ *  域内标记(如待办的计数徽标)——归一决策只认 key,不感知 label 内容。 */
 export interface TabItem<T extends string = string> {
   readonly key: T
-  readonly label: string
+  readonly label: ReactNode
 }
 
 /**

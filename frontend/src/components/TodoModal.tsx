@@ -3,18 +3,19 @@ import { ApiError } from '../api/client'
 import { useCompleteTodo, useCreateTodo, useTodo } from '../hooks/useTodo'
 import { dueLabel, isOverdue, priorityDotClass, type TodoBundle, type TodoTask } from '../lib/todo'
 import { TodoDetailModal, TodoDetailPanel } from './TodoDetail'
-import ModalShell from './ModalShell'
+import DetailModal, { QueryPane } from './DetailModal'
 
 /**
  * 待办详情 Modal(见 CONTEXT.md「待办」,3×2 迭代起为三视图):收集箱 / 当天 / 7 天
- * 三 tab(下划线式,计数徽标 mono 小字;7 天含当天;收集箱为默认首 tab)。列表 = 点掉按钮(乐观完成)+
+ * 三 tab(计数徽标 mono 小字;7 天含当天;收集箱为默认首 tab)。列表 = 点掉按钮(乐观完成)+
  * 标题 + 到期标签(过期红,收集箱无日期不显);高优先级行首色点。点条目就地展开
  * 左右分栏(左列表右「待办详情」,Modal max-w 随之 lg→3xl;再点同条收起、切 tab/
  * 完成当前条收起;窄窗 <640px 分栏放不下,降级弹二级对话框)。底部速记输入:
- * Enter → 滴答收集箱,成功即切到收集箱 tab——「速记即入箱」闭环,刚记的条目立见。
- * 失败区分:未配置(400)给出生成口令指引,其余给重试。容器:ModalShell 统一壳
- * (ADR-0031;分栏/列表双态走 width+className);二级详情开着时 Esc 只关二级
- * ——escStack 栈顶派发结构保证。
+ * Enter → 滴答清单收集箱,成功即切到收集箱 tab——「速记即入箱」闭环,刚记的条目立见。
+ * 失败区分:未配置(400)给出生成口令指引,其余给重试。容器:详情 Modal 骨架
+ * (ADR-0040;tab 计数依赖 data,失败/首载不渲染 tab 条——与原版一致;状态机与
+ * 速记行交织故 pane 自持,错误/加载块走 QueryPane 零件;二级详情开着时 Esc 只关
+ * 二级——escStack 栈顶派发结构保证)。
  */
 type TodoTab = keyof TodoBundle
 const TABS: { key: TodoTab; label: string }[] = [
@@ -56,6 +57,7 @@ export default function TodoModal({ onClose }: { onClose: () => void }) {
 
   // 分栏开着时窗口拖窄(降级含 resize,不止开详情那一刻):选中条迁移为二级详情。
   // 仅随 narrow 变化触发,选中态经渲染层兜底(find 不到即 null)。
+  const tasks = data ? data[tab] : []
   useEffect(() => {
     if (!narrow || !selectedId) return
     const t = tasks.find((x) => x.id === selectedId)
@@ -71,30 +73,23 @@ export default function TodoModal({ onClose }: { onClose: () => void }) {
     setDraft('')
   }
 
-  const tasks = data ? data[tab] : []
   // 越界兜底:选中条已不在当前视图(完成被勾走等)时不渲染分栏
   const selected = selectedId ? (tasks.find((t) => t.id === selectedId) ?? null) : null
 
-  const tabs = (
-    <div role="tablist" aria-label="待办视图" className="flex gap-4 border-b border-white/10 mb-2">
-      {TABS.map(({ key, label }) => (
-        <button
-          key={key}
-          role="tab"
-          aria-selected={tab === key}
-          type="button"
-          onClick={() => switchTab(key)}
-          className={
-            'pb-1.5 -mb-px text-sm border-b-2 transition ' +
-            (tab === key ? 'text-accent border-accent' : 'text-white/60 border-transparent hover:text-white/85')
-          }
-        >
-          {label}
-          <span className="ml-1.5 font-mono text-xs text-white/45">{data![key].length}</span>
-        </button>
-      ))}
-    </div>
-  )
+  // tab 条(骨架渲染,含悬空回落):计数徽标依赖 data,失败/首载时给空列——
+  // 骨架空列守卫即「无 tab 形态」,等价原版不渲染
+  const tabs = data
+    ? TABS.map(({ key, label }) => ({
+        key,
+        label: (
+          <>
+            {label}
+            <span className="ml-1.5 font-mono text-xs text-white/45">{data[key].length}</span>
+          </>
+        ),
+      }))
+    : []
+
   const list =
     tasks.length === 0 ? (
       <div className="text-sm text-white/50 py-6 text-center">
@@ -131,9 +126,13 @@ export default function TodoModal({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <ModalShell
+      <DetailModal
         onClose={onClose}
         ariaLabel="待办"
+        title="待办"
+        subtitle="滴答清单 · 勾掉即完成,速记存入收集箱"
+        refresh={() => void refetch()}
+        busy={isFetching}
         width={selected ? '3xl' : 'lg'}
         scroll={false}
         className={
@@ -141,76 +140,53 @@ export default function TodoModal({ onClose }: { onClose: () => void }) {
           // 分栏时加宽一档、整体滚动让位给左右列各自滚动;列表态纵向滚动
           (selected ? 'overflow-hidden flex flex-col' : 'overflow-y-auto')
         }
+        tabs={tabs}
+        tab={tab}
+        onTabChange={switchTab}
       >
+        {complete.isError && <div className="mb-2 text-xs text-red-300">完成失败,任务已恢复,请重试</div>}
 
-          <div className="mb-3">
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-semibold text-white/90">待办</h2>
-              {/* 主动刷新:轮询间隔内想立刻对账(如在别端记了任务)时用 */}
-              <button
-                type="button"
-                onClick={() => void refetch()}
-                disabled={isFetching}
-                aria-label="刷新"
-                title="刷新"
-                className="w-6 h-6 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center text-sm disabled:opacity-50"
-              >
-                <span className={isFetching ? 'animate-spin inline-block' : 'inline-block'}>↻</span>
-              </button>
-            </div>
-            <div className="text-xs text-white/50">滴答清单 · 勾掉即完成,速记存入收集箱</div>
-          </div>
-
-          {complete.isError && <div className="mb-2 text-xs text-red-300">完成失败,任务已恢复,请重试</div>}
-
-          {failed ? (
-            unconfigured ? (
-              <div className="text-sm text-white/60 py-4 leading-relaxed">
-                滴答清单未配置:请在网页版「设置 → 账户与安全 → API 口令」生成口令,写入服务器
-                <code className="mx-1 px-1 rounded bg-white/10">.env.prod</code> 的
-                <code className="mx-1 px-1 rounded bg-white/10">DIDA365_TOKEN</code> 后重启。
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center gap-3">
-                  <span className="text-sm text-white/60">待办刷新失败</span>
-                  <button
-                    type="button"
-                    onClick={() => void refetch()}
-                    disabled={isFetching}
-                    className="min-h-8 px-3 py-1.5 rounded-full border border-white/30 text-white/80 text-xs hover:border-accent hover:text-accent disabled:opacity-50 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
-                  >
-                    重试
-                  </button>
-                </div>
-                {draftRow}
-              </>
-            )
-          ) : data === undefined ? (
-            <>
-              <div className="text-xs text-white/40 py-6 text-center">加载中…</div>
-              {draftRow}
-            </>
-          ) : selected ? (
-            // 左右分栏:左列(tab/列表/速记,自滚) | 右「待办详情」(正文自滚)
-            <div className="flex-1 min-h-0 flex gap-6">
-              <div className="flex-1 min-w-0 flex flex-col overflow-y-auto modal-scroll pr-1">
-                {tabs}
-                {list}
-                {draftRow}
-              </div>
-              <aside className="w-[45%] shrink-0 min-h-0 border-l border-white/10 pl-6">
-                {selected && <TodoDetailPanel task={selected} />}
-              </aside>
+        {failed ? (
+          unconfigured ? (
+            <div className="text-sm text-white/60 py-4 leading-relaxed">
+              滴答清单未配置:请在网页版「设置 → 账户与安全 → API 口令」生成口令,写入服务器
+              <code className="mx-1 px-1 rounded bg-white/10">.env.prod</code> 的
+              <code className="mx-1 px-1 rounded bg-white/10">DIDA365_TOKEN</code> 后重启。
             </div>
           ) : (
             <>
-              {tabs}
-              {list}
+              <QueryPane
+                state={{ kind: 'error', message: '待办刷新失败' }}
+                onRetry={() => void refetch()}
+                retryBusy={isFetching}
+              />
               {draftRow}
             </>
-          )}
-      </ModalShell>
+          )
+        ) : data === undefined ? (
+          <>
+            <QueryPane state={{ kind: 'loading' }} />
+            {draftRow}
+          </>
+        ) : selected ? (
+          // 左右分栏:左列(列表/速记,自滚)| 右「待办详情」(正文自滚)。
+          // tab 条由骨架钉在面板顶层不随左列滚——长列表下 tab 常驻(ADR-0040 批 2)。
+          <div className="flex-1 min-h-0 flex gap-6">
+            <div className="flex-1 min-w-0 flex flex-col overflow-y-auto modal-scroll pr-1">
+              {list}
+              {draftRow}
+            </div>
+            <aside className="w-[45%] shrink-0 min-h-0 border-l border-white/10 pl-6">
+              <TodoDetailPanel task={selected} />
+            </aside>
+          </div>
+        ) : (
+          <>
+            {list}
+            {draftRow}
+          </>
+        )}
+      </DetailModal>
       {detail && <TodoDetailModal task={detail} onClose={() => setDetail(null)} />}
     </>
   )

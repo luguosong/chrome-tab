@@ -3,7 +3,8 @@ import { useCompanyProfile } from '../hooks/useCompanyProfile'
 import { useFundamentals } from '../hooks/useFundamentals'
 import { useKlines } from '../hooks/useKlines'
 import KlineChart from './KlineChart'
-import ModalShell from './ModalShell'
+import DetailModal, { QueryPane } from './DetailModal'
+import StatCell from './StatCell'
 import { formatMarketCap, isIndexSymbol, symbolToSecid, symbolToSecucode } from '../lib/companyOverview'
 import { extractString } from '../lib/iconData'
 import type { Icon } from '../lib/types'
@@ -52,32 +53,19 @@ export default function StockModal({
   const klines = klinesQ.data ?? []
 
   return (
-    <ModalShell
+    <DetailModal
       onClose={onClose}
       ariaLabel={`${name} 行情详情`}
       width="lg"
       scroll={false}
       className="p-6"
+      title={name}
+      subtitle={<span className="font-mono">{code}</span>}
     >
-      {/* 标题 */}
-        <div className="mb-4">
-          <h2 className="text-lg font-semibold text-white/90">{name}</h2>
-          <div className="text-xs text-white/50 font-mono">{code}</div>
-        </div>
-
-        {/* 行情区 */}
+      {/* 行情区 */}
         <div className="mb-5">
           {quotesError ? (
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-white/60">行情刷新失败</span>
-              <button
-                type="button"
-                onClick={refetchQuotes}
-                className="rounded-full border border-white/30 px-3 py-1.5 min-h-8 text-xs text-white/80 hover:border-accent hover:text-accent active:bg-white/20 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
-              >
-                刷新失败,重试
-              </button>
-            </div>
+            <QueryPane state={{ kind: 'error', message: '行情刷新失败' }} onRetry={refetchQuotes} />
           ) : q ? (
             <QuoteBody q={q} />
           ) : (
@@ -155,7 +143,7 @@ export default function StockModal({
             )}
           </div>
         </div>
-    </ModalShell>
+    </DetailModal>
   )
 }
 
@@ -172,15 +160,6 @@ function QuoteBody({ q }: { q: Quote }) {
       <span className="text-xs text-white/40 font-mono">
         昨收 {q.prev.toFixed(2)}
       </span>
-    </div>
-  )
-}
-
-function StatCell({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between rounded-lg bg-white/10 px-3 py-2">
-      <span className="text-white/50">{label}</span>
-      <span className="font-mono text-white/80">{value}</span>
     </div>
   )
 }

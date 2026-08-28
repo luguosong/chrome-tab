@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { getChangelogSource, type ChangelogSourceId } from 'chrome-tab-shared'
 import { useChangelog, useTranslateStatus, useTranslateVersions } from '../hooks/useChangelog'
 import { inline } from '../lib/changelogParser'
-import ModalShell from './ModalShell'
+import DetailModal, { QueryPane } from './DetailModal'
 
 /**
  * 更新日志详情 Modal(ADR-0022,原 ChangelogDrawer 改造:与 AiHotModal/WeatherModal
@@ -19,8 +19,8 @@ import ModalShell from './ModalShell'
  *
  * 刷新失败降级(spec user story 15):query error 非空 → 显示重试按钮,点击重拉。
  *
- * 容器:ModalShell 统一壳(ADR-0031;scroll=false,版本列表自滚)。编辑态进入时
- * 由父组件(DashboardPage)onClose。
+ * 容器:详情 Modal 骨架(ADR-0040;错误态重试块走 QueryPane 零件;scroll=false,
+ * 版本列表自滚)。编辑态进入时由父组件(DashboardPage)onClose。
  */
 export default function ChangelogModal({
   source,
@@ -63,13 +63,15 @@ export default function ChangelogModal({
   }, [translateMut.isPending, translateMut.data, translateMut.variables])
 
   return (
-    <ModalShell
+    <DetailModal
       onClose={onClose}
       ariaLabel={`${sourceLabel} 更新日志`}
       scroll={false}
       className="pb-4"
     >
-      {/* 顶栏:标题 + 副标题(关闭钮归 ModalShell 右上角) */}
+      {/* 顶栏:标题 + 副标题(关闭钮归骨架右上角)。标头不走骨架 title/subtitle——
+          本域是「壳不 p-6、区块自拆 padding」三形态之一(ModalShell 注释点名的
+          未竟事项),标头 px-6 pt-4 的特例形态随域,骨架深度止于状态机零件。 */}
         <div className="flex items-start px-6 pt-4 pb-2">
           <div className="min-w-0">
             <h2 className="text-lg font-semibold text-white/90">{sourceLabel} 更新日志</h2>
@@ -82,16 +84,7 @@ export default function ChangelogModal({
         {/* 失败态 + 列表 */}
         <div className="px-6">
           {isError ? (
-            <div className="flex items-center gap-3 py-6">
-              <span className="text-sm text-white/60">日志刷新失败</span>
-              <button
-                type="button"
-                onClick={() => void refetch()}
-                className="rounded-full border border-white/30 px-3 py-1.5 min-h-8 text-xs text-white/80 hover:border-accent hover:text-accent active:bg-white/20 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
-              >
-                重试
-              </button>
-            </div>
+            <QueryPane state={{ kind: 'error', message: '日志刷新失败' }} onRetry={() => void refetch()} />
           ) : (
             <>
               {(translateMut.isError || translateFailed.length > 0) && (
@@ -202,6 +195,6 @@ export default function ChangelogModal({
             </>
           )}
         </div>
-    </ModalShell>
+    </DetailModal>
   )
 }

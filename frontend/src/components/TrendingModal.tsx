@@ -7,7 +7,7 @@ import {
 } from 'chrome-tab-shared'
 import { timeAgo } from '../lib/timeAgo'
 import { retryTrendingTranslation, useTrending, TRENDING_TRANSLATE_FRESH_MS } from '../hooks/useTrending'
-import ModalShell from './ModalShell'
+import DetailModal, { QueryPane, retryButtonClass } from './DetailModal'
 
 /**
  * GitHub 趋势详情 Modal(见 CONTEXT.md「GitHub 趋势」;ADR-0022「更多」标头唯一入口):
@@ -48,44 +48,44 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <ModalShell onClose={onClose} ariaLabel="GitHub 趋势" className="p-6">
+    <DetailModal
+      onClose={onClose}
+      ariaLabel="GitHub 趋势"
+      className="p-6"
+      title="GitHub 趋势"
+      subtitle={
+        <>
+          趋势仓库(口语 × 语言 × 周期筛选)
+          {data && ` · 抓取于 ${timeAgo(data.fetchedAt)}`}
+        </>
+      }
+      busy={isFetching}
+    >
+      {/* 三行筛选胶囊:每行前置维度小标签,值 = 不限/精选子集;单选互斥。
+          语言胶囊带 linguist 色点,与条目行内色点同色互证(颜色即导航)。
+          胶囊在状态机之外恒显示——失败/空态下切组合即换 queryKey 重拉,
+          是天然的恢复出口(故状态机走域内 QueryPane 而非骨架 pane)。 */}
+      <ChipRow ariaLabel="按口语语言筛选" label="口语" value={spoken} onChange={setSpoken}
+        options={TRENDING_SPOKEN.map((l) => ({ key: l.slug, label: l.label }))} />
+      <ChipRow ariaLabel="按编程语言筛选" label="语言" value={language} onChange={setLanguage}
+        options={TRENDING_LANGUAGES.map((l) => ({ key: l.slug, label: l.label, color: l.color }))} />
+      <ChipRow ariaLabel="按周期筛选" label="周期" value={since} onChange={(v) => setSince(v as TrendingSince)}
+        options={Object.entries(TRENDING_SINCE_LABELS).map(([key, label]) => ({ key, label, color: '' }))} />
 
-      <div className="mb-3">
-          <h2 className="text-lg font-semibold text-white/90">GitHub 趋势</h2>
-          <div className="text-xs text-white/50">
-            趋势仓库(口语 × 语言 × 周期筛选)
-            {data && ` · 抓取于 ${timeAgo(data.fetchedAt)}`}
-          </div>
-        </div>
-
-        {/* 三行筛选胶囊:每行前置维度小标签,值 = 不限/精选子集;单选互斥。
-            语言胶囊带 linguist 色点,与条目行内色点同色互证(颜色即导航)。 */}
-        <ChipRow ariaLabel="按口语语言筛选" label="口语" value={spoken} onChange={setSpoken}
-          options={TRENDING_SPOKEN.map((l) => ({ key: l.slug, label: l.label }))} />
-        <ChipRow ariaLabel="按编程语言筛选" label="语言" value={language} onChange={setLanguage}
-          options={TRENDING_LANGUAGES.map((l) => ({ key: l.slug, label: l.label, color: l.color }))} />
-        <ChipRow ariaLabel="按周期筛选" label="周期" value={since} onChange={(v) => setSince(v as TrendingSince)}
-          options={Object.entries(TRENDING_SINCE_LABELS).map(([key, label]) => ({ key, label, color: '' }))} />
-
-        {isError ? (
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-white/60">趋势榜刷新失败</span>
-            <button
-              type="button"
-              onClick={() => void refetch()}
-              disabled={isFetching}
-              className="border border-white/30 text-white/80 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent disabled:opacity-50"
-            >
-              刷新失败,重试
-            </button>
-          </div>
-        ) : isFetching && repos.length === 0 ? (
-          // 组合现拉中(非默认组合后端无缓存,~2.4s;有旧数据时不整块闪白)
-          <div className="py-8 text-center text-sm text-white/50">正在抓取该组合的趋势榜…</div>
-        ) : repos.length === 0 ? (
-          <div className="py-8 text-center text-sm text-white/50">该组合下暂无趋势仓库</div>
-        ) : (
-          <>
+      <QueryPane
+        state={
+          isError
+            ? { kind: 'error', message: '趋势榜刷新失败' }
+            : repos.length === 0
+              ? isFetching
+                ? // 组合现拉中(非默认组合后端无缓存,~2.4s;有旧数据时不整块闪白)
+                  { kind: 'loading' }
+                : { kind: 'empty', message: '该组合下暂无趋势仓库' }
+              : { kind: 'content' }
+        }
+        onRetry={() => void refetch()}
+        retryBusy={isFetching}
+      >
             {/* 暂未译出(新鲜窗外仍有缺口):聚合提示条 + 重试入口。不逐行标红——
                 行动出口只有一个(重试本组),逐行重复按钮是噪音;中性 white-alpha
                 保持深色面唯一交互色纪律,按钮语汇与上方「刷新失败,重试」同款。 */}
@@ -99,7 +99,7 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
                   type="button"
                   onClick={() => void onRetryTranslation()}
                   disabled={retryState === 'sending'}
-                  className="shrink-0 border border-white/30 text-white/80 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent disabled:opacity-50"
+                  className={'shrink-0 ' + retryButtonClass}
                 >
                   {retryState === 'sending' ? '正在发起…' : '重试翻译'}
                 </button>
@@ -154,9 +154,8 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
               </li>
             ))}
             </ol>
-          </>
-        )}
-    </ModalShell>
+      </QueryPane>
+    </DetailModal>
   )
 }
 

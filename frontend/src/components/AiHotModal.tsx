@@ -3,8 +3,9 @@ import { useAiHot, useAiHotDaily, useAiHotModelPicks } from '../hooks/useAiHot'
 import { formatDailyDate } from '../lib/aihot'
 import { timeAgo } from '../lib/timeAgo'
 import { extractString } from '../lib/iconData'
+import { paneState } from '../lib/detailModalState'
 import type { Icon } from '../lib/types'
-import ModalShell from './ModalShell'
+import DetailModal, { QueryPane } from './DetailModal'
 
 /**
  * AI 热点详情 Modal(见 CONTEXT.md「AI 热点」,与天气同范式的详情容器),三 tab:
@@ -17,8 +18,9 @@ import ModalShell from './ModalShell'
  * 模型精选/日报面板懒挂载——切到该 tab 才挂载组件、才发请求;日报取数无轮询
  * (定稿一天一版)。
  * 数据自持 useAiHot / useAiHotModelPicks / useAiHotDaily(图标 body 与热点同
- * queryKey 去重);失败(null / isError)→ 面板内「刷新失败,重试」。容器:
- * ModalShell 统一壳(ADR-0031;tab 为 TodoModal 同款下划线式)。
+ * queryKey 去重);失败(null / isError)→ 面板内错误态重试。容器:详情 Modal
+ * 骨架(ADR-0040;三 tab 各持查询态——热点走骨架 pane,精选/日报面板走
+ * QueryPane 零件,不为此 1/10 成员撑宽复合出口,ADR-0038 §6)。
  */
 type Tab = 'hot' | 'picks' | 'daily'
 const TABS: { key: Tab; label: string }[] = [
@@ -37,233 +39,60 @@ export default function AiHotModal({ icon, onClose }: { icon: Icon; onClose: () 
   const topics = data ?? []
 
   return (
-    <ModalShell onClose={onClose} ariaLabel="AI 热点" width="lg" className="p-6">
-
-      <div className="mb-3">
-          <h2 className="text-lg font-semibold text-white/90">
-            {extractString(icon.data, 'name') || 'AI 热点'}
-          </h2>
-          <div className="text-xs text-white/50">AIHOT 事件热点榜 + 模型精选 + AI 日报</div>
-        </div>
-
-        <div role="tablist" aria-label="AI 热点视图" className="flex gap-4 border-b border-white/10 mb-2">
-          {TABS.map(({ key, label }) => (
-            <button
-              key={key}
-              role="tab"
-              aria-selected={tab === key}
-              type="button"
-              onClick={() => setTab(key)}
-              className={
-                'pb-1.5 -mb-px text-sm border-b-2 transition ' +
-                (tab === key
-                  ? 'text-accent border-accent'
-                  : 'text-white/60 border-transparent hover:text-white/85')
-              }
+    <DetailModal
+      onClose={onClose}
+      ariaLabel="AI 热点"
+      width="lg"
+      className="p-6"
+      title={extractString(icon.data, 'name') || 'AI 热点'}
+      subtitle="AIHOT 事件热点榜 + 模型精选 + AI 日报"
+      tabs={TABS}
+      tab={tab}
+      onTabChange={setTab}
+      busy={isFetching}
+      pane={
+        tab === 'hot'
+          ? paneState({
+              isError: failed,
+              isPending: data === undefined,
+              isEmpty: topics.length === 0,
+              emptyMessage: '当前没有热点',
+              errorMessage: '热点刷新失败',
+            })
+          : null
+      }
+      onRetry={() => void refetch()}
+    >
+      {tab === 'hot' ? (
+        <ol className="space-y-1">
+          {topics.map((t) => (
+            <li
+              key={t.rank}
+              className="rounded-xl px-3 py-2.5 hover:bg-white/10 transition flex gap-3"
             >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {tab === 'hot' ? (
-          failed ? (
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-white/60">热点刷新失败</span>
-              <button
-                type="button"
-                onClick={() => void refetch()}
-                disabled={isFetching}
-                className="border border-white/30 text-white/80 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent disabled:opacity-50"
-              >
-                刷新失败,重试
-              </button>
-            </div>
-          ) : data === undefined ? (
-            <div className="text-xs text-white/40 py-6 text-center">加载中…</div>
-          ) : topics.length === 0 ? (
-            <div className="text-sm text-white/50 py-6 text-center">当前没有热点</div>
-          ) : (
-            <ol className="space-y-1">
-              {topics.map((t) => (
-                <li
-                  key={t.rank}
-                  className="rounded-xl px-3 py-2.5 hover:bg-white/10 transition flex gap-3"
-                >
-                  <span className="font-mono text-accent text-sm w-5 shrink-0 text-right self-start mt-0.5">
-                    {t.rank}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    {t.storyUrl ? (
-                      <a
-                        href={t.storyUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-sm text-white/90 leading-snug hover:text-accent"
-                      >
-                        {t.title}
-                      </a>
-                    ) : (
-                      <span className="text-sm text-white/90 leading-snug">{t.title}</span>
-                    )}
-                    <div className="text-meta text-white/50 mt-1 flex items-center gap-2 flex-wrap">
-                      {t.sourceName && <span className="truncate max-w-[40%]">{t.sourceName}</span>}
-                      {t.sourceCount > 1 && <span>{t.sourceCount} 源</span>}
-                      {t.latestAt && <span>{timeAgo(t.latestAt)}</span>}
-                      {t.originalUrl && (
-                        <a
-                          href={t.originalUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="underline underline-offset-2 hover:text-accent"
-                        >
-                          原文
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          )
-        ) : tab === 'picks' ? (
-          <ModelPicksPanel />
-        ) : (
-          <DailyPanel />
-        )}
-    </ModalShell>
-  )
-}
-
-/** 模型精选 tab 面板:懒挂载(只在选中时渲染),三态与热点面板同款。 */
-function ModelPicksPanel() {
-  const { data, isError, refetch, isFetching } = useAiHotModelPicks()
-  const failed = isError || data === null
-  const picks = data ?? []
-
-  if (failed) {
-    return (
-      <div className="flex items-center gap-3">
-        <span className="text-sm text-white/60">精选刷新失败</span>
-        <button
-          type="button"
-          onClick={() => void refetch()}
-          disabled={isFetching}
-          className="border border-white/30 text-white/80 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent disabled:opacity-50"
-        >
-          刷新失败,重试
-        </button>
-      </div>
-    )
-  }
-  if (data === undefined) {
-    return <div className="text-xs text-white/40 py-6 text-center">加载中…</div>
-  }
-  if (picks.length === 0) {
-    return <div className="text-sm text-white/50 py-6 text-center">近 7 天没有模型精选</div>
-  }
-  return (
-    <ul className="space-y-1">
-      {picks.map((p) => (
-        <li key={p.id} className="rounded-xl px-3 py-2.5 hover:bg-white/10 transition">
-          {p.aihotUrl ? (
-            <a
-              href={p.aihotUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="text-sm text-white/90 leading-snug hover:text-accent"
-            >
-              {p.title}
-            </a>
-          ) : (
-            <span className="text-sm text-white/90 leading-snug">{p.title}</span>
-          )}
-          <div className="text-meta text-white/50 mt-1 flex items-center gap-2 flex-wrap">
-            {p.sourceName && <span className="truncate max-w-[40%]">{p.sourceName}</span>}
-            {p.publishedAt && <span>{timeAgo(p.publishedAt)}</span>}
-            {p.originalUrl && (
-              <a
-                href={p.originalUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="underline underline-offset-2 hover:text-accent"
-              >
-                原文
-              </a>
-            )}
-          </div>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-/**
- * 日报 tab 面板:懒挂载(只在选中时渲染),三态与热点面板同款;出刊前(空
- * sections)按空态而非失败处理。条目无 id,key 用 section/条目双下标——定稿
- * 快照渲染期不重排,安全(见 lib/aihot.ts 类型注释)。
- */
-function DailyPanel() {
-  const { data, isError, refetch, isFetching } = useAiHotDaily()
-  const failed = isError || data === null
-
-  if (failed) {
-    return (
-      <div className="flex items-center gap-3">
-        <span className="text-sm text-white/60">日报刷新失败</span>
-        <button
-          type="button"
-          onClick={() => void refetch()}
-          disabled={isFetching}
-          className="border border-white/30 text-white/80 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent disabled:opacity-50"
-        >
-          刷新失败,重试
-        </button>
-      </div>
-    )
-  }
-  if (data === undefined) {
-    return <div className="text-xs text-white/40 py-6 text-center">加载中…</div>
-  }
-  const sections = data.sections.filter((s) => s.items.length > 0)
-  if (sections.length === 0) {
-    return <div className="text-sm text-white/50 py-6 text-center">今日日报还未出刊(每早 8:00)</div>
-  }
-  const total = sections.reduce((n, s) => n + s.items.length, 0)
-  return (
-    <div>
-      <div className="text-sm text-white/80 mb-2">
-        {data.date && (
-          <>
-            {formatDailyDate(data.date)}
-            <span className="text-white/40"> · </span>
-          </>
-        )}
-        <span className="text-white/40">共 {total} 条</span>
-      </div>
-      {sections.map((s, si) => (
-        <section key={si}>
-          <div className="text-xs text-accent/80 mt-3 first:mt-0 mb-1">{s.label}</div>
-          <ul className="space-y-1">
-            {s.items.map((it, ii) => (
-              <li key={ii} className="rounded-xl px-3 py-2.5 hover:bg-white/10 transition">
-                {it.aihotUrl ? (
+              <span className="font-mono text-accent text-sm w-5 shrink-0 text-right self-start mt-0.5">
+                {t.rank}
+              </span>
+              <div className="min-w-0 flex-1">
+                {t.storyUrl ? (
                   <a
-                    href={it.aihotUrl}
+                    href={t.storyUrl}
                     target="_blank"
                     rel="noreferrer"
                     className="text-sm text-white/90 leading-snug hover:text-accent"
                   >
-                    {it.title}
+                    {t.title}
                   </a>
                 ) : (
-                  <span className="text-sm text-white/90 leading-snug">{it.title}</span>
+                  <span className="text-sm text-white/90 leading-snug">{t.title}</span>
                 )}
                 <div className="text-meta text-white/50 mt-1 flex items-center gap-2 flex-wrap">
-                  {it.sourceName && <span className="truncate max-w-[40%]">{it.sourceName}</span>}
-                  {it.originalUrl && (
+                  {t.sourceName && <span className="truncate max-w-[40%]">{t.sourceName}</span>}
+                  {t.sourceCount > 1 && <span>{t.sourceCount} 源</span>}
+                  {t.latestAt && <span>{timeAgo(t.latestAt)}</span>}
+                  {t.originalUrl && (
                     <a
-                      href={it.originalUrl}
+                      href={t.originalUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="underline underline-offset-2 hover:text-accent"
@@ -272,14 +101,146 @@ function DailyPanel() {
                     </a>
                   )}
                 </div>
-                {it.summary && (
-                  <p className="text-sm text-white/60 leading-relaxed mt-1.5">{it.summary}</p>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-    </div>
+              </div>
+            </li>
+          ))}
+        </ol>
+      ) : tab === 'picks' ? (
+        <ModelPicksPanel />
+      ) : (
+        <DailyPanel />
+      )}
+    </DetailModal>
+  )
+}
+
+/** 模型精选 tab 面板:懒挂载(只在选中时渲染),三态走 QueryPane 零件(ADR-0040)。 */
+function ModelPicksPanel() {
+  const { data, isError, refetch, isFetching } = useAiHotModelPicks()
+  const failed = isError || data === null
+  const picks = data ?? []
+
+  return (
+    <QueryPane
+      state={paneState({
+        isError: failed,
+        isPending: data === undefined,
+        isEmpty: picks.length === 0,
+        emptyMessage: '近 7 天没有模型精选',
+        errorMessage: '精选刷新失败',
+      })}
+      onRetry={() => void refetch()}
+      retryBusy={isFetching}
+    >
+      <ul className="space-y-1">
+        {picks.map((p) => (
+          <li key={p.id} className="rounded-xl px-3 py-2.5 hover:bg-white/10 transition">
+            {p.aihotUrl ? (
+              <a
+                href={p.aihotUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm text-white/90 leading-snug hover:text-accent"
+              >
+                {p.title}
+              </a>
+            ) : (
+              <span className="text-sm text-white/90 leading-snug">{p.title}</span>
+            )}
+            <div className="text-meta text-white/50 mt-1 flex items-center gap-2 flex-wrap">
+              {p.sourceName && <span className="truncate max-w-[40%]">{p.sourceName}</span>}
+              {p.publishedAt && <span>{timeAgo(p.publishedAt)}</span>}
+              {p.originalUrl && (
+                <a
+                  href={p.originalUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline underline-offset-2 hover:text-accent"
+                >
+                  原文
+                </a>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </QueryPane>
+  )
+}
+
+/**
+ * 日报 tab 面板:懒挂载(只在选中时渲染),三态走 QueryPane 零件;出刊前(空
+ * sections)按空态而非失败处理。条目无 id,key 用 section/条目双下标——定稿
+ * 快照渲染期不重排,安全(见 lib/aihot.ts 类型注释)。
+ */
+function DailyPanel() {
+  const { data, isError, refetch, isFetching } = useAiHotDaily()
+  const failed = isError || data === null
+  const sections = data?.sections.filter((s) => s.items.length > 0) ?? []
+  const total = sections.reduce((n, s) => n + s.items.length, 0)
+
+  return (
+    <QueryPane
+      state={paneState({
+        isError: failed,
+        isPending: data === undefined,
+        isEmpty: sections.length === 0,
+        emptyMessage: '今日日报还未出刊(每早 8:00)',
+        errorMessage: '日报刷新失败',
+      })}
+      onRetry={() => void refetch()}
+      retryBusy={isFetching}
+    >
+      <div>
+        <div className="text-sm text-white/80 mb-2">
+          {data?.date && (
+            <>
+              {formatDailyDate(data.date)}
+              <span className="text-white/40"> · </span>
+            </>
+          )}
+          <span className="text-white/40">共 {total} 条</span>
+        </div>
+        {sections.map((s, si) => (
+          <section key={si}>
+            <div className="text-xs text-accent/80 mt-3 first:mt-0 mb-1">{s.label}</div>
+            <ul className="space-y-1">
+              {s.items.map((it, ii) => (
+                <li key={ii} className="rounded-xl px-3 py-2.5 hover:bg-white/10 transition">
+                  {it.aihotUrl ? (
+                    <a
+                      href={it.aihotUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm text-white/90 leading-snug hover:text-accent"
+                    >
+                      {it.title}
+                    </a>
+                  ) : (
+                    <span className="text-sm text-white/90 leading-snug">{it.title}</span>
+                  )}
+                  <div className="text-meta text-white/50 mt-1 flex items-center gap-2 flex-wrap">
+                    {it.sourceName && <span className="truncate max-w-[40%]">{it.sourceName}</span>}
+                    {it.originalUrl && (
+                      <a
+                        href={it.originalUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline underline-offset-2 hover:text-accent"
+                      >
+                        原文
+                      </a>
+                    )}
+                  </div>
+                  {it.summary && (
+                    <p className="text-sm text-white/60 leading-relaxed mt-1.5">{it.summary}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+    </QueryPane>
   )
 }

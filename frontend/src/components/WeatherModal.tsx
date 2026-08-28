@@ -2,7 +2,8 @@ import { type ReactNode } from 'react'
 import { useIconData } from '../context/IconDataContext'
 import { hourHM, locationKey, weatherIconUrl, readWeatherLocation, type WeatherAir, type WeatherAlert, type WeatherDay, type WeatherHour, type WeatherNow } from '../lib/weather'
 import type { Icon } from '../lib/types'
-import ModalShell from './ModalShell'
+import DetailModal, { QueryPane } from './DetailModal'
+import StatCell from './StatCell'
 
 /**
  * 天气详情 Modal(见 ADR-0009)。实况 / 24 小时预报(水平滚动)/ 7 天预报 / 空气质量 / 灾害预警
@@ -35,34 +36,18 @@ export default function WeatherModal({
   const failed = weatherError || (key !== '' && bundle === null)
 
   return (
-    <ModalShell
+    <DetailModal
       onClose={onClose}
       ariaLabel={`${name} 天气详情`}
       width="lg"
       className="p-6"
+      title={name}
+      subtitle={loc ? [loc.adm1, loc.adm2].filter(Boolean).join(' · ') : undefined}
     >
-
-        {/* 标题:城市 + 行政区划 */}
-        <div className="mb-4">
-          <h2 className="text-lg font-semibold text-white/90">{name}</h2>
-          {loc && (
-            <div className="text-xs text-white/50">
-              {[loc.adm1, loc.adm2].filter(Boolean).join(' · ')}
-            </div>
-          )}
-        </div>
-
         {/* 实况 */}
         {failed ? (
-          <div className="flex items-center gap-3 mb-4">
-            <span className="text-sm text-white/60">天气刷新失败</span>
-            <button
-              type="button"
-              onClick={refetchWeather}
-              className="rounded-full border border-white/30 px-3 py-1.5 min-h-8 text-xs text-white/80 hover:border-accent hover:text-accent active:bg-white/20 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
-            >
-              刷新失败,重试
-            </button>
+          <div className="mb-4">
+            <QueryPane state={{ kind: 'error', message: '天气刷新失败' }} onRetry={refetchWeather} />
           </div>
         ) : now ? (
           <NowBody now={now} />
@@ -113,7 +98,7 @@ export default function WeatherModal({
             </div>
           </div>
         )}
-    </ModalShell>
+    </DetailModal>
   )
 }
 
@@ -230,15 +215,6 @@ function AlertBody({ a }: { a: WeatherAlert }) {
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
     <div className="text-meta uppercase tracking-wider text-white/50 mb-2">{children}</div>
-  )
-}
-
-function StatCell({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between rounded-lg bg-white/10 px-3 py-2">
-      <span className="text-white/50">{label}</span>
-      <span className="font-mono text-white/80">{value}</span>
-    </div>
   )
 }
 

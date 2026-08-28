@@ -8,9 +8,10 @@ import { type PaneState, type TabItem, normalizeTab } from '../lib/detailModalSt
  * tab 条(含悬空回落)、主体查询状态机、打开即对账。各域只声明 tab 派生、
  * 空态/失败文案与内容;内容主体(管理 pane、图表、列表)永远留域。
  *
- * 双出口:DetailModal(复合,目标九家消费——ADR-0040 批 2 收口后;批 1 先行
- * 新闻/视频更新/服务器状态)+ QueryPane(状态机零件,仅 per-tab 各持查询态的
- * 域——「AI 热点」三 tab——用,DetailModal 内部亦消费它)。
+ * 双出口:DetailModal(复合,九家消费——批 1:新闻/视频更新/服务器状态,批 2:
+ * 待办/模型追踪/股票/天气/更新日志/趋势)+ QueryPane(状态机零件,per-tab 各持
+ * 查询态的域——「AI 热点」三 tab——与域内自持三态的分段域用,DetailModal 内部
+ * 亦消费它)。
  */
 
 /** 重试钮方言(min-h-8 触达裁决,ADR-0040 漂移①)单点——QueryPane 与域内自持的
@@ -30,7 +31,8 @@ export function QueryPane({
   onRetry?: () => void
   /** 重试进行中禁用连点(通常与标头刷新钮共用 isFetching)。 */
   retryBusy?: boolean
-  children: ReactNode
+  /** content 态内容;省缺 = 当单态渲染器用(只渲染 error/loading/empty 块)。 */
+  children?: ReactNode
 }) {
   if (state.kind === 'loading')
     return <div className="text-sm text-white/50 py-6 text-center">加载中…</div>
@@ -55,6 +57,9 @@ interface DetailModalBaseProps<T extends string> {
   ariaLabel: string
   /** 标题;省缺不渲染标头行(如「服务器状态」现状无标头)。 */
   title?: string
+  /** 标题下的说明行(静态副行/鲜度位等;7/9 家共性形态,批 2 起)——ReactNode,
+   *  域要 mono/动态文本(股票代码、趋势「抓取于 X」)自持样式与内容。 */
+  subtitle?: ReactNode
   /** 声明即渲染标头刷新钮(声明式:域对鲜度有诉求才有,ADR-0040)。 */
   refresh?: () => void
   /** 刷新/重试进行中(转圈 + 禁用连点;两钮通常同一 isFetching)。 */
@@ -87,6 +92,7 @@ export default function DetailModal<T extends string>({
   onClose,
   ariaLabel,
   title,
+  subtitle,
   refresh,
   busy,
   tabs,
@@ -112,21 +118,24 @@ export default function DetailModal<T extends string>({
 
   return (
     <ModalShell onClose={onClose} ariaLabel={ariaLabel} width={width} scroll={scroll} z={z} className={className}>
-      {(title !== undefined || refresh !== undefined) && (
-        <div className="mb-3 flex items-center gap-2">
-          {title !== undefined && <h2 className="text-lg font-semibold text-white/90">{title}</h2>}
-          {refresh !== undefined && (
-            <button
-              type="button"
-              onClick={refresh}
-              disabled={busy}
-              aria-label="刷新"
-              title="刷新"
-              className="w-6 h-6 rounded-full bg-white/20 text-white/80 hover:bg-white/40 focus-visible:outline-2 focus-visible:outline-white/60 flex items-center justify-center text-sm disabled:opacity-50"
-            >
-              <span className={busy ? 'animate-spin inline-block' : 'inline-block'}>↻</span>
-            </button>
-          )}
+      {(title !== undefined || refresh !== undefined || subtitle !== undefined) && (
+        <div className="mb-3">
+          <div className="flex items-center gap-2">
+            {title !== undefined && <h2 className="text-lg font-semibold text-white/90">{title}</h2>}
+            {refresh !== undefined && (
+              <button
+                type="button"
+                onClick={refresh}
+                disabled={busy}
+                aria-label="刷新"
+                title="刷新"
+                className="w-6 h-6 rounded-full bg-white/20 text-white/80 hover:bg-white/40 focus-visible:outline-2 focus-visible:outline-white/60 flex items-center justify-center text-sm disabled:opacity-50"
+              >
+                <span className={busy ? 'animate-spin inline-block' : 'inline-block'}>↻</span>
+              </button>
+            )}
+          </div>
+          {subtitle !== undefined && <div className="text-xs text-white/50">{subtitle}</div>}
         </div>
       )}
 

@@ -7,7 +7,7 @@ import type {
 } from 'chrome-tab-shared'
 import { useModelArchive } from '../hooks/useModelArchive'
 import { timeAgo } from '../lib/timeAgo'
-import ModalShell from './ModalShell'
+import DetailModal from './DetailModal'
 import {
   AVAILABILITY_LABELS,
   CODING_INDEX_BENCHMARK,
@@ -38,8 +38,8 @@ import { faviconUrl } from '../lib/iconData'
  * Modal 内就地展开**(摘要 + 限额/训练参数/价格/评测四张规格卡——值按语义着色,
  * 动态时间线与信源全宽,不套第二层 Modal),24h 新动态行首红点(时间驱动,无已读
  * 概念)。信源失败保留最后成功结果并标记陈旧(CONTEXT.md「模型档案」)——头部给
- * 一行陈旧提示。容器:ModalShell 统一壳(ADR-0031),tab 为 TodoModal
- * 同款下划线式(过滤行用胶囊形态以区分「切视图/筛条件」两个维度)。
+ * 一行陈旧提示。容器:详情 Modal 骨架(ADR-0040;tab 静态派生自 PROVIDER_LABELS,
+ * 过滤行用胶囊形态以区分「切视图/筛条件」两个维度)。
  */
 /** tab 维度 = 全部 + 各跟踪厂家(自 PROVIDER_LABELS 派生,厂家票扩 shared 时 tab 随动)+ 固定「跑分榜」(ADR-0035,末位不打乱派生序)。 */
 type Tab = 'all' | ModelProviderId | 'leaderboard'
@@ -73,38 +73,30 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
   const staleSources = (data?.sources ?? []).filter((s) => s.stale)
 
   return (
-    <ModalShell onClose={onClose} ariaLabel="模型追踪" className="p-6">
-
-      <div className="mb-3">
-          <h2 className="text-lg font-semibold text-white/90">模型追踪</h2>
-          <div className="text-xs text-white/50">AI 模型档案与动态(官方一手信源)</div>
-        </div>
-
-        <div role="tablist" aria-label="模型追踪视图" className="flex gap-4 border-b border-white/10 mb-2">
-          {TABS.map(({ key, label }) => (
-            <button
-              key={key}
-              role="tab"
-              aria-selected={tab === key}
-              type="button"
-              onClick={() => setTab(key)}
-              className={
-                'pb-1.5 -mb-px text-sm border-b-2 transition ' +
-                (tab === key
-                  ? 'text-accent border-accent'
-                  : 'text-white/60 border-transparent hover:text-white/85')
-              }
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {/* 种类过滤胶囊:单选互斥,与厂家 tab AND 组合。不是 tab(不切换视图,
-            只叠加过滤条件)——role=group + aria-pressed。种类词着色与行内种类词
-            同纲(MODEL_KIND_COLOR_CLASSES):chip 与行内同色互证,颜色即导航。
-            跑分榜不消费该过滤轴(CONTEXT.md:跑分榜无种类过滤),整行隐藏。 */}
-        {tab !== 'leaderboard' && (
+    <DetailModal
+      onClose={onClose}
+      ariaLabel="模型追踪"
+      className="p-6"
+      title="模型追踪"
+      subtitle="AI 模型档案与动态(官方一手信源)"
+      tabs={TABS}
+      tab={tab}
+      onTabChange={setTab}
+      busy={isFetching}
+      pane={
+        isError
+          ? { kind: 'error', message: '档案刷新失败' }
+          : data === undefined
+            ? { kind: 'loading' }
+            : null
+      }
+      onRetry={() => void refetch()}
+    >
+      {/* 种类过滤胶囊:单选互斥,与厂家 tab AND 组合。不是 tab(不切换视图,
+          只叠加过滤条件)——role=group + aria-pressed。种类词着色与行内种类词
+          同纲(MODEL_KIND_COLOR_CLASSES):chip 与行内同色互证,颜色即导航。
+          跑分榜不消费该过滤轴(CONTEXT.md:跑分榜无种类过滤),整行隐藏。 */}
+      {tab !== 'leaderboard' && (
         <div
           role="group"
           aria-label="按模型种类过滤"
@@ -136,23 +128,11 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
         </div>
         )}
 
-        {isError ? (
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-white/60">档案刷新失败</span>
-            <button
-              type="button"
-              onClick={() => void refetch()}
-              disabled={isFetching}
-              className="border border-white/30 text-white/80 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent disabled:opacity-50"
-            >
-              刷新失败,重试
-            </button>
-          </div>
-        ) : data === undefined ? (
-          <div className="text-xs text-white/40 py-6 text-center">加载中…</div>
-        ) : (
-          <>
-            {/* 陈旧标记(CONTEXT.md「模型档案」):单信源失败保留最后成功结果 */}
+      {/* pane=null 已保证 data 就位;本守卫是编译器的类型收窄(陈旧/线索/列表
+          的派生都在 data 上) */}
+      {data && (
+      <>
+      {/* 陈旧标记(CONTEXT.md「模型档案」):单信源失败保留最后成功结果 */}
             {staleSources.length > 0 && (
               <div className="text-meta text-white/50 py-1.5">
                 {staleSources
@@ -205,9 +185,9 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
                 onToggle={(id) => setExpandedId((cur) => (cur === id ? null : id))}
               />
             )}
-          </>
-        )}
-    </ModalShell>
+      </>
+      )}
+    </DetailModal>
   )
 }
 

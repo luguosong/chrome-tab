@@ -13,7 +13,8 @@ const WIDTHS = {
  * 居中详情 Modal 统一壳(ADR-0031):遮罩点击 / Esc 栈派发(escStack,多层同开
  * 只关最上层)/ 关闭钮 / 玻璃面板几何 / 进出场动画一处持有,并
  * createPortal(document.body) 逃出 .page-panel 的 backdrop-filter 包含块
- * (fixed 后代被钳成锚定 main,TodoIcon 快览卡同款教训)。11 个居中 Modal 消费。
+ * (fixed 后代被钳成锚定 main,TodoIcon 快览卡同款教训)。直接消费:详情 Modal
+ * 骨架(ADR-0040,十家详情 Modal 经它)+ 待办详情二级对话框 + 倒计时编辑弹层。
  *
  * 不进壳的两样:padding 三形态(p-6 ×9 / p-5 / Changelog 拆内部区块)走 className;
  * 标题区异质(副行文本 vs 行内操作按钮)留在各 Modal。
