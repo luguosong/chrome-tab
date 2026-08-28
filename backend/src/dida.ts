@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { asRec, BadRequest, ConflictError, str } from './common'
+import { asRec, BadRequest, cachedOrNull, ConflictError, str } from './common'
 
 /**
  * 滴答清单待办代理(CONTEXT.md「待办」):单例图标的取数与写回——首个可写图标类型。
@@ -95,8 +95,27 @@ export type DidaConfig = { token: string }
 
 export function createDidaService(cfg: DidaConfig, baseUrl = DEFAULT_BASE) {
   const { token } = cfg
-  let cached: { at: number; data: TodoBundleDto } | null = null
-  let lastGood: TodoBundleDto | null = null
+  // 三视图 bundle 的取数源:TTL/宁旧勿空/从未成功 null 三不变量走 cachedOrNull
+  // 原语(ADR-0042);单键闭包传常量键,写操作 invalidate 强制下读重拉。
+  const bundleSource = cachedOrNull<string, TodoBundleDto>({
+    ttlMs: TTL_MS,
+    fetch: async () => {
+      const now = new Date()
+      const [week, inbox] = await Promise.all([
+        postJson('/open/v1/task/search', {
+          keywords: '', // 上游 2026-08-24 起缺失即 500(空串 = 不过滤,线上实测)
+          status: [0],
+          dueTo: endOfPlus8(now, WEEK_DAYS),
+        }).then((r) => parseTodoTasks(r, 'due')),
+        postJson('/open/v1/task/filter', {
+          projectIds: [INBOX_PROJECT_ID],
+          status: [0],
+        }).then((r) => parseTodoTasks(r, 'inbox')),
+      ])
+      return { today: splitToday(week, now), week, inbox }
+    },
+    warnLabel: () => '滴答待办取数失败',
+  })
 
   function requireConfigured() {
     if (!token.trim()) throw new BadRequest('滴答清单未配置(DIDA365_TOKEN 缺失)')
@@ -118,39 +137,18 @@ export function createDidaService(cfg: DidaConfig, baseUrl = DEFAULT_BASE) {
     /** 三视图 bundle;上游失败沿用旧数据,从未成功 null;未配置抛 400(永久态不降级)。 */
     async todoBundle(): Promise<TodoBundleDto | null> {
       requireConfigured()
-      if (cached && Date.now() - cached.at < TTL_MS) return cached.data
-      try {
-        const now = new Date()
-        const [week, inbox] = await Promise.all([
-          postJson('/open/v1/task/search', {
-            keywords: '', // 上游 2026-08-24 起缺失即 500(空串 = 不过滤,线上实测)
-            status: [0],
-            dueTo: endOfPlus8(now, WEEK_DAYS),
-          }).then((r) => parseTodoTasks(r, 'due')),
-          postJson('/open/v1/task/filter', {
-            projectIds: [INBOX_PROJECT_ID],
-            status: [0],
-          }).then((r) => parseTodoTasks(r, 'inbox')),
-        ])
-        const data: TodoBundleDto = { today: splitToday(week, now), week, inbox }
-        cached = { at: Date.now(), data }
-        lastGood = data
-        return data
-      } catch (e) {
-        console.warn(`滴答待办取数失败: ${e}`)
-        return lastGood
-      }
+      return bundleSource.get('bundle')
     },
     /** 速记:仅标题,不指定清单即落收集箱。 */
     async createTask(title: string): Promise<void> {
       requireConfigured()
-      cached = null
+      bundleSource.invalidate('bundle')
       await postJson('/open/v1/task', { title })
     },
     /** 点掉即完成。 */
     async completeTask(projectId: string, taskId: string): Promise<void> {
       requireConfigured()
-      cached = null
+      bundleSource.invalidate('bundle')
       await postJson(`/open/v1/project/${projectId}/task/${taskId}/complete`)
     },
   }

@@ -215,6 +215,8 @@ describe('TrendingService 描述译制(ADR-0030/0036)', () => {
       ['Prompt as Code 工业级提示词引擎与模板库', null],
       ['A fast build tool', null],
     ])
+    // 首批全量送译(fire-and-forget 补译的记录点在微任务链上,until 轮询去竞态)
+    await until(() => translationCalls.length > 0)
     expect(translationCalls).toEqual([['Prompt as Code 工业级提示词引擎与模板库', 'A fast build tool']])
     await until(async () => (await zhRows(db)) > 0)
     const second = await svc.get({ since: 'daily', language: '', spoken: '' })

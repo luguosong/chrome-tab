@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { asRec, str } from './common'
+import { asRec, cachedOrNull, str } from './common'
 
 /**
  * AIHOT 后端代理(CONTEXT.md「AI 热点」):单例图标类型的唯一取数来源,匿名只读、
@@ -160,24 +160,19 @@ export function parseDaily(resp: unknown): AihotDailyDto {
 
 // ── 服务(HTTP + 缓存;三视图同形闭包,第二次复用触发提取)──────────────────────
 
-/** 单端点取数闭包:TTL 内回缓存,失败沿用 lastGood,从未成功为 null。 */
+/** 单端点取数闭包:TTL/宁旧勿空/从未成功 null 三不变量走 cachedOrNull 原语
+ *  (ADR-0042;不变量直测在 common.test.ts),此处只剩域差异——匿名 UA 外呼与响应裁剪。 */
 function createCachedSource<T>(baseUrl: string, path: string, ttlMs: number, parse: (resp: unknown) => T) {
-  let cached: { at: number; data: T } | null = null
-  let lastGood: T | null = null
-  return async (): Promise<T | null> => {
-    if (cached && Date.now() - cached.at < ttlMs) return cached.data
-    try {
-      const res = await fetch(new URL(path, baseUrl), { headers: { 'User-Agent': USER_AGENT } })
+  const source = cachedOrNull({
+    ttlMs,
+    fetch: async (p: string) => {
+      const res = await fetch(new URL(p, baseUrl), { headers: { 'User-Agent': USER_AGENT } })
       if (!res.ok) throw new Error(`AIHOT 上游 HTTP ${res.status}`)
-      const data = parse(await res.json())
-      cached = { at: Date.now(), data }
-      lastGood = data
-      return data
-    } catch (e) {
-      console.warn(`AIHOT 取数失败(${path}): ${e}`)
-      return lastGood
-    }
-  }
+      return parse(await res.json())
+    },
+    warnLabel: (p) => `AIHOT 取数失败(${p})`,
+  })
+  return (): Promise<T | null> => source.get(path)
 }
 
 export function createAihotService(baseUrl = DEFAULT_BASE) {

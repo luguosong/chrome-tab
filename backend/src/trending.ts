@@ -11,7 +11,7 @@ import {
 import type { AuthEnv } from './auth'
 import { makeBatchTranslator, makeTranslationStore, type BatchTranslator, type TranslationStore } from './translate'
 import type { Db } from './db'
-import { BadRequest, FETCH_TIMEOUT, chromeHeaders, fetchText } from './common'
+import { BadRequest, cachedOrNull, type CachedSource, FETCH_TIMEOUT, chromeHeaders, fetchText } from './common'
 
 /**
  * 「GitHub 趋势」(CONTEXT.md「GitHub 趋势」;ADR-0028):独立单例图标的数据服务。
@@ -36,6 +36,11 @@ const LANG_SET = new Set(TRENDING_LANGUAGES.map((l) => l.slug))
 const SPOKEN_SET = new Set(TRENDING_SPOKEN.map((l) => l.slug))
 
 const queryKey = (q: TrendingQuery) => `${q.since}|${q.language}|${q.spoken}`
+// 反解(cachedOrNull 的 fetch 回调以序列化键调用;三段值均不含 `|`,split 安全)
+const queryFromKey = (key: string): TrendingQuery => {
+  const [since, language, spoken] = key.split('|')
+  return { since: since as TrendingSince, language, spoken }
+}
 const starNumber = (s: string): number => Number(s.replace(/,/g, '')) || 0
 
 /** 描述译制系统提示(对齐 news prompt 口径,域语境换为项目描述)。 */
@@ -111,35 +116,39 @@ async function fetchTrending(deps: TrendingDeps, q: TrendingQuery): Promise<Tren
 type Entry = { repos: TrendingRepo[]; fetchedAt: number }
 
 export class TrendingService {
-  private readonly cache = new Map<string, Entry>()
+  /** 读组合取数源:TTL 1h / 失败回落过期缓存 / 从未成功 null 三不变量走
+   *  cachedOrNull 原语(ADR-0042);键 = `since|language|spoken` 序列化,fetch 反解。 */
+  private readonly source: CachedSource<string, Entry>
 
   /** 描述译文仓(ADR-0034):原文键 load/ensure,哈希派生与补译骨架收进 store。 */
   private readonly translations: TranslationStore
 
   constructor(db: Db, private readonly deps: TrendingDeps) {
     this.translations = makeTranslationStore(db, 'trending_translations')
+    this.source = cachedOrNull<string, Entry>({
+      ttlMs: CACHE_TTL_MS,
+      fetch: async (key) => ({
+        repos: await fetchTrending(this.deps, queryFromKey(key)),
+        fetchedAt: Date.now(),
+      }),
+      warnLabel: () => '趋势榜取数失败',
+      // 抓取成功即后台补译(ADR-0030 fire-and-forget):首批响应先回原文,译文就位
+      // 后靠前端既有刷新节奏(staleTime 5min + 聚焦重拉)自然到达;缓存命中路径
+      // 每次 join 译文表即见。钩子异常由原语自吞,不牵连取数。
+      onSuccess: (_key, entry) => void this.translateMissingDescriptions(entry.repos),
+    })
   }
 
-  /** 读组合:缓存未过期直接回;过期现抓(失败回落过期缓存)。抓取成功即后台补译
-   * (ADR-0030 fire-and-forget)——首批响应先回原文,译文就位后靠前端既有刷新节奏
-   * (staleTime 5min + 聚焦重拉)自然到达,缓存命中路径每次 join 译文表即见。 */
+  /** 读组合:TTL/宁旧勿空由原语持有;从未成功 → 域选上抛(诚实 500,原语日志
+   *  已记上游失败原因)。回落路径 fetchedAt 如实陈旧(tile 鲜度位如实显示)。 */
   async get(q: TrendingQuery): Promise<TrendingResponse> {
     const key = queryKey(q)
-    const hit = this.cache.get(key)
-    if (hit && Date.now() - hit.fetchedAt < CACHE_TTL_MS) return this.toResponse(hit)
-    try {
-      const entry: Entry = { repos: await fetchTrending(this.deps, q), fetchedAt: Date.now() }
-      this.cache.set(key, entry)
-      void this.translateMissingDescriptions(entry.repos)
-      return await this.toResponse(entry)
-    } catch (e) {
-      // 降级:陈旧数据好过没有(tile 有 fetchedAt 如实显示鲜度);无缓存才上抛 500
-      if (hit) return await this.toResponse(hit)
-      throw e
-    }
+    const entry = await this.source.get(key)
+    if (entry === null) throw this.source.lastError(key) ?? new Error('趋势榜取数失败(上游不可达且无缓存)')
+    return await this.toResponse(entry)
   }
 
-  /** cron 保热默认组合(图标卡片视图);失败保留旧缓存由 get 降级。 */
+  /** cron 保热默认组合(图标卡片视图);失败保留旧缓存由原语降级。 */
   async refreshDefault(): Promise<void> {
     await this.get({ since: 'daily', language: '', spoken: '' })
   }
@@ -151,11 +160,8 @@ export class TrendingService {
    *  收果。 */
   async retryTranslations(q: TrendingQuery): Promise<void> {
     const key = queryKey(q)
-    let entry = this.cache.get(key)
-    if (!entry || Date.now() - entry.fetchedAt >= CACHE_TTL_MS) {
-      entry = { repos: await fetchTrending(this.deps, q), fetchedAt: Date.now() }
-      this.cache.set(key, entry)
-    }
+    const entry = await this.source.get(key)
+    if (entry === null) throw this.source.lastError(key) ?? new Error('趋势榜取数失败(上游不可达且无缓存)')
     void this.translateMissingDescriptions(entry.repos)
   }
 
