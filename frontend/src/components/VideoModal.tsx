@@ -14,13 +14,12 @@ import {
 } from '../hooks/useVideoUpdates'
 import { normalizeTab, paneState } from '../lib/detailModalState'
 import { timeAgo } from '../lib/timeAgo'
+import { isFreshRow } from '../lib/tileBody'
 import ConfirmButton from './ConfirmButton'
 import DetailModal from './DetailModal'
 
-/** 新视频红点窗口(与 VideoIconBody 同口径):发布 <24h,时间驱动满窗自隐。 */
-const NEW_WINDOW_S = 24 * 60 * 60
-
-const isNew = (v: VideoFeedItem) => Date.now() / 1000 - v.publishedAt < NEW_WINDOW_S
+// 红点判据与 VideoIconBody 同口径 = isFreshRow(「块内主体」24h 红点窗唯一执行口径)
+const isNew = (v: VideoFeedItem) => isFreshRow(v.publishedAt)
 const iso = (sec: number) => new Date(sec * 1000).toISOString()
 const fmtDuration = (sec: number) => {
   const h = Math.floor(sec / 3600)

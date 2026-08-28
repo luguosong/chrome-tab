@@ -4,10 +4,8 @@ import type { NewsSourceId } from 'chrome-tab-shared'
 import { useNewsFeed, useSetNewsSources } from '../hooks/useNews'
 import { normalizeTab, paneState } from '../lib/detailModalState'
 import { timeAgo } from '../lib/timeAgo'
+import { isFreshRow } from '../lib/tileBody'
 import DetailModal, { retryButtonClass } from './DetailModal'
-
-/** 新条目红点窗口(与 NewsIconBody 同口径)。 */
-const NEW_WINDOW_S = 24 * 60 * 60
 
 /**
  * 新闻详情 Modal(见 CONTEXT.md「新闻」):tab = 全部(默认,混合流)→ 各勾选源 →
@@ -71,7 +69,7 @@ export default function NewsModal({ onClose }: { onClose: () => void }) {
                 className="block rounded-xl p-2 hover:bg-white/10 transition-colors"
               >
                 <span className="flex items-start gap-1.5">
-                  {n.publishedAt !== null && Date.now() / 1000 - n.publishedAt < NEW_WINDOW_S && (
+                  {isFreshRow(n.publishedAt) && (
                     <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" aria-hidden="true" />
                   )}
                   {/* 译文主行,悬停 title 属性恒英文原文供核对(ADR-0029) */}

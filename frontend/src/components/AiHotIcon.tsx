@@ -4,6 +4,7 @@ import { ICON_SCALE, tileFont } from '../lib/iconLayout'
 import { useEditMode } from '../context/EditModeContext'
 import type { Icon } from '../lib/types'
 import BigTile from './BigTile'
+import { TileBody, TileRow } from './TileBody'
 
 /**
  * AI 热点图标的专属网格渲染(见 CONTEXT.md「AI 热点」;ADR-0021 跨格大 tile):
@@ -46,13 +47,11 @@ export default function AiHotIconBody({
       overlay={overlay}
     >
       {sections.length === 0 ? null : (
-        <div
-          // 原生滚动翻阅全量(雾胶囊滚动条 tile-scroll,触屏 pan-y 保原生滚动,
-          // TouchSensor delay+tolerance 分流拖拽)。条目 key 双下标:定稿快照渲染期
-          // 不重排,安全(见 lib/aihot.ts 类型注释)
-          className="flex-1 min-h-0 overflow-y-auto flex flex-col px-2 py-1.5 tile-scroll [touch-action:pan-y]"
-        >
-          {sections.map((s, si) => (
+        // 全量翻阅(cap={null} 显式声明,见「块内主体」):日报一期条目少,30 行窗不适用
+        <TileBody
+          as="div"
+          cap={null}
+          rows={sections.map((s, si) => (
             // 分类间距挂 section:first-child(标头 div 恒为 section 首子,first: 挂它身上恒真)
             <section key={si} className="mt-2 first:mt-0">
               <div className="px-2 pb-0.5 text-accent" style={{ fontSize }}>
@@ -60,7 +59,8 @@ export default function AiHotIconBody({
               </div>
               <ul>
                 {s.items.map((it, ii) => (
-                  <li key={ii} className="min-w-0 px-2 py-1 rounded-lg hover:bg-white/10 transition">
+                  // 条目 key 双下标:定稿快照渲染期不重排,安全(见 lib/aihot.ts 类型注释)
+                  <TileRow key={ii} interactive="hover" className="min-w-0">
                     {it.aihotUrl && !editing ? (
                       <a
                         href={it.aihotUrl}
@@ -78,12 +78,12 @@ export default function AiHotIconBody({
                         {it.title}
                       </span>
                     )}
-                  </li>
+                  </TileRow>
                 ))}
               </ul>
             </section>
           ))}
-        </div>
+        />
       )}
     </BigTile>
   )

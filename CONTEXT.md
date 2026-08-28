@@ -53,6 +53,10 @@ _Avoid_: 手抄 onMutate/onError/onSettled 三件套(漏取消在途或漏还原
 各扩展图标「详情 Modal」在 ModalShell(几何/Esc 栈/动画,ADR-0031)之上的公共结构层:标头(名称 + 可选刷新钮)、tab 条(当前 tab 所指实体被删后悬空,回落首个 tab)、主体查询状态机(加载中 / 失败可重试 / 空态 / 内容;不依赖数据查询的 tab——如「管理」——在数据失败时仍可达)与打开即对账(打开 Modal 即重拉最新;是否声明由各域对鲜度与上游压力取舍,非结构强制)。各域只声明 tab 派生、空态文案与内容主体;逐 tab 各持查询态的域(「AI 热点」三 tab)可只取状态机零件。实现载体:前端 components/DetailModal.tsx(复合 + 同文件状态机零件)与 lib/detailModalState.ts 纯决策函数(ADR-0040)。
 _Avoid_: Modal 框架(泛 UI 概念)、ModalShell(下层壳,非本层)、弹窗模板。
 
+**块内主体 (Tile Body)**:
+跨格大 tile 标头之下的滚动榜区域,是「详情 Modal 骨架」在块内的对应物。公共骨架四处单点:滚动容器(原生滚动翻阅,触屏 pan-y 保原生滚动、TouchSensor 分流拖拽——ADR-0021 滚轮契约的实现载体)、行壳(圆角 pill;可点性四态——外链行/点击行/hover 行/纯静态行;不可点不做 hover 高亮,免暗示交互)、行数渲染窗(最近 30 行,看全量走「更多」Modal;「AI 热点」与「待办」声明全量翻阅)与 24h 红点窗(时间驱动、满窗自隐、无已读概念)。行内容(行内布局、字段、外链语义)归各图标类型;标头鲜度位不属于块内主体,按域各自计算(如「新闻」按源级最近成功抓取时刻)后经 BigTile 呈现。实现载体:前端 components/TileBody.tsx(容器 + 行壳 + 红点零件)与 lib/tileBody.ts(红点窗纯规则)。
+_Avoid_: 块内列表、滚动区、榜单组件。
+
 **图标类型 (Icon Type)**:
 类型元数据表(前端 `lib/iconTypeRegistry.ts`,静态全覆盖)中的一个条目,声明该类图标:标签、是否单例、配置表单与画格跨度(ADR-0001 契约)。图标块与详情的组件映射由静态全覆盖 UI adapter(前端 `components/iconTypeUi.tsx`)持有——有无详情由可选详情 renderer 表达,入口策略('block' 整块点击 / 'header' 标头「更多」,ADR-0022)随 adapter 声明(2026-08-28 起,原注册表 detail/detailEntry 字段退役)。类型分基础与扩展两类。
 _Avoid_: 组件、widget、block。

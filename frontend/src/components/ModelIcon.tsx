@@ -14,9 +14,7 @@ import {
 } from '../lib/modelTracking'
 import type { Icon } from '../lib/types'
 import BigTile from './BigTile'
-
-/** 榜单最多渲染行数(对齐 ADR-0022 changelog/video 30 行先例,看全部走 Modal)。 */
-const MAX_ROWS = 30
+import { FreshDot, TileBody, TileRow } from './TileBody'
 
 /**
  * 模型追踪图标的专属网格渲染(见 CONTEXT.md「模型追踪」;3×2 大 tile,ADR-0021/0022
@@ -55,24 +53,16 @@ export default function ModelIconBody({
       overlay={overlay}
     >
       {models.length === 0 ? null : (
-        <ol
-          // 原生滚动翻阅(雾胶囊滚动条 tile-scroll,触屏 pan-y 保原生滚动;同 aihot/todo/video)
-          className="flex-1 min-h-0 overflow-y-auto flex flex-col px-2 py-1.5 tile-scroll [touch-action:pan-y]"
-        >
-          {models.slice(0, MAX_ROWS).map((m) => {
+        <TileBody
+          rows={models.map((m) => {
             const latest = m.events[0]
-            const isNew = latest ? isFreshModelEvent(latest.occurredOn) : false
             return (
-              <li
-                key={m.id}
-                className="rounded-lg px-2 py-1 hover:bg-white/10 transition-colors"
-                title={latest ? `${m.name}:${latest.title}` : m.name}
-              >
+              // hover 行:tile 行不可点(hover 是行级视觉语汇,与 Modal 展开无关),
+              // 语义同 Changelog 静态臂的镜像——有意保留 hover,经 interactive='hover' 声明
+              <TileRow key={m.id} interactive="hover" title={latest ? `${m.name}:${latest.title}` : m.name}>
                 <span className="flex items-baseline justify-between gap-2 min-w-0">
                   <span className="flex min-w-0 items-center gap-1.5">
-                    {isNew && (
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" aria-hidden="true" />
-                    )}
+                    <FreshDot show={latest ? isFreshModelEvent(latest.occurredOn) : false} />
                     <span className="min-w-0 truncate text-white/90" style={{ fontSize }}>
                       {m.name}
                     </span>
@@ -101,10 +91,10 @@ export default function ModelIconBody({
                     </span>
                   )}
                 </span>
-              </li>
+              </TileRow>
             )
           })}
-        </ol>
+        />
       )}
     </BigTile>
   )

@@ -5,6 +5,7 @@ import { ICON_SCALE, tileFont } from '../lib/iconLayout'
 import type { Icon } from '../lib/types'
 import type { TodoTask } from '../lib/todo'
 import BigTile from './BigTile'
+import { TileBody, TileRow } from './TileBody'
 import { TodoDetailModal, TodoDetailPanel } from './TodoDetail'
 import { useCarousel } from './Carousel'
 
@@ -134,25 +135,24 @@ export default function TodoIconBody({
             收集箱是空的
           </div>
         ) : (
-          <ol
-            // 原生滚动翻阅全量(雾胶囊滚动条 tile-scroll,触屏 pan-y 保原生滚动,TouchSensor 分流拖拽;同 aihot)。
-            // 滚动即收快览:行移位后 fixed 卡的定位快照过期,收起最干净
+          <TileBody
+            cap={null}
+            // 全量翻阅(cap={null} 显式声明):速记即入箱即见,30 行窗不适用
             onScroll={() => {
+              // 滚动即收快览:行移位后 fixed 卡的定位快照过期,收起最干净
               clearTimeout(hideTimer.current)
               setPeek(null)
             }}
-            className="flex-1 min-h-0 overflow-y-auto flex flex-col px-2 py-1.5 tile-scroll [touch-action:pan-y]"
-          >
-            {inbox.map((t) => (
+            rows={inbox.map((t) => (
               // 悬浮行右侧快览详情(hover 卡),点行开二级对话框深读;
-              // 编辑模式(overlay)是布局编辑语义,不悬浮不弹
-              <li
+              // 编辑模式(overlay)是布局编辑语义,不悬浮不弹(= TileRow 静态臂)
+              <TileRow
                 key={t.id}
-                onClick={overlay ? undefined : () => {
+                interactive={overlay ? false : { onClick: () => {
                   clearTimeout(hideTimer.current)
                   setPeek(null)
                   setDetail(t)
-                }}
+                } }}
                 onMouseEnter={overlay ? undefined : (e) => {
                   // 首次交互门槛:刷新后指针没真正动过(累计 <10px)不弹,压幽灵 mouseenter。
                   // Chromium 派发 mouseenter 早于 mousemove,此处读到的必是「到达行之前」
@@ -163,19 +163,16 @@ export default function TodoIconBody({
                   setPeek({ task: t, rowRect: r, ...peekPos(r) })
                 }}
                 onMouseLeave={overlay ? undefined : (e) => scheduleHide(e.currentTarget.getBoundingClientRect())}
-                className={
-                  'flex items-center gap-2 min-w-0 px-2 py-1 rounded-lg ' +
-                  (overlay ? '' : 'cursor-pointer hover:bg-white/10 transition-colors')
-                }
+                className="flex items-center gap-2 min-w-0"
               >
                 <span aria-hidden className="shrink-0 w-1 h-1 rounded-full bg-white/25" />
                 {/* 单行截断的救济:快览卡外的兜底 hover 全文(报告 #14) */}
                 <span className="min-w-0 truncate text-white/90" style={{ fontSize }} title={t.title}>
                   {t.title}
                 </span>
-              </li>
+              </TileRow>
             ))}
-          </ol>
+          />
         )}
       </BigTile>
       {/* 快览卡:详情面板第三形态(同 TodoDetailPanel),非模态、Esc/焦点不接管;
