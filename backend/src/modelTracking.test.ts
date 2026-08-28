@@ -4,47 +4,26 @@ import { SINGLETON_TYPES, TYPE_SPANS } from './icons'
 import { createApp } from './app'
 import { bootstrap } from './seed'
 import { openDb, type Db } from './db'
+import { ModelTrackingService, type ModelTrackingDeps } from './modelTracking'
+import { ZHIPU_BASELINE } from './zhipuBaseline'
+import { ANTHROPIC_BASELINE } from './anthropicBaseline'
+import { XAI_BASELINE } from './xaiBaseline'
+import { KIMI_BASELINE } from './kimiBaseline'
+import { OPENAI_BASELINE } from './openaiBaseline'
 import {
-  ANTHROPIC_BASELINE,
   ANTHROPIC_RELEASES_URL,
-  KIMI_BASELINE,
-  KIMI_BLOG_URL,
-  KIMI_NEWS_URL,
-  ModelTrackingService,
-  OPENAI_BASELINE,
-  OPENAI_CHANGELOG_URL,
-  XAI_BASELINE,
-  XAI_RELEASES_URL,
-  ZHIPU_BASELINE,
-  ZHIPU_RELEASES_URL,
   matchAnthropicEvent,
-  matchKimiEvent,
-  matchOpenAIEvents,
-  matchXaiEvent,
-  matchZhipuEvent,
   normalizeAnthropicDate,
-  normalizeZhipuDate,
   parseAnthropicReleases,
-  parseKimiArticles,
-  parseOpenAIChangelog,
-  parseXaiReleaseNotes,
-  parseZhipuReleases,
-  resolveOpenAIModelId,
-  type ModelTrackingDeps,
-} from './modelTracking'
-import {
-  DEEPSEEK_BASELINE,
-  DEEPSEEK_UPDATES_URL,
-  matchDeepSeekEvent,
-  parseDeepSeekUpdates,
-} from './deepseekBaseline'
-import {
-  QWEN_BASELINE,
-  QWEN_RELEASES_URL,
-  matchQwenEvents,
-  parseBailianReleases,
-  resolveQwenModelId,
-} from './qwenBaseline'
+} from './providers/anthropic'
+import { KIMI_BLOG_URL, KIMI_NEWS_URL, matchKimiEvent, parseKimiArticles } from './providers/moonshot'
+import { matchOpenAIEvents, OPENAI_CHANGELOG_URL, parseOpenAIChangelog, resolveOpenAIModelId } from './providers/openai'
+import { matchXaiEvent, parseXaiReleaseNotes, XAI_RELEASES_URL } from './providers/xai'
+import { matchZhipuEvent, normalizeZhipuDate, parseZhipuReleases, ZHIPU_RELEASES_URL } from './providers/zhipu'
+import { DEEPSEEK_BASELINE, DEEPSEEK_UPDATES_URL } from './deepseekBaseline'
+import { matchDeepSeekEvent, parseDeepSeekUpdates } from './providers/deepseek'
+import { QWEN_BASELINE, QWEN_RELEASES_URL } from './qwenBaseline'
+import { matchQwenEvents, parseBailianReleases, resolveQwenModelId } from './providers/alibaba'
 
 /**
  * 模型追踪自动检查(issues/01:单例/占格、持久化、陈旧降级 + 鉴权;issues/02:八类

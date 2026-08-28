@@ -1,5 +1,5 @@
 import type { ModelEvent, ModelLimit, ModelPricing } from 'chrome-tab-shared'
-import { aliasIn, type BaselineModel } from './modelTracking'
+import type { BaselineModel } from './modelTracking'
 
 /**
  * DeepSeek 人工核验基线(issues/07)。全部资料于 2026-08-25 自官方一手信源核对:
@@ -274,69 +274,3 @@ export const DEEPSEEK_BASELINE: BaselineModel[] = [
     ],
   },
 ]
-
-// ---- DeepSeek API Change Log 解析(研究 §3:主发布源 HTML 无 RSS。与智谱/Anthropic/
-//  xAI 的解析器同居 modelTracking.ts 不同,本解析器随基线收在本文件——issues/07 期间
-//  五家并行接入,modelTracking.ts 为争用热点,厂家专属纯函数随厂家基线文件走可把
-//  共享文件接触面压到最小;aliasIn 词边界语义仍复用 modelTracking 的单一实现)----
-
-/** DeepSeek Change Log 一个小节(解析后的统一形态)。 */
-export interface DeepSeekSection {
-  /** YYYY-MM-DD(所在 `<h2 id="date-…">Date: YYYY-MM-DD` 日期段)。 */
-  date: string
-  /** 小节标题(h3 文本,官方条目名;HTML 实体已还原、锚点零宽字符已剥)。 */
-  title: string
-  /** 小节锚点 URL(事件信源;与上方基线事件 sourceUrl 同构拼串,同键去重对齐)。 */
-  anchorUrl: string
-}
-
-/**
- * DeepSeek Change Log HTML → 小节数组。`<h2>` 分段、段首 `Date: YYYY-MM-DD`(实日期
- * 回滚校验)为该段日期;段内 `<h3 id="…">` 逐节提取标题(剥内嵌锚点标签/零宽字符、
- * 还原 HTML 实体——实测 2024-09-05 节标题含 `&amp;`)。非日期 h2 段(页首/侧栏)与
- * 无 id 的 h3 跳过。
- */
-export function parseDeepSeekUpdates(html: string): DeepSeekSection[] {
-  const out: DeepSeekSection[] = []
-  for (const part of html.split(/<h2[^>]*>/).slice(1)) {
-    const m = /^Date: (\d{4})-(\d{2})-(\d{2})/.exec(part)
-    if (!m) continue
-    const [, y, mo, d] = m
-    const date = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)))
-    if (date.getUTCMonth() !== Number(mo) - 1 || date.getUTCDate() !== Number(d)) continue
-    for (const h3 of part.matchAll(/<h3[^>]*\bid="([^"]+)"[^>]*>([\s\S]*?)<\/h3>/g)) {
-      const title = h3[2]!
-        .replace(/<[^>]+>/g, '')
-        .replace(/​/g, '')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .trim()
-      if (title === '') continue
-      out.push({ date: `${y}-${mo}-${d}`, title, anchorUrl: `${DEEPSEEK_UPDATES_URL}#${h3[1]}` })
-    }
-  }
-  return out
-}
-
-/**
- * Change Log 小节 → 基线模型命中数组(**可为多个**:同 xAI matchXaiEvent 口径——家族式
- * 标题「V4-Pro 与 V4-Flash …」同时命中两行,单返回会静默漏记半边)。归属**只用标题
- * 词边界**(标题即官方条目名、自证归属;正文混提他模型不可作证据——实测 2026-08-21
- * Vision-Exp 节正文提及「on par with DeepSeek-V4-Flash」,按正文归属会误记 V4-Flash)。
- * 别名 ID 标题段(deepseek-chat/reasoner/coder 的历史升级公告)与平台功能段(缓存
- * 技术、API 功能)无 alias 命中 → 待核验线索跳过,该史实由基线事件承载。kind 恒
- * 'updated',与基线事件同 (模型,日期,信源) 的小节由 poll 跳过。
- */
-export function matchDeepSeekEvent(s: DeepSeekSection): Array<{ officialId: string; event: Omit<ModelEvent, 'id'> }> {
-  const out: Array<{ officialId: string; event: Omit<ModelEvent, 'id'> }> = []
-  for (const b of DEEPSEEK_BASELINE) {
-    if (!b.matchAliases.some((a) => aliasIn(a, s.title))) continue
-    out.push({
-      officialId: b.officialId,
-      event: { kind: 'updated', occurredOn: s.date, title: s.title, sourceUrl: s.anchorUrl },
-    })
-  }
-  return out
-}

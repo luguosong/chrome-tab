@@ -67,7 +67,7 @@ export const ANTHROPIC_BASELINE: BaselineModel[] = [
     trainingParams: null, // Anthropic 从未披露任何 Claude 模型的参数量
     matchAliases: ['Claude Fable 5', 'claude-fable-5'],
     // 发布公告 slug 为 introducing-claude-fable-5-and-claude-mythos-5,'fable-5' 后随 '-and'
-    // 会被词边界拒掉,须整串收录(slug 尾边界见 modelTracking.slugIn)
+    // 会被词边界拒掉,须整串收录(slug 尾边界见 providers/def.ts 的 slugIn)
     matchSlugs: ['claude-fable-5', 'fable-5', 'introducing-claude-fable-5-and-claude-mythos-5'],
     events: [
       { kind: 'api_available', occurredOn: '2026-06-09', title: 'Claude Fable 5 发布,最强公开发布模型', sourceUrl: 'https://platform.claude.com/docs/en/models/fable-5/introducing-claude-fable-5-and-claude-mythos-5' },

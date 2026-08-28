@@ -1,16 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { ModelEvent, TrackedModel } from 'chrome-tab-shared'
 import { openDb, type Db } from './db'
-import {
-  ANTHROPIC_BASELINE,
-  DEEPSEEK_BASELINE,
-  KIMI_BASELINE,
-  ModelTrackingService,
-  OPENAI_BASELINE,
-  type ModelTrackingDeps,
-  XAI_BASELINE,
-  ZHIPU_BASELINE,
-} from './modelTracking'
+import { ModelTrackingService, type ModelTrackingDeps } from './modelTracking'
+import { ZHIPU_BASELINE } from './zhipuBaseline'
+import { ANTHROPIC_BASELINE } from './anthropicBaseline'
+import { XAI_BASELINE } from './xaiBaseline'
+import { KIMI_BASELINE } from './kimiBaseline'
+import { OPENAI_BASELINE } from './openaiBaseline'
+import { DEEPSEEK_BASELINE } from './deepseekBaseline'
 import { QWEN_BASELINE } from './qwenBaseline'
 import { AA_LLM_URL, AA_MEDIA_ENDPOINTS, AA_MODEL_MAP, aaModelUrl, aaRowsFromLlms, aaRowsFromMedia, beijingToday } from './aaEvaluations'
 
