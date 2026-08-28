@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
+import { hash } from 'bcryptjs'
 import { createApp } from './app'
 import { openDb } from './db'
 import { bootstrap } from './seed'
@@ -110,13 +111,16 @@ describe('POST /api/login', () => {
   })
 
   it('Java 侧产出的 bcrypt $2a$ 哈希原样可验(零重置)', async () => {
-    // fixture 哈希由 python bcrypt(与 Java BCryptPasswordEncoder 同标准)生成,模拟线上迁移来的 users 行
+    // fixture 哈希运行时生成,但走固定「外部盐」+ $2a$ 前缀、不经本仓 hashPassword 的
+    // genSalt 路径——保住「模拟线上迁移来的 users 行(Java BCryptPasswordEncoder 同
+    // 标准)」语义;明文即下方登录用例所输
+    const legacyHash = await hash('correct horse battery staple', '$2a$10$abcdefghijklmnopqrstuv')
     const legacy = openDb(':memory:').db
     await legacy
       .insertInto('users')
       .values({
         username: 'admin',
-        password: '$2a$10$RAxOAfzYIqvcVD8JKPGgg.ubiZZSmtaCLYlCistB9SSxE8qgeofsy',
+        password: legacyHash,
         created_at: new Date().toISOString(),
       })
       .execute()

@@ -12,6 +12,8 @@ const KEEP = 14
 const NAME_RE = /^newtab-\d{4}-\d{2}-\d{2}\.db$/
 
 export function dailyBackup(sqlite: SqliteConnection, dir: string) {
+  // 备份目录来自部署 env;VACUUM INTO 无法参数化,SQL 内转义之外先在边界拒收引号/空字节
+  if (/['\0]/.test(dir)) throw new Error(`备份目录含不安全字符:${dir}`)
   mkdirSync(dir, { recursive: true })
   const file = join(dir, `newtab-${new Date().toISOString().slice(0, 10)}.db`)
   if (!existsSync(file)) sqlite.exec(`VACUUM INTO '${file.replaceAll("'", "''")}'`)

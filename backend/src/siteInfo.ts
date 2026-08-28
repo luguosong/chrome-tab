@@ -104,6 +104,7 @@ export function createSiteInfoHandler(deps: SiteInfoDeps = {}): Handler<AuthEnv>
       throw new BadRequest('url 仅支持 http(s)')
     }
     const key = target.toString()
+    // mimosa-ignore 「站点信息」按已登录用户提交网址抓取是产品既定功能(CONTEXT.md),SSRF 面为已接受风险
     const cached = cache.get(key)
     if (cached) return c.json(cached)
     const res = await fetchFn(key, {

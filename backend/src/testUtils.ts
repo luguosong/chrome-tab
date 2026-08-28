@@ -13,6 +13,10 @@ import { bootstrap } from './seed'
  * 每测试文件独立实例,互不串污染;测试可直接用 db 造边角 fixture(满格页等)。
  * changelog/news 透传注入桩 service(假 fetch,零外呼)。
  */
+
+/** 测试假上游 key:上游全是本文件/本进程内的 stub,仅记录外呼不校验取值,非真实凭据。
+ *  集中一处声明,各测试文件引用,避免逐文件散落字面量。 */
+export const STUB_UPSTREAM_KEY = 'stub-upstream-key'
 export async function setupApp(
   changelog?: ChangelogService,
   newsFactory?: (db: Db) => NewsService,

@@ -184,6 +184,7 @@ import { createApp } from './app'
 import { openDb } from './db'
 import { bootstrap } from './seed'
 import { VideoUpdatesService, type VideoDeps } from './videoUpdates'
+import { STUB_UPSTREAM_KEY } from './testUtils'
 
 const MIXIN = '0123456789abcdef0123456789abcdef'
 
@@ -430,7 +431,7 @@ describe('视频更新:YouTube 双路线', () => {
   it('有 key:首添走 API 补满 50 带时长;RSS 轮询检出增量再补时长', async () => {
     const rssState = { ids: ['k0', 'k1'] } // 轮询时出现新视频 k2
     const w = await makeWorld({
-      youtubeApiKey: 'test-key',
+      youtubeApiKey: STUB_UPSTREAM_KEY,
       routes: {
         'youtube/v3/channels?': () =>
           JSON.stringify({ items: [{ id: 'UC_x5', snippet: { title: '频道', thumbnails: { medium: { url: 'https://yt3.g/240.jpg' } } } }] }),

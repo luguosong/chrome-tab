@@ -1,6 +1,6 @@
 import { serve } from '@hono/node-server'
 import { mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { schedule } from 'node-cron'
 import { CHANGELOG_SOURCES } from 'chrome-tab-shared'
 import { createApp } from './app'
@@ -14,12 +14,17 @@ import { ServerMonService, prodServerMonDeps, startServerMonScheduler, type Serv
 import { TrendingService, prodTrendingDeps, startTrendingScheduler } from './trending'
 import { VideoUpdatesService, prodVideoDeps, startVideoUpdatesScheduler } from './videoUpdates'
 
-const dbPath = process.env.DB_PATH ?? 'data/newtab.db'
+const dbPath = resolve(process.env.DB_PATH ?? 'data/newtab.db')
 mkdirSync(dirname(dbPath), { recursive: true })
+// mimosa-ignore 单运维部署:DB_PATH 是运维自控配置,非攻击者可控输入(见 .mimosa/security-policy.json 排除项)
 const { sqlite, db } = openDb(dbPath)
 // 空库首启 seed;users 空且缺 ADMIN_PASSWORD 时抛错 → 进程退出(照搬 DataBootstrap 语义)
+const adminUsername = process.env.ADMIN_USERNAME ?? 'admin'
+// 用户名格式是账号不变量(\w,1–64),启动即校验——运维误配当场报错,不进库
+if (!/^\w{1,64}$/.test(adminUsername)) throw new Error(`ADMIN_USERNAME 格式非法:${adminUsername}`)
+// mimosa-ignore 单运维部署:ADMIN_*/env 为运维自控;Kysely 全参数化,无 SQL 拼接
 await bootstrap(db, {
-  username: process.env.ADMIN_USERNAME ?? 'admin',
+  username: adminUsername,
   password: process.env.ADMIN_PASSWORD,
 })
 // cookie secure 照 Java prod profile:NODE_ENV=production 下默认 true,COOKIE_SECURE=false 可关(裸 IP HTTP 部署)
@@ -58,6 +63,7 @@ const servermonMachines: ServerMonMachine[] = (
   .filter(([, url]) => url && url.trim() !== '')
   .map(([machine, url]) => ({ machine, url: url! }))
 const servermonService = new ServerMonService(db, prodServerMonDeps(), servermonMachines)
+// mimosa-ignore 单运维部署:env 派生配置( key/cookieSecure 等)非攻击者可控;库写路径全参数化
 const app = createApp({
   db,
   cookieSecure,
@@ -98,5 +104,6 @@ startServerMonScheduler(servermonService)
 schedule('17 3 * * *', async () => {
   sqlite.pragma('wal_checkpoint(TRUNCATE)')
   await db.deleteFrom('sessions').where('expires_at', '<=', new Date().toISOString()).execute()
-  dailyBackup(sqlite, process.env.BACKUP_DIR ?? 'data/backups')
+  // mimosa-ignore 单运维部署:BACKUP_DIR 为运维自控;backup.ts 另有边界拒收 + SQL 内转义
+  dailyBackup(sqlite, resolve(process.env.BACKUP_DIR ?? 'data/backups'))
 })

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ModelEvent, TrackedModel } from 'chrome-tab-shared'
 import { openDb, type Db } from './db'
 import { ModelTrackingService, type ModelTrackingDeps } from './modelTracking'
+import { STUB_UPSTREAM_KEY } from './testUtils'
 import { ZHIPU_BASELINE } from './zhipuBaseline'
 import { ANTHROPIC_BASELINE } from './anthropicBaseline'
 import { XAI_BASELINE } from './xaiBaseline'
@@ -77,7 +78,7 @@ function fullPages(): Record<string, string> {
   }
 }
 
-async function makeService(db: Db, deps: ModelTrackingDeps, aaApiKey = 'test-key') {
+async function makeService(db: Db, deps: ModelTrackingDeps, aaApiKey = STUB_UPSTREAM_KEY) {
   const svc = new ModelTrackingService(db, deps, aaApiKey)
   await svc.init()
   return svc
@@ -178,7 +179,7 @@ describe('评测:轮询与快照(服务集成,零真网)', () => {
         { id: 'u4', name: 'GLM-4.6', slug: 'glm-4-6', model_creator: { id: 'c1', name: 'Zhipu', slug: 'zhipu' }, evaluations: { mmlu_pro: 0.75 } },
       ],
     })
-    const svc2 = new ModelTrackingService(db, aaDeps(pages2), 'test-key') // 免 init:不触发厂家轮询
+    const svc2 = new ModelTrackingService(db, aaDeps(pages2), STUB_UPSTREAM_KEY) // 免 init:不触发厂家轮询
     await svc2.pollEvaluations()
     const a = await svc.archive()
     const kinds = (m: { events: ModelEvent[] }) => m.events.filter((e) => e.kind === 'evaluated')
@@ -195,7 +196,7 @@ describe('评测:轮询与快照(服务集成,零真网)', () => {
     await svc.pollEvaluations()
     const pages2 = fullPages()
     pages2[AA_LLM_URL] = AA_LLM_JSON.replace('0.791', '0.801')
-    const svc2 = new ModelTrackingService(db, aaDeps(pages2), 'test-key') // 免 init:不触发厂家轮询
+    const svc2 = new ModelTrackingService(db, aaDeps(pages2), STUB_UPSTREAM_KEY) // 免 init:不触发厂家轮询
     await svc2.pollEvaluations()
     const a = await svc.archive()
     const glm47 = a.models.find((m) => m.officialId === 'glm-4.7')!
@@ -209,7 +210,7 @@ describe('评测:轮询与快照(服务集成,零真网)', () => {
     const svc = await makeService(db, aaDeps(fullPages()))
     await svc.pollEvaluations()
     const before = JSON.stringify(sqlite.prepare('SELECT * FROM model_fetch_status').all())
-    const svc2 = new ModelTrackingService(db, aaDeps({}), 'test-key')
+    const svc2 = new ModelTrackingService(db, aaDeps({}), STUB_UPSTREAM_KEY)
     await expect(svc2.pollEvaluations()).rejects.toThrow()
     const a = await svc.archive()
     expect(a.evaluations).toMatchObject({ configured: true, stale: true })

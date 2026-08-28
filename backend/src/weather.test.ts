@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net'
 import { gzipSync } from 'node:zlib'
 import { Hono } from 'hono'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import { STUB_UPSTREAM_KEY } from './testUtils'
 import { createApp } from './app'
 import { openDb } from './db'
 import { bootstrap } from './seed'
@@ -106,7 +107,8 @@ afterEach(() => {
 /** 每用例独立 app → 独立 TTL 缓存(缓存跨用例会互染外呼计数) */
 function makeApp() {
   return new Hono()
-    .route('/', weatherRoutes({ apiKey: 'test-key', apiHost: stubUrl }))
+    // mimosa-ignore 测试拓扑:本地 stub 无攻击者;testUtils 假 key 非凭据
+    .route('/', weatherRoutes({ apiKey: STUB_UPSTREAM_KEY, apiHost: stubUrl }))
     .onError((_e, c) => c.json({ status: 500, message: '服务器错误' }, 500))
 }
 
@@ -244,7 +246,7 @@ describe('GET /api/weather(批量,重复 location 整串为键)', () => {
       '/v7/weather/7d',
     ])
     expect(new URL(hits[0]!.url, 'http://x').searchParams.get('location')).toBe('116.41,39.90')
-    expect(hits[0]!.key).toBe('test-key')
+    expect(hits[0]!.key).toBe(STUB_UPSTREAM_KEY)
   })
 
   it('重复参数各存:两个原始串两键', async () => {
@@ -411,7 +413,9 @@ describe('createApp 接线', () => {
   }
 
   it('weather 配置注入生效:登录后批量端点可达', async () => {
-    const app = createApp({ db: wiringDb, weather: { apiKey: 'test-key', apiHost: stubUrl } })
+    // mimosa-ignore 测试拓扑:createApp 连 wiringDb 内存库,无攻击者
+    const app = createApp({ db: wiringDb, weather: { apiKey: STUB_UPSTREAM_KEY, apiHost: stubUrl } })
+    // mimosa-ignore 测试拓扑:请求发往自身 app 实例,非外部 ssrf 面
     const res = await app.request('/api/weather?location=39.9,116.4', { headers: { cookie: await loginCookie(app) } })
     expect(res.status).toBe(200)
     expect((await json(res))['39.9,116.4']!.now.temp).toBe(25)

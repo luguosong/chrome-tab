@@ -125,6 +125,7 @@ export class TrendingService {
 
   constructor(db: Db, private readonly deps: TrendingDeps) {
     this.translations = makeTranslationStore(db, 'trending_translations')
+    // mimosa-ignore 取数 host 钉死 github.com,用户筛选仅进 query string,无任意出站
     this.source = cachedOrNull<string, Entry>({
       ttlMs: CACHE_TTL_MS,
       // 「新抓成功」钩子写在 fetch 回调内(原语不设 onSuccess——手动补一轮的调用方
@@ -221,6 +222,7 @@ export function trendingRoutes(service: TrendingService): Hono<AuthEnv> {
   }
   return new Hono<AuthEnv>()
     .get('/api/trending', async (c) => c.json(await service.get(parseQuery(c))))
+    // mimosa-ignore 同上:补译取数 host 钉死,parseQuery 结果仅进 query string
     .post('/api/trending/retry-translation', (c) => service.retryTranslations(parseQuery(c)).then(() => c.json({ started: true })))
 }
 

@@ -33,6 +33,7 @@ async function main() {
   mkdirSync(dirname(target), { recursive: true })
   const sqlite = new Database(target)
   sqlite.pragma('journal_mode = WAL')
+  // mimosa-ignore 一次性迁移 CLI(ADR-0019 后即退役):source 来自运维终端环境,非攻击者可控
   runEtl(sqlite, source)
 
   const report = reconcile(sqlite, source)
