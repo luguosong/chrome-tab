@@ -258,7 +258,7 @@ function failingDeps(): ModelTrackingDeps {
 
 async function makeService(db: Db, deps: ModelTrackingDeps): Promise<ModelTrackingService> {
   const svc = new ModelTrackingService(db, deps)
-  await svc.init() // 基线入档 + 首轮取数(init 内 pollQuietly 不被等待,测试显式 await poll)
+  await svc.init() // 基线入档 + 首轮取数(init 内 pollProvider 不被等待,测试显式 await)
   return svc
 }
 
@@ -433,11 +433,22 @@ describe('模型追踪:基线自身(issues/02 八类全量)', () => {
 })
 
 describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
+  it('pollProvider() 全量轮:一家失败不牵连他家(失败家标陈旧、成功家新鲜),整轮不抛(ADR-0041 编排锁)', async () => {
+    const { db } = openDb(':memory:')
+    // zhipu 空页 = 解析零条目按改版失败,其余六家默认页正常——一败六成的现成构造
+    const svc = await makeService(db, makeDeps(''))
+    await expect(svc.pollProvider()).resolves.toBeUndefined()
+    const sources = (await svc.archive()).sources
+    const by = (p: string) => sources.find((s) => s.provider === p)
+    expect(by('zhipu')?.stale).toBe(true)
+    expect(by('anthropic')?.stale).toBe(false)
+  })
+
   it('init 基线入档:双厂家全量模型、profile 字段(定价/限额/参数量)齐备;首轮取数后源就位', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
-    await svc.pollZhipu()
-    await svc.pollAnthropic()
+    await svc.pollProvider('zhipu')
+    await svc.pollProvider('anthropic')
     const a = await svc.archive()
     expect(a.models).toHaveLength(TOTAL_BASELINE)
     const glm53 = a.models.find((m) => m.officialId === 'glm-5.3')!
@@ -478,7 +489,7 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
     const { db } = openDb(':memory:')
     const md = `<Update label="2025-4-14" description="GLM-Z1 推理模型系列上线">\n[**GLM-Z1**](/cn/guide/models/text/glm-z1)\n</Update>`
     const svc = await makeService(db, makeDeps(md))
-    await svc.pollZhipu()
+    await svc.pollProvider('zhipu')
     const z1 = await byId(svc, 'glm-z1')
     expect(z1!.events).toHaveLength(2) // 基线 api_available + retired,无 updated 混入
   })
@@ -486,8 +497,8 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
   it('历史去重:基线已核验的公告,自动解析不再补「updated」重复行', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
-    await svc.pollZhipu()
-    await svc.pollZhipu() // 两轮:同页幂等 + 基线事件在场
+    await svc.pollProvider('zhipu')
+    await svc.pollProvider('zhipu') // 两轮:同页幂等 + 基线事件在场
     const glm53 = await byId(svc, 'glm-5.3')
     // 2026-08-19 公告只有基线 api_available 一条(无 'updated' 重复)
     expect(glm53!.events).toHaveLength(1)
@@ -527,7 +538,7 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
     // 构造基线模型的未来新公告:日期不在基线事件里 → 自动入库 updated(与基线上线事件共存)
     const md = `<Update label="2026-9-9" description="GLM-5.3 价格下调">\n[**GLM-5.3**](/cn/guide/models/text/glm-5.3)\n</Update>`
     const svc = await makeService(db, makeDeps(md))
-    await svc.pollZhipu()
+    await svc.pollProvider('zhipu')
     const glm53 = await byId(svc, 'glm-5.3')
     expect(glm53!.events.map((e) => e.kind)).toEqual(['updated', 'api_available'])
   })
@@ -535,7 +546,7 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
   it('服务重启(同库新实例)档案仍在——持久化而非内存态', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
-    await svc.pollZhipu()
+    await svc.pollProvider('zhipu')
     // 模拟重启:新 Service 挂同一 db,不再 init/poll,直接读
     const revived = new ModelTrackingService(db, makeDeps(''))
     const a = await revived.archive()
@@ -546,8 +557,8 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
   it('重复取数去重:同发布页两轮入库,事件不翻倍', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
-    await svc.pollZhipu()
-    await svc.pollZhipu()
+    await svc.pollProvider('zhipu')
+    await svc.pollProvider('zhipu')
     const a = await svc.archive()
     for (const m of a.models) {
       const keys = new Set(m.events.map((e) => `${e.kind}|${e.occurredOn}|${e.sourceUrl}`))
@@ -558,15 +569,15 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
   it('信源失败降级:保留最后成功结果并标记陈旧,恢复后陈旧清除', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
-    await svc.pollZhipu()
+    await svc.pollProvider('zhipu')
     const failing = new ModelTrackingService(db, failingDeps())
-    await expect(failing.pollZhipu()).rejects.toThrow('HTTP 503')
+    await expect(failing.pollProvider('zhipu')).rejects.toThrow('HTTP 503')
     let a = await failing.archive()
     const zhipu = () => a.sources.find((s) => s.provider === 'zhipu')!
     expect(zhipu()).toMatchObject({ stale: true })
     expect((await byId(failing, 'glm-5.3'))!.events.length).toBeGreaterThan(0) // 档案保留
     const ok = new ModelTrackingService(db, makeDeps(ZHIPU_MD))
-    await ok.pollZhipu()
+    await ok.pollProvider('zhipu')
     a = await ok.archive()
     expect(zhipu()!.stale).toBe(false)
   })
@@ -574,11 +585,11 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
   it('上游改版降级:200 但零结构化块 → 抛错并置陈旧,既有档案保留;另一厂家不受牵连', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
-    await svc.pollZhipu()
+    await svc.pollProvider('zhipu')
     // 智谱页改版为无结构化块;Anthropic 页仍是有效夹具(makeDeps 单字符串语义)
     const drifty = new ModelTrackingService(db, makeDeps('<html>上游改版了</html>'))
-    await expect(drifty.pollZhipu()).rejects.toThrow('疑似上游改版')
-    await drifty.pollAnthropic()
+    await expect(drifty.pollProvider('zhipu')).rejects.toThrow('疑似上游改版')
+    await drifty.pollProvider('anthropic')
     const a = await drifty.archive()
     const source = (p: string) => a.sources.find((s) => s.provider === p)!
     expect(source('zhipu')!.stale).toBe(true)
@@ -595,11 +606,11 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
     try {
       const { db } = openDb(':memory:')
       const svc = await makeService(db, makeDeps(ZHIPU_MD))
-      await svc.pollZhipu()
+      await svc.pollProvider('zhipu')
       const clueTitles = async () => (await svc.archive()).pendingClues.map((c) => c.title)
       expect((await clueTitles()).some((t) => t.includes('GLM-9.9'))).toBe(true)
       expect((await clueTitles()).some((t) => t.includes('Vidu'))).toBe(false)
-      await svc.pollZhipu() // 二轮幂等:同行不翻倍
+      await svc.pollProvider('zhipu') // 二轮幂等:同行不翻倍
       expect((await clueTitles()).filter((t) => t.includes('GLM-9.9'))).toHaveLength(1)
       // 模拟条目从页面消失:last_seen_at 停更 8 天 → 滚出读侧(基线收录自愈同路径)
       await db
@@ -616,10 +627,10 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
   it('Anthropic 信源失败只标记该厂家陈旧:智谱档案与源状态不受影响', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
-    await svc.pollZhipu()
-    await svc.pollAnthropic()
+    await svc.pollProvider('zhipu')
+    await svc.pollProvider('anthropic')
     const failing = new ModelTrackingService(db, failingDeps())
-    await expect(failing.pollAnthropic()).rejects.toThrow('HTTP 503')
+    await expect(failing.pollProvider('anthropic')).rejects.toThrow('HTTP 503')
     const a = await failing.archive()
     const source = (p: string) => a.sources.find((s) => s.provider === p)!
     expect(source('anthropic')!.stale).toBe(true)
@@ -643,13 +654,7 @@ describe('模型追踪:路由', () => {
     const { db } = openDb(':memory:')
     await bootstrap(db, { username: 'admin', password: 'admin-pw' })
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
-    await svc.pollZhipu()
-    await svc.pollAnthropic()
-    await svc.pollXai()
-    await svc.pollOpenAI()
-    await svc.pollMoonshot()
-    await svc.pollDeepSeek()
-    await svc.pollAlibaba() // 七源显式就位(sources 数确定,不靠 init 内未等待轮询的时序)
+    await svc.pollProvider() // 全量轮可等待:七源确定就位,不靠 init 内未等待轮询的时序(ADR-0041)
     const app = createApp({ db, modelTracking: svc })
     const anon = await app.request('/api/model-tracking/archive')
     expect(anon.status).toBe(401)
@@ -776,8 +781,8 @@ describe('模型追踪:Anthropic 基线自身(issues/04)', () => {
   it('历史去重:基线已核验的发布公告,自动解析不再补「updated」重复行', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
-    await svc.pollAnthropic()
-    await svc.pollAnthropic() // 两轮:同页幂等 + 基线事件在场
+    await svc.pollProvider('anthropic')
+    await svc.pollProvider('anthropic') // 两轮:同页幂等 + 基线事件在场
     const opus5 = await byId(svc, 'claude-opus-5')
     // 2026-07-24 公告只有基线 api_available 一条(无 'updated' 重复)
     expect(opus5!.events).toHaveLength(1)
@@ -796,7 +801,7 @@ describe('模型追踪:Anthropic 基线自身(issues/04)', () => {
 * [Claude Opus 5](https://platform.claude.com/docs/en/models/opus-5/overview) now supports a new output format. See [What's new](https://platform.claude.com/docs/en/models/opus-5/whats-new-opus-5) for details.
 `
     const svc = await makeService(db, makeDeps({ [ZHIPU_RELEASES_URL]: '', [ANTHROPIC_RELEASES_URL]: md }))
-    await svc.pollAnthropic()
+    await svc.pollProvider('anthropic')
     const opus5 = await byId(svc, 'claude-opus-5')
     expect(opus5!.events.map((e) => e.kind)).toEqual(['updated', 'api_available'])
   })
@@ -902,11 +907,11 @@ describe('模型追踪:xAI 基线自身(issues/05)', () => {
 })
 
 describe('模型追踪:xAI 档案服务(轮询/厂家隔离)', () => {
-  it('pollXai:月份锚定 updated 动态入库,两轮幂等不翻倍', async () => {
+  it('xAI 轮询:月份锚定 updated 动态入库,两轮幂等不翻倍', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(''))
-    await svc.pollXai()
-    await svc.pollXai()
+    await svc.pollProvider('xai')
+    await svc.pollProvider('xai')
     const v2 = await byId(svc, 'grok-voice-think-fast-2.0')
     // 基线 2 条(api_available + alias_repointed)+ July 条目自动 updated(2026-07-01)
     expect(v2!.events.map((e) => e.kind).sort()).toEqual(['alias_repointed', 'api_available', 'updated'])
@@ -919,11 +924,11 @@ describe('模型追踪:xAI 档案服务(轮询/厂家隔离)', () => {
   it('xAI 信源失败只标记该厂家陈旧:智谱/Anthropic 源与档案不受影响(issues/05 验收)', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
-    await svc.pollZhipu()
-    await svc.pollAnthropic()
-    await svc.pollXai()
+    await svc.pollProvider('zhipu')
+    await svc.pollProvider('anthropic')
+    await svc.pollProvider('xai')
     const failing = new ModelTrackingService(db, failingDeps())
-    await expect(failing.pollXai()).rejects.toThrow('HTTP 503')
+    await expect(failing.pollProvider('xai')).rejects.toThrow('HTTP 503')
     const a = await failing.archive()
     const source = (p: string) => a.sources.find((s) => s.provider === p)!
     expect(source('xai')!.stale).toBe(true)
@@ -941,7 +946,7 @@ describe('模型追踪:xAI 档案服务(轮询/厂家隔离)', () => {
       [XAI_RELEASES_URL]: '<html>上游改版了</html>',
     }))
     await svc.init()
-    await expect(svc.pollXai()).rejects.toThrow('疑似上游改版')
+    await expect(svc.pollProvider('xai')).rejects.toThrow('疑似上游改版')
     const a = await svc.archive()
     expect(a.sources.find((s) => s.provider === 'xai')!.stale).toBe(true)
     expect(a.models).toHaveLength(TOTAL_BASELINE)
@@ -1122,11 +1127,11 @@ describe('模型追踪:月之暗面档案服务(轮询/去重/陈旧,issues/06)'
     },
   })
 
-  it('pollMoonshot:基线已核验的公告不产重复动态;基线未覆盖的新文章(技术博客)自动入库 updated', async () => {
+  it('月暗轮询:基线已核验的公告不产重复动态;基线未覆盖的新文章(技术博客)自动入库 updated', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, kimiDeps())
-    await svc.pollMoonshot()
-    await svc.pollMoonshot() // 两轮幂等
+    await svc.pollProvider('moonshot')
+    await svc.pollProvider('moonshot') // 两轮幂等
     const k3 = await byId(svc, 'kimi-k3')
     // 资讯发布(07-17 基线占键)+ 开放日(07-27 基线占键)+ 技术博客(07-16 自动解析)
     expect(k3!.events.map((e) => [e.kind, e.occurredOn]).sort()).toEqual([
@@ -1152,14 +1157,14 @@ describe('模型追踪:月之暗面档案服务(轮询/去重/陈旧,issues/06)'
   it('单页失败标陈旧并上抛,另一页动态照常入库;恢复后陈旧清除', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, kimiDeps())
-    await svc.pollMoonshot()
+    await svc.pollProvider('moonshot')
     const halfFailing = new ModelTrackingService(db, kimiDeps(new Error('HTTP 503'), KIMI_BLOG_HTML))
-    await expect(halfFailing.pollMoonshot()).rejects.toThrow('HTTP 503')
+    await expect(halfFailing.pollProvider('moonshot')).rejects.toThrow('HTTP 503')
     let a = await halfFailing.archive()
     expect(a.sources.find((s) => s.provider === 'moonshot')!.stale).toBe(true)
     expect((await byId(halfFailing, 'kimi-k3'))!.events.length).toBeGreaterThan(0) // 档案与已入动态保留
     const ok = new ModelTrackingService(db, kimiDeps())
-    await ok.pollMoonshot()
+    await ok.pollProvider('moonshot')
     a = await ok.archive()
     expect(a.sources.find((s) => s.provider === 'moonshot')!.stale).toBe(false)
   })
@@ -1167,9 +1172,9 @@ describe('模型追踪:月之暗面档案服务(轮询/去重/陈旧,issues/06)'
   it('上游改版:200 但零卡片 → 抛错标陈旧,既有档案保留', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, kimiDeps())
-    await svc.pollMoonshot()
+    await svc.pollProvider('moonshot')
     const drifty = new ModelTrackingService(db, kimiDeps('<html>上游改版了</html>', '<html>上游改版了</html>'))
-    await expect(drifty.pollMoonshot()).rejects.toThrow('疑似上游改版')
+    await expect(drifty.pollProvider('moonshot')).rejects.toThrow('疑似上游改版')
     const a = await drifty.archive()
     expect(a.sources.find((s) => s.provider === 'moonshot')!.stale).toBe(true)
     expect(a.models.filter((m) => m.provider === 'moonshot')).toHaveLength(KIMI_BASELINE.length)
@@ -1179,9 +1184,9 @@ describe('模型追踪:月之暗面档案服务(轮询/去重/陈旧,issues/06)'
     const { db } = openDb(':memory:')
     // 不经 init(其内未等待的并行轮询会与本测试的显式失败轮询竞争写 sources 行)
     const svc = new ModelTrackingService(db, makeDeps(ZHIPU_MD))
-    await svc.pollZhipu() // 智谱源就位
+    await svc.pollProvider('zhipu') // 智谱源就位
     const failing = new ModelTrackingService(db, kimiDeps(new Error('HTTP 503'), new Error('HTTP 503')))
-    await expect(failing.pollMoonshot()).rejects.toThrow('HTTP 503')
+    await expect(failing.pollProvider('moonshot')).rejects.toThrow('HTTP 503')
     const a = await failing.archive()
     expect(a.sources.find((s) => s.provider === 'moonshot')!.stale).toBe(true)
     expect(a.sources.find((s) => s.provider === 'zhipu')!.stale).toBe(false)
@@ -1297,7 +1302,7 @@ describe('模型追踪:OpenAI 档案服务(轮询/历史去重/厂家隔离,issu
   it('init 入档:OpenAI 模型在库,profile 齐备(价格/限额);信源就位(前端 tab 数据源)', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
-    await svc.pollOpenAI()
+    await svc.pollProvider('openai')
     const sol = await byId(svc, 'gpt-5.6-sol')
     expect(sol!.provider).toBe('openai')
     expect(sol!.pricing!.region).toBe('OpenAI API(美元)')
@@ -1313,8 +1318,8 @@ describe('模型追踪:OpenAI 档案服务(轮询/历史去重/厂家隔离,issu
   it('历史去重:基线事件占住同 (模型,日期,锚点) 的公告,changelog 不产 updated 重复(两轮幂等)', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
-    await svc.pollOpenAI()
-    await svc.pollOpenAI()
+    await svc.pollProvider('openai')
+    await svc.pollProvider('openai')
     const sol = await byId(svc, 'gpt-5.6-sol')
     // 2026-07-09 家族上线:仅基线 api_available;2026-08-21 降价:仅基线 updated
     expect(sol!.events.filter((e) => e.occurredOn === '2026-07-09')).toHaveLength(1)
@@ -1327,7 +1332,7 @@ describe('模型追踪:OpenAI 档案服务(轮询/历史去重/厂家隔离,issu
     const { db } = openDb(':memory:')
     const md = `# Changelog\n\n## September, 2026\n\n### Sep 9\n\nUpdate · Model: gpt-5.6-sol\n\nGPT-5.6 Sol context window expanded.\n`
     const svc = await makeService(db, makeDeps({ [OPENAI_CHANGELOG_URL]: md }))
-    await svc.pollOpenAI()
+    await svc.pollProvider('openai')
     const sol = await byId(svc, 'gpt-5.6-sol')
     expect(sol!.events.filter((e) => e.occurredOn === '2026-09-09')).toEqual([
       expect.objectContaining({
@@ -1341,10 +1346,10 @@ describe('模型追踪:OpenAI 档案服务(轮询/历史去重/厂家隔离,issu
   it('厂家隔离:OpenAI 上游改版只标记 openai 陈旧,智谱源与两家档案均不受影响', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD))
-    await svc.pollOpenAI()
+    await svc.pollProvider('openai')
     // 只换 OpenAI 页(200 但零结构化条目 = 上游改版口径),不经 init → 无其他后台轮询
     const drifty = new ModelTrackingService(db, makeDeps({ [OPENAI_CHANGELOG_URL]: '<html>redesigned</html>' }))
-    await expect(drifty.pollOpenAI()).rejects.toThrow('疑似上游改版')
+    await expect(drifty.pollProvider('openai')).rejects.toThrow('疑似上游改版')
     const a = await drifty.archive()
     expect(a.sources.find((s) => s.provider === 'openai')!.stale).toBe(true)
     expect(a.sources.find((s) => s.provider === 'zhipu')!.stale).toBe(false)
@@ -1481,15 +1486,15 @@ describe('模型追踪:DeepSeek 基线与服务(issues/07)', () => {
   it('陈旧降级:DeepSeek 源失败只标记 deepseek 陈旧、档案保留且他厂不受牵连;零小节 = 上游改版同口径', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(ZHIPU_MD)) // 单字符串:智谱页实文,DeepSeek 页用固定夹具
-    await svc.pollDeepSeek()
+    await svc.pollProvider('deepseek')
     const failing = new ModelTrackingService(db, failingDeps())
-    await expect(failing.pollDeepSeek()).rejects.toThrow('HTTP 503')
+    await expect(failing.pollProvider('deepseek')).rejects.toThrow('HTTP 503')
     let a = await failing.archive()
     expect(a.sources.find((s) => s.provider === 'deepseek')!.stale).toBe(true)
     expect((await byId(failing, 'deepseek-v4-pro'))!.events.length).toBeGreaterThan(0) // 档案保留
     expect(a.sources.find((s) => s.provider === 'zhipu')!.stale).toBe(false)
     const drifty = new ModelTrackingService(db, makeDeps({ [DEEPSEEK_UPDATES_URL]: '<html>redesigned</html>' }))
-    await expect(drifty.pollDeepSeek()).rejects.toThrow('疑似上游改版')
+    await expect(drifty.pollProvider('deepseek')).rejects.toThrow('疑似上游改版')
     a = await drifty.archive()
     expect(a.models.filter((m) => m.provider === 'deepseek')).toHaveLength(DEEPSEEK_BASELINE.length)
   })
@@ -1498,8 +1503,8 @@ describe('模型追踪:DeepSeek 基线与服务(issues/07)', () => {
     const { db } = openDb(':memory:')
     const md = `${DEEPSEEK_HTML}<h2 id="date-2026-09-09">Date: 2026-09-09</h2><h3 id="deepseek-v4-pro-price">DeepSeek-V4-Pro Price Cut</h3>\n`
     const svc = await makeService(db, makeDeps({ [DEEPSEEK_UPDATES_URL]: md }))
-    await svc.pollDeepSeek()
-    await svc.pollDeepSeek() // 两轮幂等
+    await svc.pollProvider('deepseek')
+    await svc.pollProvider('deepseek') // 两轮幂等
     const pro = (await byId(svc, 'deepseek-v4-pro'))!
     expect(pro.events).toHaveLength(4) // 权重/API/GA 三条基线 + 1 条新公告
     expect(pro.events.find((e) => e.occurredOn === '2026-08-13')!.kind).toBe('updated') // GA 公告未被覆盖
@@ -1577,8 +1582,8 @@ describe('模型追踪:通义基线形状与服务轮询(issues/09)', () => {
   it('通义一轮:表格事件入库、与基线同 (模型,日期,信源) 的上架行不补重复动态;两轮幂等', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(QWEN_HTML))
-    await svc.pollAlibaba()
-    await svc.pollAlibaba() // 幂等
+    await svc.pollProvider('alibaba')
+    await svc.pollProvider('alibaba') // 幂等
     const max = (await byId(svc, 'qwen3.8-max'))!
     // 基线 api_available(2026-08-02,主发布源)已在库,同键表格行不补 updated
     expect(max.events.filter((e) => e.occurredOn === '2026-08-02')).toHaveLength(1)
@@ -1591,8 +1596,8 @@ describe('模型追踪:通义基线形状与服务轮询(issues/09)', () => {
   it('上游改版(零结构化行)标陈旧、库内通义档案保留,不影响他厂', async () => {
     const { db } = openDb(':memory:')
     const failing = await makeService(db, makeDeps({ [QWEN_RELEASES_URL]: '<html>改版空表</html>', [ZHIPU_RELEASES_URL]: ZHIPU_MD }))
-    await failing.pollZhipu() // 智谱显式成功就位(不靠 init 内未等待轮询的时序)
-    await expect(failing.pollAlibaba()).rejects.toThrow('发布源无结构化条目')
+    await failing.pollProvider('zhipu') // 智谱显式成功就位(不靠 init 内未等待轮询的时序)
+    await expect(failing.pollProvider('alibaba')).rejects.toThrow('发布源无结构化条目')
     const archive = await failing.archive()
     expect(archive.sources.find((s) => s.provider === 'alibaba')!.stale).toBe(true)
     expect((await byId(failing, 'qwen3.8-max'))!.events.length).toBeGreaterThan(0) // 基线在库保留

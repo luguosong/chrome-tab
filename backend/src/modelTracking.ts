@@ -105,9 +105,9 @@ const ALL_BASELINES: BaselineModel[] = [
 ]
 
 /**
- * 全部跟踪厂家的 provider 定义(取数差异面,ADR-0038):cron(pollQuietly)与运维单轮
- * (pollXxx 薄壳)的遍历/委托源。**Record 满配 = 编译期完备性**——新厂家票在 shared
- * 的 ModelProviderId 扩了枚举而漏挂此处,编译即报错;顺序与 cron 日志习惯一致。
+ * 全部跟踪厂家的 provider 定义(取数差异面,ADR-0038):pollProvider 轮询入口的
+ * 遍历/查表源。**Record 满配 = 编译期完备性**——新厂家票在 shared 的
+ * ModelProviderId 扩了枚举而漏挂此处,编译即报错;顺序与 cron 日志习惯一致。
  */
 const PROVIDERS: Record<ModelProviderId, ProviderDef<unknown>> = {
   zhipu: ZHIPU_DEF,
@@ -209,7 +209,7 @@ export class ModelTrackingService {
           .execute()
       }
     }
-    this.pollQuietly()
+    void this.pollProvider()
   }
 
   /** 档案读侧(路由直调):模型(可用在前、retired 沉底)+ 各事件倒序 + 信源状态。 */
@@ -308,13 +308,25 @@ export class ModelTrackingService {
     }
   }
 
-  /** cron 入口:失败只记日志(6h 节奏即天然重试,禁密集重试,同 videoUpdates 口径);
-   *  各厂家独立 catch——单家失败不影响另一家本轮取数;评测源同理独立(issues/08)。 */
-  pollQuietly(): void {
-    for (const def of Object.values(PROVIDERS)) {
-      void this.runPoll(def).catch((e) => console.error(`模型追踪(${def.label})取数失败:`, e))
+  /**
+   * 取数轮询唯一入口(ADR-0041,吸收原 pollQuietly 与 7 个 pollXxx 薄壳):生产
+   * cron/init 与测试同一 seam。省缺 id = 全部厂家 + 评测,**各家独立 catch**——
+   * 单家失败记日志、标陈旧,不牵连他家(6h 节奏即天然重试,禁密集重试,同
+   * videoUpdates 口径);全轮落定后 resolve(可等待),不抛。指定 id = 单家一轮,
+   * 失败直抛——确定性单轮,测试断言标陈旧的入口。
+   */
+  async pollProvider(id?: ModelProviderId): Promise<void> {
+    if (id !== undefined) {
+      await this.runPoll(PROVIDERS[id])
+      return
     }
-    void this.pollEvaluations().catch((e) => console.error('模型追踪(评测)取数失败:', e))
+    const jobs = Object.values(PROVIDERS).map((def) =>
+      this.runPoll(def).catch((e) => console.error(`模型追踪(${def.label})取数失败:`, e)),
+    )
+    jobs.push(
+      this.pollEvaluations().catch((e) => console.error('模型追踪(评测)取数失败:', e)),
+    )
+    await Promise.all(jobs)
   }
 
   /**
@@ -348,16 +360,6 @@ export class ModelTrackingService {
       await this.markSource(def.id, false).catch(() => {})
       throw errs[0]
     }
-  }
-
-  /** DeepSeek 一轮(差异面见 providers/deepseek.ts 的 DEEPSEEK_DEF)。 */
-  async pollDeepSeek(): Promise<void> {
-    await this.runPoll(DEEPSEEK_DEF)
-  }
-
-  /** 通义一轮(差异面见 providers/alibaba.ts 的 ALIBABA_DEF)。 */
-  async pollAlibaba(): Promise<void> {
-    await this.runPoll(ALIBABA_DEF)
   }
 
   /**
@@ -457,31 +459,6 @@ export class ModelTrackingService {
         )
         .execute()
     }
-  }
-
-  /** 智谱一轮(差异面见 providers/zhipu.ts 的 ZHIPU_DEF)。 */
-  async pollZhipu(): Promise<void> {
-    await this.runPoll(ZHIPU_DEF)
-  }
-
-  /** Anthropic 一轮(差异面见 providers/anthropic.ts 的 ANTHROPIC_DEF)。 */
-  async pollAnthropic(): Promise<void> {
-    await this.runPoll(ANTHROPIC_DEF)
-  }
-
-  /** xAI 一轮(差异面见 providers/xai.ts 的 XAI_DEF)。 */
-  async pollXai(): Promise<void> {
-    await this.runPoll(XAI_DEF)
-  }
-
-  /** OpenAI 一轮(差异面见 providers/openai.ts 的 OPENAI_DEF)。 */
-  async pollOpenAI(): Promise<void> {
-    await this.runPoll(OPENAI_DEF)
-  }
-
-  /** 月之暗面一轮(资讯+Blog 两页语义由 runPoll 的 urls 多项统一承载,见 MOONSHOT_DEF)。 */
-  async pollMoonshot(): Promise<void> {
-    await this.runPoll(MOONSHOT_DEF)
   }
 
   /**
@@ -636,5 +613,5 @@ export function prodModelDeps(): ModelTrackingDeps {
 // ---- 定时轮询(研究 §6:6h 节奏;非整点错开,同 videoUpdates 口径)----
 
 export function startModelTrackingScheduler(service: ModelTrackingService): void {
-  schedule('41 */6 * * *', () => service.pollQuietly())
+  schedule('41 */6 * * *', () => void service.pollProvider())
 }
