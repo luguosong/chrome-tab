@@ -45,11 +45,14 @@ export class TtlCache<V> {
   }
 }
 
-/** cachedOrNull 的句柄(ADR-0042):get + 写后失效。 */
+/** cachedOrNull 的句柄(ADR-0042):读 + 写后失效 + 失败因查询。 */
 export interface CachedSource<K, V> {
   get(key: K): Promise<V | null>
   /** 写操作后强制下读重拉(如待办速记);只清 TTL 缓存——lastGood 是宁旧勿空的底,不清。 */
   invalidate(key: K): void
+  /** TTL 未过期的新鲜缓存(不触发取数、不含 lastGood 回落)——「手动补一轮」类
+   *  调用方区分「命中」与「新抓/回落」用(引用与 get 命中路径一致)。 */
+  peek(key: K): V | undefined
   /** 最近一次取数失败的原因(get 返回 null / 回落时的原始错误;成功即清)——
    *  域选「从未成功上抛」时透传原始因(如趋势榜 500 带「风控」而非泛化文案)。 */
   lastError(key: K): unknown
@@ -62,14 +65,15 @@ export interface CachedSource<K, V> {
  * 即重试。键粒度由域选:单值源传常量键,组合源传序列化键(如趋势榜 `since|lang|spoken`)。
  * 不收的两族:TtlCache 纯缓存(回旧值有害场景,见其注释);servermon 式「失败续
  * TTL 防密集重试 + 批抓聚合 + 单项成败标 online/offline」(语义分叉,ADR-0039 先例)。
+ * 「新抓成功」的域钩子(如趋势榜后台补译)写在 fetch 回调内——原语不设 onSuccess
+ * 钩子(曾有,因「手动补一轮」调用方与钩子双发 fire-and-forget 而撤,ADR-0042 修订)。
  */
 export function cachedOrNull<K, V>(opts: {
   ttlMs: number
   fetch: (key: K) => Promise<V>
-  /** 失败运维日志前缀(域名,如「AIHOT 取数失败(/hot-topics)」)。 */
-  warnLabel: (key: K) => string
-  /** 成功后的域钩子(如趋势榜后台补译 fire-and-forget);异常自吞不牵连取数。 */
-  onSuccess?: (key: K, value: V) => void | Promise<void>
+  /** 失败运维日志前缀(域名,如「AIHOT 取数失败(/hot-topics)」);省缺不打——
+   *  失败已由调用链自记(路由 500 日志/调度 catch)的域用,防双重噪音。 */
+  warnLabel?: (key: K) => string
 }): CachedSource<K, V> {
   const cache = new Map<K, { at: number; value: V }>()
   const lastGood = new Map<K, V>()
@@ -83,16 +87,19 @@ export function cachedOrNull<K, V>(opts: {
         cache.set(key, { at: Date.now(), value })
         lastGood.set(key, value)
         lastErr.delete(key)
-        if (opts.onSuccess) void Promise.resolve(opts.onSuccess(key, value)).catch(() => {})
         return value
       } catch (e) {
-        console.warn(`${opts.warnLabel(key)}: ${e}`)
+        if (opts.warnLabel) console.warn(`${opts.warnLabel(key)}: ${e}`)
         lastErr.set(key, e)
         return lastGood.get(key) ?? null
       }
     },
     invalidate(key) {
       cache.delete(key)
+    },
+    peek(key) {
+      const hit = cache.get(key)
+      return hit && Date.now() - hit.at < opts.ttlMs ? hit.value : undefined
     },
     lastError(key) {
       return lastErr.get(key)

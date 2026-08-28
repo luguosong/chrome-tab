@@ -35,7 +35,9 @@ export function QueryPane({
   children?: ReactNode
 }) {
   if (state.kind === 'loading')
-    return <div className="text-sm text-white/50 py-6 text-center">加载中…</div>
+    return (
+      <div className="text-sm text-white/50 py-6 text-center">{state.message ?? '加载中…'}</div>
+    )
   if (state.kind === 'error')
     return (
       <div className="flex items-center gap-3 py-4">

@@ -52,7 +52,9 @@ export default function WeatherModal({
         ) : now ? (
           <NowBody now={now} />
         ) : (
-          <div className="text-xs text-white/40 mb-4">加载中…</div>
+          <div className="mb-4">
+            <QueryPane state={{ kind: 'loading' }} />
+          </div>
         )}
 
         {/* 24 小时预报(后端 24h 端点失败时省略 hourly,该段隐藏) */}

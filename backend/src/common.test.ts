@@ -64,20 +64,26 @@ describe('cachedOrNull:TTL + 宁旧勿空原语', () => {
     expect(await src.get('b')).toBe(2) // invalidate 不动 lastGood:失败仍有底
   })
 
-  it('onSuccess 域钩子随成功触发、异常自吞不牵连取数', async () => {
-    const seen: string[] = []
-    const src = cachedOrNull({
-      ttlMs: 60_000,
-      fetch: async (key: string) => key.toUpperCase(),
-      warnLabel: (key) => `测试源(${key})`,
-      onSuccess: (key) => {
-        seen.push(key)
-        if (key === 'boom') throw new Error('钩子炸了')
-      },
-    })
-    expect(await src.get('x')).toBe('X')
-    expect(await src.get('boom')).toBe('BOOM') // 钩子异常不影响返回值
-    await new Promise((r) => setTimeout(r, 0)) // fire-and-forget 落定
-    expect(seen).toEqual(['x', 'boom'])
+  it('peek 只认 TTL 未过期的新鲜缓存(引用与 get 命中路径一致),过期/无键 undefined;warnLabel 省缺不打日志', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-28T10:00:00Z'))
+    const warns: string[] = []
+    const origWarn = console.warn
+    console.warn = (msg) => warns.push(String(msg))
+    try {
+      const src = cachedOrNull<string, number>({
+        ttlMs: 60_000,
+        fetch: async (key) => (key === 'bad' ? Promise.reject(new Error('HTTP 503')) : Promise.resolve(1)),
+      })
+      expect(src.peek('k')).toBeUndefined() // 从未取数
+      const got = await src.get('k')
+      expect(src.peek('k')).toBe(got) // 命中:同引用
+      expect(await src.get('bad')).toBeNull() // 失败(无 lastGood)
+      expect(warns).toEqual([]) // 省缺 warnLabel 不打日志
+      vi.setSystemTime(new Date('2026-08-28T10:01:01Z')) // TTL 过期
+      expect(src.peek('k')).toBeUndefined() // 过期即 undefined(不触发取数)
+    } finally {
+      console.warn = origWarn
+    }
   })
 })

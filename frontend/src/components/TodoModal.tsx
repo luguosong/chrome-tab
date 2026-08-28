@@ -77,8 +77,9 @@ export default function TodoModal({ onClose }: { onClose: () => void }) {
   const selected = selectedId ? (tasks.find((t) => t.id === selectedId) ?? null) : null
 
   // tab 条(骨架渲染,含悬空回落):计数徽标依赖 data,失败/首载时给空列——
-  // 骨架空列守卫即「无 tab 形态」,等价原版不渲染
-  const tabs = data
+  // 骨架空列守卫即「无 tab 形态」。失败判定含 isError&&data(后台刷新失败但旧
+  // 缓存仍在)——原版 failed 分支不渲染 tab 条,旧计数配错误块是误导
+  const tabs = data && !failed
     ? TABS.map(({ key, label }) => ({
         key,
         label: (

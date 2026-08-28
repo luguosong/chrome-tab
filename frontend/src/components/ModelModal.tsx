@@ -6,8 +6,9 @@ import type {
   TrackedModel,
 } from 'chrome-tab-shared'
 import { useModelArchive } from '../hooks/useModelArchive'
+import { paneState } from '../lib/detailModalState'
 import { timeAgo } from '../lib/timeAgo'
-import DetailModal from './DetailModal'
+import DetailModal, { QueryPane } from './DetailModal'
 import {
   AVAILABILITY_LABELS,
   CODING_INDEX_BENCHMARK,
@@ -82,20 +83,12 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
       tabs={TABS}
       tab={tab}
       onTabChange={setTab}
-      busy={isFetching}
-      pane={
-        isError
-          ? { kind: 'error', message: '档案刷新失败' }
-          : data === undefined
-            ? { kind: 'loading' }
-            : null
-      }
-      onRetry={() => void refetch()}
     >
       {/* 种类过滤胶囊:单选互斥,与厂家 tab AND 组合。不是 tab(不切换视图,
           只叠加过滤条件)——role=group + aria-pressed。种类词着色与行内种类词
           同纲(MODEL_KIND_COLOR_CLASSES):chip 与行内同色互证,颜色即导航。
-          跑分榜不消费该过滤轴(CONTEXT.md:跑分榜无种类过滤),整行隐藏。 */}
+          跑分榜不消费该过滤轴(CONTEXT.md:跑分榜无种类过滤),整行隐藏。
+          在状态机之外恒显示(同趋势榜胶囊)——失败态下换组合过滤仍是有效探索。 */}
       {tab !== 'leaderboard' && (
         <div
           role="group"
@@ -128,8 +121,19 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
         </div>
         )}
 
-      {/* pane=null 已保证 data 就位;本守卫是编译器的类型收窄(陈旧/线索/列表
-          的派生都在 data 上) */}
+      <QueryPane
+        state={paneState({
+          isError,
+          isPending: data === undefined,
+          isEmpty: false,
+          emptyMessage: '',
+          errorMessage: '档案刷新失败',
+        })}
+        onRetry={() => void refetch()}
+        retryBusy={isFetching}
+      >
+      {/* 编译器的类型收窄守卫(陈旧/线索/列表的派生都在 data 上);QueryPane
+          content 态 = data 已就位 */}
       {data && (
       <>
       {/* 陈旧标记(CONTEXT.md「模型档案」):单信源失败保留最后成功结果 */}
@@ -145,13 +149,13 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
             )}
             {/* 待核验线索(ADR-0025「跳过待核验」的可见形态):发布源出现基线不认识的
                 新条目——非故障,提示人工核验纳入;核验后下轮自愈消失。 */}
-            {(data?.pendingClues ?? []).length > 0 && (
+            {data.pendingClues.length > 0 && (
               <details className="py-1.5 text-meta text-white/50">
                 <summary className="cursor-pointer select-none hover:text-white/70">
-                  待核验线索 {data!.pendingClues.length} 条(发布源新条目不在跟踪名单,核验后消失)
+                  待核验线索 {data.pendingClues.length} 条(发布源新条目不在跟踪名单,核验后消失)
                 </summary>
                 <ul className="mt-1 space-y-0.5 pl-1">
-                  {data!.pendingClues.map((c) => (
+                  {data.pendingClues.map((c) => (
                     <li key={`${c.provider}|${c.date}|${c.url}`} className="truncate">
                       <span className="text-white/40">{PROVIDER_LABELS[c.provider]}</span>{' '}
                       <span className="text-white/30">{c.date.slice(5)}</span>{' '}
@@ -187,6 +191,7 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
             )}
       </>
       )}
+      </QueryPane>
     </DetailModal>
   )
 }

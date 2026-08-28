@@ -7,6 +7,7 @@ import {
 } from 'chrome-tab-shared'
 import { timeAgo } from '../lib/timeAgo'
 import { retryTrendingTranslation, useTrending, TRENDING_TRANSLATE_FRESH_MS } from '../hooks/useTrending'
+import { paneState } from '../lib/detailModalState'
 import DetailModal, { QueryPane, retryButtonClass } from './DetailModal'
 
 /**
@@ -59,7 +60,6 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
           {data && ` · 抓取于 ${timeAgo(data.fetchedAt)}`}
         </>
       }
-      busy={isFetching}
     >
       {/* 三行筛选胶囊:每行前置维度小标签,值 = 不限/精选子集;单选互斥。
           语言胶囊带 linguist 色点,与条目行内色点同色互证(颜色即导航)。
@@ -73,16 +73,16 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
         options={Object.entries(TRENDING_SINCE_LABELS).map(([key, label]) => ({ key, label, color: '' }))} />
 
       <QueryPane
-        state={
-          isError
-            ? { kind: 'error', message: '趋势榜刷新失败' }
-            : repos.length === 0
-              ? isFetching
-                ? // 组合现拉中(非默认组合后端无缓存,~2.4s;有旧数据时不整块闪白)
-                  { kind: 'loading' }
-                : { kind: 'empty', message: '该组合下暂无趋势仓库' }
-              : { kind: 'content' }
-        }
+        state={paneState({
+          isError,
+          // 组合现拉中(非默认组合后端无缓存 ~2.4s;有旧数据时不整块闪白)——
+          // 等待语义直说,「切胶囊更快」的出口用户自己能看见
+          isPending: repos.length === 0 && isFetching,
+          isEmpty: repos.length === 0,
+          emptyMessage: '该组合下暂无趋势仓库',
+          errorMessage: '趋势榜刷新失败',
+          loadingMessage: '正在抓取该组合的趋势榜…',
+        })}
         onRetry={() => void refetch()}
         retryBusy={isFetching}
       >

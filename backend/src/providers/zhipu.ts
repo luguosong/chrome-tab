@@ -47,7 +47,7 @@ export function parseZhipuReleases(md: string): ZhipuUpdate[] {
 /**
  * 更新块 → (基线模型 officialId, 事件)。仅双条件匹配的块产事件,kind 恒 'updated'
  * (自动解析不猜语义化事件类型;api_available 等语义类型只出自人工核验基线 events)。
- * 与基线事件同 (模型,日期,信源) 的块由 pollZhipu 跳过,不产重复动态。
+ * 与基线事件同 (模型,日期,信源) 的块由轮询入库(runPoll → ingest 的 seen 过滤)跳过,不产重复动态。
  */
 export function matchZhipuEvent(u: ZhipuUpdate): { officialId: string; event: Omit<ModelEvent, 'id'> } | null {
   const docUrl = u.docUrl

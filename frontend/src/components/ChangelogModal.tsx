@@ -96,9 +96,7 @@ export default function ChangelogModal({
               )}
 
               <div className="modal-scroll max-h-[60vh] overflow-auto pr-1.5">
-                {versions.length === 0 && (
-                  <div className="text-white/60 text-sm py-4">加载中…</div>
-                )}
+                {versions.length === 0 && <QueryPane state={{ kind: 'loading' }} />}
 
                 {noRaw && versions.length > 0 && (
                   <p className="mb-2 text-xs text-white/40">

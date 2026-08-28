@@ -127,25 +127,29 @@ export class TrendingService {
     this.translations = makeTranslationStore(db, 'trending_translations')
     this.source = cachedOrNull<string, Entry>({
       ttlMs: CACHE_TTL_MS,
-      fetch: async (key) => ({
-        repos: await fetchTrending(this.deps, queryFromKey(key)),
-        fetchedAt: Date.now(),
-      }),
-      warnLabel: () => '趋势榜取数失败',
-      // 抓取成功即后台补译(ADR-0030 fire-and-forget):首批响应先回原文,译文就位
-      // 后靠前端既有刷新节奏(staleTime 5min + 聚焦重拉)自然到达;缓存命中路径
-      // 每次 join 译文表即见。钩子异常由原语自吞,不牵连取数。
-      onSuccess: (_key, entry) => void this.translateMissingDescriptions(entry.repos),
+      // 「新抓成功」钩子写在 fetch 回调内(原语不设 onSuccess——手动补一轮的调用方
+      // 会被钩子双发 fire-and-forget):新抓即后台补译(ADR-0030),首批响应先回
+      // 原文,译文就位后靠前端既有刷新节奏(staleTime 5min + 聚焦重拉)自然到达。
+      fetch: async (key) => {
+        const entry: Entry = { repos: await fetchTrending(this.deps, queryFromKey(key)), fetchedAt: Date.now() }
+        void this.translateMissingDescriptions(entry.repos)
+        return entry
+      },
+      // 失败不在此打日志:读路径的 500 与 cron catch 已各记一次,原语再 warn 是三重噪音
     })
   }
 
-  /** 读组合:TTL/宁旧勿空由原语持有;从未成功 → 域选上抛(诚实 500,原语日志
-   *  已记上游失败原因)。回落路径 fetchedAt 如实陈旧(tile 鲜度位如实显示)。 */
-  async get(q: TrendingQuery): Promise<TrendingResponse> {
-    const key = queryKey(q)
+  /** 组合取数(peek/get + 从未成功上抛原始因),get 与手动补译轮共用。 */
+  private async requireEntry(key: string): Promise<Entry> {
     const entry = await this.source.get(key)
     if (entry === null) throw this.source.lastError(key) ?? new Error('趋势榜取数失败(上游不可达且无缓存)')
-    return await this.toResponse(entry)
+    return entry
+  }
+
+  /** 读组合:TTL/宁旧勿空由原语持有;从未成功 → 域选上抛(诚实 500)。回落路径
+   *  fetchedAt 如实陈旧(tile 鲜度位如实显示)。 */
+  async get(q: TrendingQuery): Promise<TrendingResponse> {
+    return await this.toResponse(await this.requireEntry(queryKey(q)))
   }
 
   /** cron 保热默认组合(图标卡片视图);失败保留旧缓存由原语降级。 */
@@ -154,15 +158,22 @@ export class TrendingService {
   }
 
   /** 手动重试译制(ADR-0030 补译的显式入口,前端「重试翻译」钮):取组合最新榜
-   *  (缓存有效即用,否则现抓并落缓存),强制补一轮缺失描述——ensure 内部 load
-   *  先滤已入库行,幂等(重复点击/与抓取后的自动轮不双译)。端点侧 fire-and-forget
-   *  (LLM 批译最坏跨分钟,同步等待必撞 HTTP 超时),译文到库由前端 15s 到达轮询
-   *  收果。 */
+   *  (新鲜缓存即用,否则现抓并落缓存),强制补一轮缺失描述。与抓取自动轮不双发:
+   *  新鲜缓存命中时 fetch 未跑(无自动轮)才显式补;现抓时 fetch 回调内的自动轮已
+   *  在途,不再叠一轮——ensure 无 in-flight 守卫,两轮并发会对同一批缺口双倍送译。
+   *  过期 + 上游失败不吞:回落旧榜补译没有意义,上抛让前端显「重试发送失败」。
+   *  端点侧 fire-and-forget(LLM 批译最坏跨分钟,同步等待必撞 HTTP 超时),译文到库
+   *  由前端 15s 到达轮询收果。 */
   async retryTranslations(q: TrendingQuery): Promise<void> {
     const key = queryKey(q)
-    const entry = await this.source.get(key)
-    if (entry === null) throw this.source.lastError(key) ?? new Error('趋势榜取数失败(上游不可达且无缓存)')
-    void this.translateMissingDescriptions(entry.repos)
+    const fresh = this.source.peek(key)
+    const entry = await this.requireEntry(key)
+    if (fresh === undefined) {
+      // 缓存过期:requireEntry 拿到的必须是新抓(fetchedAt 已是当下);仍是旧值 = 上游失败回落,诚实上抛
+      if (Date.now() - entry.fetchedAt > 5_000) throw this.source.lastError(key) ?? new Error('趋势榜取数失败(回落旧榜,拒绝补译)')
+      return // 现抓已在 fetch 回调内触发自动补译轮
+    }
+    if (fresh === entry) void this.translateMissingDescriptions(entry.repos) // 新鲜命中:无自动轮,显式补
   }
 
   /** 描述译文拼装(读侧内存 join,同 news feed 范式;25 哈希一次 in 查询,毫秒级)。 */

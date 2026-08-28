@@ -26,7 +26,7 @@ import type { BaselineModel } from './modelTracking'
 
 /** DeepSeek API Change Log(主发布源,研究 §3;HTML,日期 h2 段 + h3 小节锚点)。 */
 export const DEEPSEEK_UPDATES_URL = 'https://api-docs.deepseek.com/updates/'
-/** Change Log 小节锚点(事件信源 = 与 pollDeepSeek 解析产键对齐,勿改动拼接形态)。 */
+/** Change Log 小节锚点(事件信源 = 与 providers/deepseek.ts 解析器产键对齐,勿改动拼接形态)。 */
 const CL = (anchor: string) => `${DEEPSEEK_UPDATES_URL}#${anchor}`
 const PRICING_PAGE = { title: '官方 Models & Pricing', url: 'https://api-docs.deepseek.com/quick_start/pricing' }
 /** 开放权重信源(HuggingFace 官方 deepseek-ai 实仓)。 */

@@ -21,9 +21,10 @@ export function normalizeTab<T extends string>(tabs: readonly TabItem<T>[], sele
   return tabs.some((t) => t.key === selected) ? selected : (tabs[0]?.key ?? selected)
 }
 
-/** 主体查询状态机的四态;error/empty 的文案由域声明。 */
+/** 主体查询状态机的四态;error/empty 文案由域声明,loading 可选域文案(默认「加载中…」;
+ *  有等待语义 worth 说的域带上,如趋势榜非默认组合现拉「正在抓取该组合的趋势榜…」)。 */
 export type PaneState =
-  | { readonly kind: 'loading' }
+  | { readonly kind: 'loading'; readonly message?: string }
   | { readonly kind: 'error'; readonly message: string }
   | { readonly kind: 'empty'; readonly message: string }
   | { readonly kind: 'content' }
@@ -36,6 +37,8 @@ export interface PaneInput {
   readonly emptyMessage: string
   /** 失败态消息,域文案(如「新闻流刷新失败」);省缺「刷新失败」。 */
   readonly errorMessage?: string
+  /** 加载态域文案(默认「加载中…」);等待语义 worth 说的域带,如趋势榜现拉。 */
+  readonly loadingMessage?: string
 }
 
 /**
@@ -46,7 +49,7 @@ export interface PaneInput {
  */
 export function paneState(i: PaneInput): PaneState {
   if (i.isError) return { kind: 'error', message: i.errorMessage ?? '刷新失败' }
-  if (i.isPending) return { kind: 'loading' }
+  if (i.isPending) return { kind: 'loading', message: i.loadingMessage }
   if (i.isEmpty) return { kind: 'empty', message: i.emptyMessage }
   return { kind: 'content' }
 }
