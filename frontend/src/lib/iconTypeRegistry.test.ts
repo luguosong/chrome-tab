@@ -1,17 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import {
-  canAdd,
-  get,
-  iconCells,
-  listTypes,
-  register,
-  type IconTypeDefinition,
-  type SummaryInput,
-} from './iconTypeRegistry'
-import type { Quote } from './quoteParser'
-import type { IconTypeId } from './types'
+import { canAdd, get, iconCells, listTypes } from './iconTypeRegistry'
 
-// 内置类型由模块加载时登记;此处断言其元数据 + 纯查询函数。
+// 静态类型表直接断言元数据 + 纯查询函数。
 // 对齐 spec §接缝2:canAdd(单例判断)纯函数输入输出断言。图标无尺寸档位(ADR-0016)。
 
 describe('内置类型登记', () => {
@@ -46,58 +36,8 @@ describe('canAdd — 单例判断', () => {
     expect(canAdd('changelog', ['changelog', 'changelog'])).toBe(true)
   })
 
-  it('未登记类型拒绝', () => {
+  it('未知类型拒绝(运行期兜底;类型层面 Record 已全覆盖)', () => {
     expect(canAdd('unknown' as never, [])).toBe(false)
-  })
-})
-
-describe('summarize — 纯数据提取(无需 DOM)', () => {
-  it('stock 有行情:返回价格+涨跌摘要', () => {
-    const q: Quote = { price: 308.26, prev: 313.06, change: -4.8, pct: -1.53 }
-    const s = get('stock')!.summarize({ symbol: 'usAAPL', name: '苹果' }, { quotes: { usAAPL: q } })
-    expect(s).not.toBeNull()
-    expect(s!.text).toContain('308.26')
-    expect(s!.text).toContain('▼')
-    expect(s!.tone).toBe('down')
-  })
-
-  it('stock 涨:tone=up ▲', () => {
-    const q: Quote = { price: 10, prev: 9, change: 1, pct: 11.11 }
-    const s = get('stock')!.summarize({ symbol: 'sh600000' }, { quotes: { sh600000: q } })
-    expect(s!.tone).toBe('up')
-    expect(s!.text).toContain('▲')
-  })
-
-  it('stock 无行情/刷新失败:返回 null(组件降级 "--")', () => {
-    expect(get('stock')!.summarize({ symbol: 'usAAPL' }, { quotes: {} })).toBeNull()
-    expect(
-      get('stock')!.summarize({ symbol: 'usAAPL' }, { quotes: { usAAPL: null } }),
-    ).toBeNull()
-  })
-
-  it('changelog 有最新版本:返回 title + 首条', () => {
-    const v = {
-      title: '1.2.3',
-      top: ['big feature'],
-      sections: [{ name: 'Bug fixes', items: ['fixed X'] }],
-    }
-    const s = get('changelog')!.summarize(null, { changelog: v })
-    expect(s!.title).toBe('1.2.3')
-    expect(s!.text).toBe('big feature')
-  })
-
-  it('changelog top 空时取 section 首条', () => {
-    const v = { title: '1.2.3', top: [], sections: [{ name: 'Bugs', items: ['fix'] }] }
-    const s = get('changelog')!.summarize(null, { changelog: v })
-    expect(s!.text).toBe('fix')
-  })
-
-  it('changelog 无数据:返回 null', () => {
-    expect(get('changelog')!.summarize(null, { changelog: null })).toBeNull()
-  })
-
-  it('nav 无实时摘要:恒返回 null', () => {
-    expect(get('nav')!.summarize({ name: 'x', url: 'https://a.com' }, {})).toBeNull()
   })
 })
 
@@ -125,43 +65,13 @@ describe('天气类型 weather(ADR-0009)', () => {
     const editor = get('weather')?.editor ?? []
     expect(editor.some((f) => f.name === 'location')).toBe(true)
   })
-
-  it('summarize 有实况:返回 城市名 + 温度/文字', () => {
-    const data = { location: { name: '北京', adm1: '北京市', adm2: '', lat: 39.92, lon: 116.41 } }
-    const live = {
-      weather: {
-        '39.92,116.41': {
-          location: '39.92,116.41',
-          now: { temp: 25, text: '多云', icon: '104', obsTime: '', feelsLike: 27, humidity: 60, windDir: '', windScale: '', windSpeed: '', pressure: 1010, vis: 10, precip: 0 },
-          air: null,
-          alerts: [],
-        },
-      },
-    } as unknown as SummaryInput
-    const s = get('weather')!.summarize(data, live)
-    expect(s!.title).toBe('北京')
-    expect(s!.text).toBe('25° 多云')
-    expect(s!.tone).toBe('neutral')
-  })
-
-  it('summarize 无 bundle/无 now:返回 null(组件降级)', () => {
-    const data = { location: { name: '北京', adm1: '', adm2: '', lat: 39.92, lon: 116.41 } }
-    expect(get('weather')!.summarize(data, {})).toBeNull()
-    expect(get('weather')!.summarize(data, { weather: { '39.92,116.41': null } })).toBeNull()
-  })
-
-  it('summarize 无位置(非法 data):返回 null', () => {
-    expect(get('weather')!.summarize(null, {})).toBeNull()
-    expect(get('weather')!.summarize({}, {})).toBeNull()
-  })
 })
 
 describe('分组类型 group(ADR-0011 / issue 07)', () => {
-  it('登记:kind=group(不入新增抽屉 base/extension 分区)、无 editor、无摘要', () => {
+  it('登记:kind=group(不入新增抽屉 base/extension 分区)、无 editor', () => {
     const g = get('group')
     expect(g?.kind).toBe('group')
     expect(g?.editor).toEqual([])
-    expect(g?.summarize(null, {})).toBeNull()
   })
 
   it('kind=group 不落新增抽屉任一分区(组只由合并手势诞生)', () => {
@@ -171,25 +81,6 @@ describe('分组类型 group(ADR-0011 / issue 07)', () => {
     expect(drawerKinds).toContain('extension')
     // AddDrawer 渲染 base/extension 两分区,group 不在任一分区 → 不出现
     expect(listTypes().some((t) => t.kind === 'group')).toBe(true)
-  })
-})
-
-describe('register — 扩展点(spec 契约:register(typeId, definition))', () => {
-  it('register 一个新类型后 get 可见', () => {
-    const customId = 'custom-test' as IconTypeId
-    const custom: IconTypeDefinition = {
-      id: customId,
-      label: '测试类型',
-      kind: 'extension',
-      singleton: false,
-      refresh: { kind: 'none' },
-      editor: [],
-      summarize: () => null,
-    }
-    register(customId, custom)
-    expect(get(customId)?.label).toBe('测试类型')
-    // 清理:覆盖回一个 noop 定义避免污染其它测试(模块级 registry 是单例)
-    register(customId, { ...custom, label: '__cleaned__' })
   })
 })
 
