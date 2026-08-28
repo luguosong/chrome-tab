@@ -114,7 +114,7 @@ export function useDeleteIcon() {
 /**
  * 改图标配置(data):乐观更新 icons[i].data,失败回滚。
  * 后端 PATCH /api/icons/{id} body={data}。编辑模式 ✎ 入口用。
- * data 归一化(url 补 https://)由调用方经 buildIconData 完成。
+ * data 归一化(url 补 https://)由调用方经 serializeFields(字段臂)完成。
  */
 export function useUpdateIconData() {
   const qc = useQueryClient()

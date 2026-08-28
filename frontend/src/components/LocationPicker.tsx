@@ -7,7 +7,7 @@ import type { WeatherLocation } from '../lib/weather'
  *
  * 异步搜索后端 /api/weather/locations(GeoAPI 代理)+ 结果下拉 + 选中,消歧同名城市(朝阳:北京/辽宁)
  * 靠 adm1/adm2 副标。350ms 防抖避免逐键打后端。选中即把 WeatherLocation 对象交回调用方
- * (新增抽屉 / 编辑 popover 存入 values.location,buildIconData 原样写入 data.location)。
+ * (新增抽屉 / 编辑 popover 存入 values.location,经 location 臂序列化写入 data.location)。
  *
  * 值回显:value 非空时输入框 placeholder 显示已选城市(搜索文本 q 单独维护,选中后清空)。
  */

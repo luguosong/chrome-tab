@@ -1,14 +1,9 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { CHANGELOG_SOURCES } from 'chrome-tab-shared'
 import { useCreateIcon } from '../api/config'
 import { useSiteInfoAutofill } from '../api/siteInfo'
 import { ApiError } from '../api/client'
 import { canAdd, listTypes, type IconTypeDefinition } from '../lib/iconTypeRegistry'
-import { buildIconData } from '../lib/iconData'
-import LocationPicker from './LocationPicker'
-import SymbolPicker from './SymbolPicker'
-import IconPicker from './IconPicker'
-import type { WeatherLocation } from '../lib/weather'
+import { EditorFields, missingRequiredText, serializeFields } from './editorFields'
 import type { IconTypeId } from '../lib/types'
 
 /**
@@ -90,9 +85,11 @@ function TypeCard({
 }) {
   const create = useCreateIcon()
   const [values, setValues] = useState<Record<string, unknown>>(() => initialValues(def))
+  // 字段臂上报的本地处理 busy(nav 图标上传),期间禁提交——此前新增侧缺这道门(编辑侧有)
+  const [armBusy, setArmBusy] = useState(false)
 
   // nav:网址停顿后自动加载站点信息(CONTEXT.md「站点信息」)——title 只在名称为空时
-  // 填入,图标候选由下方 icon 字段的 IconPicker 消费(共享 hook,与编辑 EditForm 一致)。
+  // 填入,图标候选由 icon 臂的 IconPicker 消费(共享 hook,与编辑 EditForm 一致)。
   useSiteInfoAutofill(def.id === 'nav', String(values['url'] ?? ''), setValues)
 
   function setField(name: string, v: unknown) {
@@ -102,14 +99,14 @@ function TypeCard({
   async function submit(e: FormEvent) {
     e.preventDefault()
     if (pageId === undefined) return
-    if (def.editor.some((f) => f.name === 'location') && !values['location']) return
+    if (missingRequiredText(def.editor, values) !== undefined) return
     // mutateAsync:成功才清空表单(抽屉保持打开以连续添加,issue 09);
     // 失败抛出由 react-query 记录到 create.error,UI 据此展示提示。
     try {
       await create.mutateAsync({
         pageId,
         type: def.id,
-        data: buildIconData(def.editor, values),
+        data: serializeFields(def.editor, values),
       })
       setValues(initialValues(def))
     } catch {
@@ -139,7 +136,7 @@ function TypeCard({
   }
 
   const noPage = pageId === undefined
-  const locMissing = def.editor.some((f) => f.name === 'location') && !values['location']
+  const missing = missingRequiredText(def.editor, values)
   // 格数徽标取真实画格跨度(ADR-0021:缺省 1×1)——加块前告知占地
   const span = def.size ?? { w: 1, h: 1 }
   return (
@@ -154,71 +151,19 @@ function TypeCard({
         </span>
       </div>
 
-      {def.editor.map((f) =>
-        f.name === 'symbol' ? (
-          <SymbolPicker
-            key={f.name}
-            value={String(values['symbol'] ?? '')}
-            onText={(v) => setField('symbol', v)}
-            onPick={(c) => {
-              setField('symbol', c.symbol)
-              setField('name', c.name) // 规范名自动填,换候选覆盖;name 框仍可手改
-            }}
-            placeholder={f.placeholder}
-          />
-        ) : f.name === 'location' ? (
-          <LocationPicker
-            key={f.name}
-            value={values[f.name] ? (values[f.name] as WeatherLocation) : null}
-            onChange={(loc) => setField('location', loc)}
-            placeholder={f.placeholder}
-          />
-        ) : f.name === 'icon' ? (
-          <IconPicker
-            key={f.name}
-            url={String(values['url'] ?? '')}
-            value={String(values['icon'] ?? '')}
-            onChange={(v) => setField('icon', v)}
-            placeholder={f.placeholder}
-          />
-        ) : f.name === 'source' ? (
-          // 更新日志外源下拉(ADR-0020):选项 = shared CHANGELOG_SOURCES 枚举
-          <select
-            key={f.name}
-            value={String(values['source'] ?? f.default)}
-            onChange={(e) => setField('source', e.target.value)}
-            aria-label={f.label}
-            className="w-full px-3 py-2 rounded-lg bg-white/20 text-white text-sm outline-none focus:ring-2 focus:ring-accent"
-          >
-            {CHANGELOG_SOURCES.map((s) => (
-              <option key={s.id} value={s.id} className="text-black">
-                {s.label}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <input
-            key={f.name}
-            value={(values[f.name] as string) ?? ''}
-            onChange={(e) => setField(f.name, e.target.value)}
-            placeholder={f.placeholder}
-            aria-label={f.label}
-            className="w-full px-3 py-2 rounded-lg bg-white/20 text-white placeholder-white/50 text-sm outline-none focus:ring-2 focus:ring-accent"
-          />
-        ),
-      )}
-
-      {/* changelog 仅一个源下拉字段;其它类型 editor 为空时直接一个提交按钮 */}
+      {/* 字段渲染唯一分派点(臂表),add/edit 两路共用,见 editorFields.tsx;
+          changelog 仅一个源下拉字段,editor 为空的类型直接一个提交按钮 */}
+      <EditorFields fields={def.editor} values={values} setField={setField} onBusyChange={setArmBusy} />
 
       {errorMsg && <div className="text-xs text-down">{errorMsg}</div>}
 
       <button
         type="submit"
-        disabled={create.isPending || noPage || locMissing}
+        disabled={create.isPending || noPage || missing !== undefined || armBusy}
         className="w-full rounded-full bg-accent py-1.5 text-sm font-medium text-white transition hover:bg-accent/90
           active:bg-accent/80 focus-visible:outline-2 focus-visible:outline-white/60 disabled:opacity-50"
       >
-        {create.isPending ? '添加中…' : locMissing ? '请选择城市' : `添加${def.label}`}
+        {create.isPending ? '添加中…' : missing ?? `添加${def.label}`}
       </button>
     </form>
   )

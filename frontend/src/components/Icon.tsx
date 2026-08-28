@@ -2,20 +2,17 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { get, type EditorField, type IconTypeDefinition } from '../lib/iconTypeRegistry'
-import LocationPicker from './LocationPicker'
-import SymbolPicker from './SymbolPicker'
 import ConfirmButton from './ConfirmButton'
 import { ICON_TYPE_UI } from './iconTypeUi'
 import type { Icon as IconModel } from '../lib/types'
 import { useEditMode } from '../context/EditModeContext'
 import { useGroupGesture } from '../context/GroupGestureContext'
 import { LABEL_GAP_PX } from '../lib/iconLayout'
-import { extractString, buildIconData } from '../lib/iconData'
-import IconPicker from './IconPicker'
+import { extractString } from '../lib/iconData'
 import { useSiteInfoAutofill } from '../api/siteInfo'
-import { readWeatherLocation, type WeatherLocation } from '../lib/weather'
 import { useDeleteIcon, useDissolveGroup, useUpdateIconData } from '../api/config'
 import { ApiError } from '../api/client'
+import { EditorFields, prefillFields, serializeFields } from './editorFields'
 
 /**
  * 单个图标渲染(见 CONTEXT.md「图标」/ spec §前端架构 IconGrid / ADR-0012 图标层换肤)。
@@ -206,7 +203,7 @@ function EditActions({
   onDelete: () => void
   onEdit: (data: Record<string, unknown> | null) => void
 }) {
-  // 仅 editor 非空的类型(nav/stock/weather)出现编辑配置 ✎;changelog(editor=[])无配置可改。
+  // 仅 editor 非空的类型出现编辑配置 ✎——含 changelog(✎ 弹层经 source 臂同款下拉改绑外源)。
   const editor = def?.editor ?? []
   const showEdit = editor.length > 0
   // 删除/解散确认文案要带图标名(下方 ConfirmButton 的 aria-label)
@@ -265,9 +262,9 @@ function EditActions({
 }
 
 /**
- * 编辑配置 popover(见 CONTEXT.md「编辑模式」)。从图标当前 data 预填类型 editor 声明的字段
- * (nav=name+url / stock=symbol+name),保存走 useUpdateIconData(PATCH /api/icons/{id} body={data}),
- * 取消直接关闭。与 AddDrawer 共用 buildIconData 归一化 + 输入样式,使「新增」与「编辑」表单一致。
+ * 编辑配置 popover(见 CONTEXT.md「编辑模式」)。从图标当前 data 预填类型 editor 声明的字段,
+ * 保存走 useUpdateIconData(PATCH /api/icons/{id} body={data}),取消直接关闭。字段的渲染 /
+ * 预填 / 序列化语义都在臂上(editorFields seam),与 AddDrawer 消费同一份,新增与编辑不漂移。
  *
  * 容器用 `fixed inset-0` 透明遮罩(z-[60],click-outside 取消)+ absolute 面板(z-[61])。
  * onPointerDown stopPropagation 防止冒泡到 Tag 触发拖拽(同 EditActions 角标,见 06)。
@@ -289,16 +286,13 @@ export function EditForm({
   onCancel: () => void
 }) {
   // 预填当前 data;组件仅在 editOpen 时挂载,故初值即打开瞬间的快照。
-  // location 字段(天气)是结构化对象,预填 readWeatherLocation;其余为字符串。
+  // 逐字段预填语义在臂上(prefillFields:location 走 readWeatherLocation、source 走
+  // changelogSourceOf 存量兜底显示生效源),见 editorFields.tsx。
   const [values, setValues] = useState<Record<string, unknown>>(() =>
-    Object.fromEntries(
-      fields.map((f) => [
-        f.name,
-        f.name === 'location' ? (readWeatherLocation(icon.data) ?? '') : extractString(icon.data, f.name),
-      ]),
-    ),
+    prefillFields(fields, icon.data),
   )
-  const [iconProcessing, setIconProcessing] = useState(false)
+  // 字段臂上报的本地处理 busy(nav 图标上传),期间禁保存
+  const [armBusy, setArmBusy] = useState(false)
   // nav:改网址后重新抓站点信息(图标候选随新网址刷新;名称已有值不覆盖——名称是
   // 用户的标签,与「图标覆盖」同为显式意图优先)。共享 hook,与新增抽屉一致。
   useSiteInfoAutofill(icon.type === 'nav', String(values['url'] ?? ''), setValues)
@@ -334,45 +328,8 @@ export function EditForm({
           }
         }}
       >
-        {fields.map((f) =>
-          f.name === 'symbol' ? (
-            <SymbolPicker
-              key={f.name}
-              value={String(values['symbol'] ?? '')}
-              onText={(v) => setField('symbol', v)}
-              onPick={(c) => {
-                setField('symbol', c.symbol)
-                setField('name', c.name) // 规范名自动填,换候选覆盖;name 框仍可手改
-              }}
-              placeholder={f.placeholder}
-            />
-          ) : f.name === 'location' ? (
-            <LocationPicker
-              key={f.name}
-              value={values[f.name] ? (values[f.name] as WeatherLocation) : null}
-              onChange={(loc) => setField('location', loc)}
-              placeholder={f.placeholder}
-            />
-          ) : f.name === 'icon' ? (
-            <IconPicker
-              key={f.name}
-              url={String(values['url'] ?? '')}
-              value={String(values['icon'] ?? '')}
-              onChange={(v) => setField('icon', v)}
-              onProcessingChange={setIconProcessing}
-              placeholder={f.placeholder}
-            />
-          ) : (
-            <input
-              key={f.name}
-              value={(values[f.name] as string) ?? ''}
-              onChange={(e) => setField(f.name, e.target.value)}
-              placeholder={f.placeholder}
-              aria-label={f.label}
-              className="w-full px-3 py-2 rounded-lg bg-white/20 text-white placeholder-white/50 text-sm outline-none focus:ring-2 focus:ring-accent"
-            />
-          ),
-        )}
+        {/* 字段渲染唯一分派点(臂表),add/edit 两路共用,见 editorFields.tsx */}
+        <EditorFields fields={fields} values={values} setField={setField} onBusyChange={setArmBusy} />
         {/* 胶囊按钮族:取消=次级(min-h-8 圆胶囊 + 焦点环),保存=主按钮语汇
             (bg-accent/90 圆胶囊,对齐 AddDrawer;active:bg-accent/75 按压变暗反馈) */}
         <div className="flex gap-2 justify-end pt-0.5">
@@ -388,14 +345,14 @@ export function EditForm({
           </button>
           <button
             type="button"
-            disabled={busy || iconProcessing}
+            disabled={busy || armBusy}
             onClick={(e) => {
               e.stopPropagation()
-              onSave(buildIconData(fields, values))
+              onSave(serializeFields(fields, values))
             }}
             className="px-3.5 py-1.5 min-h-8 rounded-full bg-accent/90 hover:bg-accent active:bg-accent/75 disabled:opacity-50 text-white text-xs focus-visible:outline-2 focus-visible:outline-white/60"
           >
-            {iconProcessing ? '处理中…' : '保存'}
+            {armBusy ? '处理中…' : '保存'}
           </button>
         </div>
       </div>
