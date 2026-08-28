@@ -1,70 +1,54 @@
 import { useState } from 'react'
 import type { ServerMonEntry, ServerMonHistoryPoint } from 'chrome-tab-shared'
+import { normalizeTab, paneState } from '../lib/detailModalState'
 import { timeAgo } from '../lib/timeAgo'
 import { fmtBytes, fmtUptime, useServerHistory, useServers } from '../hooks/useServers'
-import ModalShell from './ModalShell'
+import DetailModal from './DetailModal'
 
 /**
  * 服务器状态详情 Modal(见 CONTEXT.md「服务器状态」;ADR-0022「更多」标头唯一入口):
  * tab 按机器分页(thinkpad/aliyun),页内 = 概览数字块(uptime/CPU/负载/内存/磁盘/
  * 失败单元)+ CPU·内存 24h sparkline(10min 采样曲线,SVG polyline 零依赖)+
  * 服务/容器状态清单两列(timer 附上次触发结果)。离线降级:显示旧快照 + 陈旧
- * 标注(宁旧勿空,与后端口径一致);从未取到则整页「离线」。
+ * 标注(宁旧勿空,与后端口径一致);从未取到则整页「离线」。容器:详情 Modal
+ * 骨架(ADR-0040;无标头,机器页 pane 自持——快照/曲线双 query 在 pane 内,
+ * 清单空态走骨架状态机并带重试)。
  */
 export default function ServersModal({ onClose }: { onClose: () => void }) {
-  const { data, isError } = useServers()
+  const { data, isError, isPending, isFetching, refetch } = useServers()
   const entries = data ?? []
-  // tab 初值随首波数据回落(entries 到达前 active 为 undefined → 空态)
+  // tab 初值随首波数据回落(entries 到达前 active 为 undefined → 空态;空列 =
+  // 无 tab 形态由骨架吸收)
   const [tab, setTab] = useState('')
-  const active = entries.find((e) => e.machine === tab) ?? entries[0]
+  const tabs = entries.map((e) => ({ key: e.machine, label: e.machine }))
+  const active = entries.find((e) => e.machine === normalizeTab(tabs, tab))
   const hist = useServerHistory(active?.machine ?? '')
 
   return (
-    <ModalShell onClose={onClose} ariaLabel="服务器状态详情" width="2xl" className="p-5">
-      {entries.length === 0 ? (
-        // 空态判据是快照请求(useServers)的成败:后端不可达 vs 真未配置
-        <EmptyState text={isError ? '服务器数据不可用' : '暂无监控机器(未配置 exporter)'} />
-      ) : (
-        <>
-          <TabBar
-            machines={entries.map((e) => e.machine)}
-            active={active!.machine}
-            onSwitch={setTab}
-          />
-          <MachinePane entry={active!} points={hist.data?.points ?? []} />
-        </>
-      )}
-    </ModalShell>
-  )
-}
-
-function TabBar({
-  machines,
-  active,
-  onSwitch,
-}: {
-  machines: string[]
-  active: string
-  onSwitch: (m: string) => void
-}) {
-  return (
-    <div role="tablist" className="flex gap-5 border-b border-white/10 px-1">
-      {machines.map((m) => (
-        <button
-          key={m}
-          role="tab"
-          aria-selected={m === active}
-          onClick={() => onSwitch(m)}
-          className={`pb-2 text-sm transition-colors ${
-            m === active
-              ? 'text-white border-b-2 border-white/80'
-              : 'text-white/50 hover:text-white/80 border-b-2 border-transparent'
-          }`}
-        >
-          {m}
-        </button>
-      ))}
-    </div>
+    <DetailModal
+      onClose={onClose}
+      ariaLabel="服务器状态详情"
+      width="2xl"
+      className="p-5"
+      busy={isFetching}
+      tabs={tabs}
+      tab={active?.machine}
+      onTabChange={setTab}
+      pane={
+        entries.length > 0
+          ? null
+          : paneState({
+              isError,
+              isPending,
+              isEmpty: true,
+              emptyMessage: '暂无监控机器(未配置 exporter)',
+              errorMessage: '服务器数据不可用',
+            })
+      }
+      onRetry={() => void refetch()}
+    >
+      {active && <MachinePane entry={active} points={hist.data?.points ?? []} />}
+    </DetailModal>
   )
 }
 
@@ -76,7 +60,9 @@ function MachinePane({
   points: ServerMonHistoryPoint[]
 }) {
   const s = entry.snapshot
-  if (!s) return <EmptyState text={`${entry.machine} 离线(无历史快照)`} />
+  if (!s)
+    // 空态口径对齐 QueryPane(py-6/50;ADR-0040 ④ 的视觉统一)
+    return <div className="py-6 text-center text-sm text-white/50">{entry.machine} 离线(无历史快照)</div>
   const online = entry.status === 'online'
   const memUsed = 1 - s.memAvail / s.memTotal
   const diskUsed = 1 - s.diskFree / s.diskTotal
@@ -210,7 +196,3 @@ const stateTone = (v: { state: string; result?: string }) =>
 
 const stateText = (v: { state: string; result?: string }) =>
   v.result && v.result !== 'success' ? `${v.state}(${v.result})` : v.state
-
-function EmptyState({ text }: { text: string }) {
-  return <div className="py-8 text-center text-sm text-white/40">{text}</div>
-}

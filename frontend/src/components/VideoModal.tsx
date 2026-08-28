@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { VideoBlogger, VideoFeedItem } from 'chrome-tab-shared'
 import {
   useAddVideoBlogger,
@@ -12,9 +12,10 @@ import {
   useVideoCategories,
   useVideoFeed,
 } from '../hooks/useVideoUpdates'
+import { normalizeTab, paneState } from '../lib/detailModalState'
 import { timeAgo } from '../lib/timeAgo'
 import ConfirmButton from './ConfirmButton'
-import ModalShell from './ModalShell'
+import DetailModal from './DetailModal'
 
 /** 新视频红点窗口(与 VideoIconBody 同口径):发布 <24h,时间驱动满窗自隐。 */
 const NEW_WINDOW_S = 24 * 60 * 60
@@ -37,7 +38,8 @@ const platformLabel = (p: string) => (p === 'youtube' ? 'YouTube' : 'B站')
  * 直连,B站 hdslb 防盗链实测自家域 Referer 必 403)+ 右下时长角标(无时长则无角标,
  * 无 key 降级口径)+ 标题两行截断 + 博主名·相对时间,整条外跳原平台。管理 tab:分类
  * 增删改排序(删 → 博主回未分类)与博主添加/归类/删除(status='failing' 标红)。
- * 容器:ModalShell 统一壳(ADR-0031)。
+ * 容器:详情 Modal 骨架(ADR-0040;管理里删掉当前分类后 tab 悬空回落「全部」,
+ * 管理 tab 主体自持——feed 失败仍可达)。
  */
 type Tab = 'all' | 'uncategorized' | `cat-${number}` | 'manage'
 
@@ -45,11 +47,6 @@ export default function VideoModal({ onClose }: { onClose: () => void }) {
   const feed = useVideoFeed()
   const cats = useVideoCategories()
   const [tab, setTab] = useState<Tab>('all')
-
-  // spec:Modal 打开时 refetch(打开即对账最新视频;refetch 引用稳定,空依赖安全)
-  useEffect(() => {
-    void feed.refetch()
-  }, [])
 
   const videos = feed.data ?? []
   const categories = cats.data?.categories ?? []
@@ -61,83 +58,51 @@ export default function VideoModal({ onClose }: { onClose: () => void }) {
     ...categories.map((c) => ({ key: `cat-${c.id}` as Tab, label: c.name })),
     { key: 'manage', label: '管理' },
   ]
+  const active = normalizeTab(tabs, tab)
   const shown =
-    tab === 'all'
+    active === 'all'
       ? videos
-      : tab === 'uncategorized'
+      : active === 'uncategorized'
         ? videos.filter((v) => v.categoryId === null)
-        : tab.startsWith('cat-')
-          ? videos.filter((v) => v.categoryId === Number(tab.slice(4)))
+        : active.startsWith('cat-')
+          ? videos.filter((v) => v.categoryId === Number(active.slice(4)))
           : []
 
   return (
-    <ModalShell onClose={onClose} ariaLabel="视频更新" className="p-6">
-
-      <div className="mb-3 flex items-center gap-2">
-          <h2 className="text-lg font-semibold text-white/90">视频更新</h2>
-          <button
-            type="button"
-            onClick={() => void feed.refetch()}
-            disabled={feed.isFetching}
-            aria-label="刷新"
-            title="刷新"
-            className="w-6 h-6 rounded-full bg-white/20 text-white/80 hover:bg-white/40 focus-visible:outline-2 focus-visible:outline-white/60 flex items-center justify-center text-sm disabled:opacity-50"
-          >
-            <span className={feed.isFetching ? 'animate-spin inline-block' : 'inline-block'}>↻</span>
-          </button>
-        </div>
-
-        {/* tab 按钮不可加 -mb-px 压线:overflow-x-auto 会把 overflow-y 计算为 auto,1px 溢出即冒垂直滚动条。
-            横条走 modal-scroll 雾胶囊(与面板同语汇,占位 8px 随行盒长高、下划线与分隔线同盒不脱开)——
-            源多时常态溢出,横滚是主交互,藏条(eee92a5f 曾走 no-scrollbar)会失去拖拽与可滚提示 */}
-        <div role="tablist" aria-label="视频视图" className="flex gap-4 border-b border-white/10 mb-3 overflow-x-auto modal-scroll">
-          {tabs.map(({ key, label }) => (
-            <button
-              key={key}
-              role="tab"
-              aria-selected={tab === key}
-              type="button"
-              onClick={() => setTab(key)}
-              className={
-                'pb-1.5 text-sm border-b-2 whitespace-nowrap transition focus-visible:outline-2 focus-visible:outline-white/60 ' +
-                (tab === key
-                  ? 'text-accent border-accent'
-                  : 'text-white/60 border-transparent hover:text-white/85')
-              }
-            >
-              {label}
-            </button>
+    <DetailModal
+      onClose={onClose}
+      ariaLabel="视频更新"
+      title="视频更新"
+      className="p-6"
+      refresh={() => void feed.refetch()}
+      busy={feed.isFetching}
+      tabs={tabs}
+      tab={active}
+      onTabChange={setTab}
+      onOpen={() => void feed.refetch()}
+      pane={
+        active === 'manage'
+          ? null
+          : paneState({
+              isError: feed.isError,
+              isPending: feed.isPending,
+              isEmpty: shown.length === 0,
+              emptyMessage:
+                videos.length === 0 ? '还没有博主——去「管理」粘贴主页链接添加' : '这个分类还没有视频',
+              errorMessage: '视频流刷新失败',
+            })
+      }
+    >
+      {active === 'manage' ? (
+        <ManagePane />
+      ) : (
+        <ul className="space-y-1">
+          {shown.map((v) => (
+            <VideoRow key={v.id} video={v} />
           ))}
-        </div>
-
-        {feed.isError ? (
-          <div className="flex items-center gap-3 py-4">
-            <span className="text-sm text-white/60">视频流刷新失败</span>
-            <button
-              type="button"
-              onClick={() => void feed.refetch()}
-              disabled={feed.isFetching}
-              className="border border-white/30 text-white/80 rounded-md px-2 py-0.5 text-xs hover:border-accent hover:text-accent disabled:opacity-50"
-            >
-              重试
-            </button>
-          </div>
-        ) : tab === 'manage' ? (
-          <ManagePane />
-        ) : videos.length === 0 ? (
-          <div className="text-sm text-white/50 py-6 text-center">
-            还没有博主——去「管理」粘贴主页链接添加
-          </div>
-        ) : shown.length === 0 ? (
-          <div className="text-sm text-white/50 py-6 text-center">这个分类还没有视频</div>
-        ) : (
-          <ul className="space-y-1">
-            {shown.map((v) => (
-              <VideoRow key={v.id} video={v} />
-            ))}
-          </ul>
-        )}
-    </ModalShell>
+        </ul>
+      )}
+    </DetailModal>
   )
 }
 
@@ -238,7 +203,11 @@ function ManagePane() {
                       renameCategory.mutate({ id: c.id, name: renameDraft.trim() })
                       setRenamingId(null)
                     }
-                    if (e.key === 'Escape') setRenamingId(null)
+                    if (e.key === 'Escape') {
+                      // 取消重命名的 Esc 不得冒泡到 escStack 把整个 Modal 关掉(ADR-0040 漂移⑦)
+                      e.stopPropagation()
+                      setRenamingId(null)
+                    }
                   }}
                   onBlur={() => setRenamingId(null)}
                   className="flex-1 min-w-0 rounded-lg bg-white/10 px-2 py-1 text-sm text-white/90 outline-none focus:ring-1 focus:ring-accent"
@@ -292,7 +261,14 @@ function ManagePane() {
           <input
             value={catDraft}
             onChange={(e) => setCatDraft(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && submitCategory()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submitCategory()
+              // Esc 就地清草稿,不冒泡到 escStack 关 Modal(ADR-0040 漂移⑦,同重命名 input)
+              if (e.key === 'Escape') {
+                e.stopPropagation()
+                setCatDraft('')
+              }
+            }}
             placeholder="新分类名称"
             className="flex-1 min-w-0 rounded-xl bg-white/10 px-3 py-2 text-sm text-white/90 placeholder:text-white/35 outline-none focus:ring-1 focus:ring-accent"
           />
@@ -327,7 +303,14 @@ function ManagePane() {
           <input
             value={urlDraft}
             onChange={(e) => setUrlDraft(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && submitBlogger()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submitBlogger()
+              // Esc 就地清草稿,不冒泡到 escStack 关 Modal(ADR-0040 漂移⑦,同重命名 input)
+              if (e.key === 'Escape') {
+                e.stopPropagation()
+                setUrlDraft('')
+              }
+            }}
             placeholder={addBlogger.isPending ? '解析博主信息…' : 'https://www.youtube.com/@… 或 https://space.bilibili.com/…'}
             disabled={addBlogger.isPending}
             className="flex-1 min-w-0 rounded-xl bg-white/10 px-3 py-2 text-sm text-white/90 placeholder:text-white/35 outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
