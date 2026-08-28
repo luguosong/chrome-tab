@@ -1,31 +1,20 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { get, type EditorField, type IconTypeDefinition } from '../lib/iconTypeRegistry'
-import StockIconBody from './StockIcon'
-import WeatherIconBody from './WeatherIcon'
-import ChangelogIconBody from './ChangelogIcon'
-import AiHotIconBody from './AiHotIcon'
-import TodoIconBody from './TodoIcon'
-import VideoIconBody from './VideoIcon'
-import ModelIconBody from './ModelIcon'
-import NewsIconBody from './NewsIcon'
-import TrendingIconBody from './TrendingIcon'
-import ServersIconBody from './ServersIcon'
 import LocationPicker from './LocationPicker'
 import SymbolPicker from './SymbolPicker'
-import Tile from './Tile'
 import ConfirmButton from './ConfirmButton'
+import { ICON_TYPE_UI } from './iconTypeUi'
 import type { Icon as IconModel } from '../lib/types'
 import { useEditMode } from '../context/EditModeContext'
 import { useGroupGesture } from '../context/GroupGestureContext'
-import { GROUP_PAD_PX, LABEL_GAP_PX } from '../lib/iconLayout'
-import { extractString, buildIconData, navIconSrc } from '../lib/iconData'
+import { LABEL_GAP_PX } from '../lib/iconLayout'
+import { extractString, buildIconData } from '../lib/iconData'
 import IconPicker from './IconPicker'
 import { useSiteInfoAutofill } from '../api/siteInfo'
-import { groupMembers } from '../lib/groupReducer'
 import { readWeatherLocation, type WeatherLocation } from '../lib/weather'
-import { useConfig, useDeleteIcon, useDissolveGroup, useUpdateIconData } from '../api/config'
+import { useDeleteIcon, useDissolveGroup, useUpdateIconData } from '../api/config'
 import { ApiError } from '../api/client'
 
 /**
@@ -34,16 +23,12 @@ import { ApiError } from '../api/client'
  * 所有图标一律占 1 格(ADR-0016 单档化),且统一「上块下字」结构(ADR-0016 注记
  * 2026-08-23b):squircle 玻璃块(TileFrame,同一 faviconPx 边长推导)+ 外置一行文字
  * (IconLabel,同一 labelSize 行高)——视觉尺寸一致由共享几何保证,不靠各类型目测对齐。
- *   - nav:favicon 块 + 名称行(直接渲染,iOS 主屏式)
- *   - group:iOS 文件夹式——块内成员 favicon 3×2 迷你预览(GroupBody,ADR-0011)+ 名称行
- *   - stock / weather / changelog:专属 body(StockIcon / WeatherIcon / ChangelogIcon)
- *     自行组装同款 Tile(块内主体 / 数据行,见 Tile.tsx),本组件不再包玻璃卡
+ * 各类型图标块由 iconTypeUi 静态 adapter 选择;本组件只保留共享外壳语义。
  *
- * 点击行为(按 detail 字段派发 —— ADR-0001 契约:容器形态由类型定义声明,
- * 新增复用 modal 的类型无需改本组件):
+ * 点击行为(按 adapter 的可选详情 renderer + 入口策略派发):
  *   - 编辑模式:不触发任何详情/跳转(角标操作优先,spec user story 29)
- *   - detail='none':nav 渲染为 <a>(新标签打开目标 URL,spec user story 13)
- *   - detail='modal':单格类型查看态点击 → onOpenDetail(icon),父组件按 detail 渲染面板;
+ *   - nav:渲染为 <a>(新标签打开目标 URL,spec user story 13)
+ *   - block 入口:查看态点击 → onOpenDetail(icon),父组件渲染 adapter 详情;
  *     跨格大 tile(aihot/changelog,ADR-0022)整块点击无操作,openDetail 下发给
  *     body 的「更多」按钮直调——详情唯一入口
  *
@@ -73,6 +58,7 @@ export default function Icon({
   overlay?: boolean
 }) {
   const def = get(icon.type)
+  const ui = ICON_TYPE_UI[icon.type]
   const { editing } = useEditMode()
   const delIcon = useDeleteIcon()
   const editIcon = useUpdateIconData()
@@ -113,30 +99,28 @@ export default function Icon({
       : null),
   }
 
-  const name = extractString(icon.data, 'name')
   const url = icon.type === 'nav' ? extractString(icon.data, 'url') : ''
-  // 渲染优先级:图标覆盖(data.icon)> 派生 favicon(navIconSrc 统一口径)
-  const favicon = icon.type === 'nav' ? navIconSrc(icon.data) : ''
 
-  // 点击派发(ADR-0001 契约:容器形态由类型定义声明):
+  // 点击派发(UI adapter 契约:可选详情 renderer 决定有无详情,detailEntry 决定入口):
   //   - group:点开分组弹层(票 08)——任意模式(编辑态也要先开弹层才能组内排序)
-  //   - 其余类型:编辑模式一律不触发;查看模式按 detail 字段
-  //     - detail='none':nav 渲染为 <a> 当前标签打开(保留原生中键/右键菜单)
-  //     - detail='modal':查看态开详情;整块点击(detailEntry 缺省 'block'——单格类型
-  //       与跨格无滚动主体的类型如天气 3×1);跨格滚动大 tile(detailEntry='header',
-  //       ADR-0022)= 块内「更多」按钮直调(openDetail 下发给 body),整块点击无操作
+  //   - nav:查看模式渲染为 <a> 当前标签打开(保留原生中键/右键菜单)
+  //   - 其余类型:编辑模式一律不触发;查看模式按 detailEntry 开详情
+  //     - block:整块点击(单格类型与跨格无滚动主体的天气 3×1)
+  //     - header:跨格滚动大 tile 的块内「更多」按钮直调(openDetail 下发给 body),
+  //       整块点击无操作(ADR-0022)
   const isNavLink = icon.type === 'nav' && !editing
   const Tag = isNavLink ? 'a' : 'div'
   const linkProps = isNavLink
     ? { href: url }
     : {}
-  const hasPanel = def?.detail === 'modal'
+  const hasPanel = ui.detail !== undefined
   // 组图标点击 = 开弹层(票 08):任意模式(编辑态开弹层才能组内排序),不与编辑态互斥
   const onGroupOpen = icon.type === 'group' && onOpenGroup ? () => onOpenGroup(icon) : undefined
   const openDetail = !editing && hasPanel && onOpenDetail ? () => onOpenDetail(icon) : undefined
-  const onClick = onGroupOpen ?? (def?.detailEntry === 'header' ? undefined : openDetail)
+  const onClick = onGroupOpen ?? (ui.detailEntry === 'header' ? undefined : openDetail)
 
   const interactive = isNavLink || onClick !== undefined
+  const Body = ui.body
 
   return (
     <Tag
@@ -164,47 +148,7 @@ export default function Icon({
         (overlay ? ' shadow-2xl ring-2 ring-accent cursor-grabbing' : '')
       }
     >
-      {icon.type === 'stock' ? (
-        <StockIconBody icon={icon} overlay={overlay} />
-      ) : icon.type === 'weather' ? (
-        <WeatherIconBody icon={icon} overlay={overlay} />
-      ) : icon.type === 'group' ? (
-        /* 分组(ADR-0011,ADR-0015 容器化):iOS 文件夹式——玻璃块内成员 favicon 迷你预览,
-           名称外置下方。点组打开弹层看全部成员 = 票 08。 */
-        <GroupBody icon={icon} overlay={overlay} />
-      ) : icon.type === 'changelog' ? (
-        <ChangelogIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
-      ) : icon.type === 'aihot' ? (
-        <AiHotIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
-      ) : icon.type === 'todo' ? (
-        <TodoIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
-      ) : icon.type === 'video' ? (
-        <VideoIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
-      ) : icon.type === 'model' ? (
-        <ModelIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
-      ) : icon.type === 'news' ? (
-        <NewsIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
-      ) : icon.type === 'trending' ? (
-        <TrendingIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
-      ) : icon.type === 'servers' ? (
-        <ServersIconBody icon={icon} overlay={overlay} onOpenDetail={openDetail} />
-      ) : (
-        <>
-          {/* nav:裸 favicon 直出(ADR-0015 注记 2026-08-23c,回归 ADR-0013):Tile bare
-              不渲染玻璃底板,几何骨架(块边长/收缩/hover 缩放)与名称行照常;favicon 撑满
-              块(pad=0),自身圆角 22% 即图形圆角;favicon 缺失留空占位(画格仍占位)。 */}
-          <Tile label={name} overlay={overlay} bare>
-            {favicon && (
-              <img
-                src={favicon}
-                alt=""
-                referrerPolicy="no-referrer"
-                className="w-full h-full rounded-[22%] object-contain"
-              />
-            )}
-          </Tile>
-        </>
-      )}
+      <Body icon={icon} overlay={overlay} onOpenDetail={openDetail} />
 
       {/* 分组解散失败提示(容量 409「先移出部分图标」等):组图标上方小气泡,短暂显示 */}
       {icon.type === 'group' && dissolve.isError && (
@@ -235,46 +179,6 @@ export default function Icon({
 }
 
 // ── 辅助 ──────────────────────────────────────────────────────────────────
-
-/**
- * 分组图标内容(ADR-0011,ADR-0015 修订):iOS 文件夹式——玻璃块内 3×2 网格,按组内序
- * 取**前 6 个**成员的 favicon(不足留空)。取 3×2 而非 iOS 原版 3×3:块受画格高度所限
- * (正方形块 ~48px),3×3 每子仅约 10px 不可辨认,3×2 每子约 19px 是辨认下限;块内
- * pad 用小固定值(3px,不随 scale),为子图标争取空间(iOS 文件夹块内边距同样小于
- * app 图标)。「上块下字」组装归 Tile(padPx=GROUP_PAD_PX,名称行随组 data)。
- * 成员从聚合缓存按 parentId 派生(groupMembers)。
- * 在组件内(而非 Icon 主体)调 useConfig:仅 group 类型挂载时才订阅,['config'] 命中缓存
- * 无网络开销;overlay 拖拽幽灵同路径渲染(React 上下文随 React 树,不随 DOM)。
- */
-function GroupBody({ icon, overlay }: { icon: IconModel; overlay: boolean }) {
-  const { data } = useConfig()
-  const members = useMemo(
-    () => groupMembers(data?.icons ?? [], icon.id).slice(0, 6),
-    [data?.icons, icon.id],
-  )
-  return (
-    <Tile label={extractString(icon.data, 'name')} padPx={GROUP_PAD_PX} overlay={overlay}>
-      <div className="grid w-full h-full grid-cols-3 grid-rows-2 place-items-center gap-[6%]">
-        {members.map((m) => {
-          // 组成员只能是 nav(后端把关),但防御式兜底非 nav 的占位灰块;成员图标同样
-          // 走 navIconSrc(覆盖 > 派生),与网格渲染一致
-          const src = m.type === 'nav' ? navIconSrc(m.data) : ''
-          return src ? (
-            <img
-              key={m.id}
-              src={src}
-              alt=""
-              referrerPolicy="no-referrer"
-              className="w-full h-full rounded-[2px] object-contain"
-            />
-          ) : (
-            <span key={m.id} className="w-full h-full rounded-[2px] bg-white/20" />
-          )
-        })}
-      </div>
-    </Tile>
-  )
-}
 
 /**
  * 编辑模式角标集群(右上角):编辑配置 ✎ + 删除 ×。
