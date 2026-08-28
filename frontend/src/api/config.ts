@@ -3,6 +3,7 @@ import { apiFetch } from './client'
 import type { Config, Icon, IconTypeId, LayoutSettings, Page } from '../lib/types'
 import { moveIcon, type MoveAction } from '../lib/iconReducer'
 import { dissolveGroup, mergeIcons, moveIntoGroup, type MergeAction } from '../lib/groupReducer'
+import { optimisticConfigCallbacks } from '../lib/configMutation'
 import type { WireConfig } from '../lib/mirror/backup'
 
 /** Page 重排请求项(对齐后端 PageService.ReorderItem)。 */
@@ -55,7 +56,7 @@ export async function fetchConfigOnce(): Promise<Config> {
  * useLayoutDraft 乐观写 ['config'] 缓存实现,本 hook 仅负责持久化。
  *
  * 失败兜底 = onSettled 重拉服务端权威值 + useLayoutDraft 干净态 reseed,
- * 幻影预览随之还原。**不**照搬 useDeleteIcon 的 onMutate 快照/onError 还原:
+ * 幻影预览随之还原。**不**走 configMutation 工厂的 onMutate 快照/onError 还原:
  * 那边快照与乐观写同在 onMutate 内有序完成,这边乐观写发生在 apply(松手
  * 之前),onMutate 抓到的已是草稿值,还原等于还原幻影。选项级回调在组件
  * 卸载后仍执行——抽屉 close() 即 commit 即卸载,失败路径必须活过卸载。
@@ -94,8 +95,8 @@ export function useReplaceConfig() {
 }
 
 // ── Icon 写操作（issue 05 编辑模式:删除）───────────────────────────────────
-// 乐观更新模式（react-query onMutate）:先改 ['config'].icons 到目标态,失败回滚快照,
-// 完成后 invalidate 拉取权威数据。容量超限等约束由服务端 409 把关,前端乐观失败即回滚。
+// 乐观更新走 lib/configMutation 工厂(取消在途→快照→乐观写→失败还原→落定重拉)。
+// 容量超限等约束由服务端 409 把关,前端乐观失败即回滚。
 
 /** 删除图标:乐观从缓存移除,失败回滚。DELETE 返回 204 无体。 */
 export function useDeleteIcon() {
@@ -103,23 +104,10 @@ export function useDeleteIcon() {
   return useMutation({
     mutationFn: (id: number) =>
       apiFetch<void>(`/api/icons/${id}`, { method: 'DELETE' }),
-    onMutate: async (id) => {
-      await qc.cancelQueries({ queryKey: ['config'] })
-      const prev = qc.getQueryData<Config>(['config'])
-      if (prev) {
-        qc.setQueryData<Config>(['config'], {
-          ...prev,
-          icons: prev.icons.filter((i) => i.id !== id),
-        })
-      }
-      return { prev }
-    },
-    onError: (_err, _id, ctx) => {
-      if (ctx?.prev) qc.setQueryData<Config>(['config'], ctx.prev)
-    },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: ['config'] })
-    },
+    ...optimisticConfigCallbacks<number>(qc, (prev, id) => ({
+      ...prev,
+      icons: prev.icons.filter((i) => i.id !== id),
+    })),
   })
 }
 
@@ -136,23 +124,13 @@ export function useUpdateIconData() {
         method: 'PATCH',
         body: JSON.stringify({ data: vars.data }),
       }),
-    onMutate: async ({ id, data }) => {
-      await qc.cancelQueries({ queryKey: ['config'] })
-      const prev = qc.getQueryData<Config>(['config'])
-      if (prev) {
-        qc.setQueryData<Config>(['config'], {
-          ...prev,
-          icons: prev.icons.map((i) => (i.id === id ? { ...i, data } : i)),
-        })
-      }
-      return { prev }
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev) qc.setQueryData<Config>(['config'], ctx.prev)
-    },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: ['config'] })
-    },
+    ...optimisticConfigCallbacks<{ id: number; data: Record<string, unknown> | null }>(
+      qc,
+      (prev, { id, data }) => ({
+        ...prev,
+        icons: prev.icons.map((i) => (i.id === id ? { ...i, data } : i)),
+      }),
+    ),
   })
 }
 
@@ -212,25 +190,16 @@ export function useReorderPages() {
         method: 'PATCH',
         body: JSON.stringify(items),
       }),
-    onMutate: async (items) => {
-      await qc.cancelQueries({ queryKey: ['config'] })
-      const prev = qc.getQueryData<Config>(['config'])
-      if (prev) {
-        const order = new Map(items.map((it) => [it.id, it.sortOrder]))
-        const pages = [...prev.pages].sort(
+    ...optimisticConfigCallbacks<ReorderItem[]>(qc, (prev, items) => {
+      const order = new Map(items.map((it) => [it.id, it.sortOrder]))
+      return {
+        ...prev,
+        pages: [...prev.pages].sort(
           (a, b) =>
             (order.get(a.id) ?? a.sortOrder) - (order.get(b.id) ?? b.sortOrder),
-        )
-        qc.setQueryData<Config>(['config'], { ...prev, pages })
+        ),
       }
-      return { prev }
-    },
-    onError: (_err, _items, ctx) => {
-      if (ctx?.prev) qc.setQueryData<Config>(['config'], ctx.prev)
-    },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: ['config'] })
-    },
+    }),
   })
 }
 
@@ -286,32 +255,19 @@ export function useMoveIcon() {
         method: 'PATCH',
         body: JSON.stringify(vars),
       }),
-    onMutate: async (vars) => {
-      await qc.cancelQueries({ queryKey: ['config'] })
-      const prev = qc.getQueryData<Config>(['config'])
-      if (prev) {
-        qc.setQueryData<Config>(['config'], {
-          ...prev,
-          icons:
-            vars.parentId != null
-              ? // toIndex 透传:组内重排按夹紧位序算乐观态(票 08);入组路径后端
-                // 忽略 toIndex、恒落末尾,reducer 的夹紧对「已在组」才生效,语义无冲突
-                moveIntoGroup(prev.icons, {
-                  id: vars.id,
-                  groupId: vars.parentId,
-                  toIndex: vars.toIndex,
-                })
-              : moveIcon(prev.icons, vars),
-        })
-      }
-      return { prev }
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev) qc.setQueryData<Config>(['config'], ctx.prev)
-    },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: ['config'] })
-    },
+    ...optimisticConfigCallbacks<MoveIconVars>(qc, (prev, vars) => ({
+      ...prev,
+      icons:
+        vars.parentId != null
+          ? // toIndex 透传:组内重排按夹紧位序算乐观态(票 08);入组路径后端
+            // 忽略 toIndex、恒落末尾,reducer 的夹紧对「已在组」才生效,语义无冲突
+            moveIntoGroup(prev.icons, {
+              id: vars.id,
+              groupId: vars.parentId,
+              toIndex: vars.toIndex,
+            })
+          : moveIcon(prev.icons, vars),
+    })),
   })
 }
 
@@ -331,25 +287,14 @@ export function useMergeIcons() {
         method: 'POST',
         body: JSON.stringify(vars),
       }),
-    onMutate: async (vars) => {
-      await qc.cancelQueries({ queryKey: ['config'] })
-      const prev = qc.getQueryData<Config>(['config'])
-      if (prev) {
-        // 临时负数组 id:仅存在于乐观窗口,invalidate 后由服务端分配的真 id 替换
-        const tempGroupId = -Date.now()
-        qc.setQueryData<Config>(['config'], {
-          ...prev,
-          icons: mergeIcons(prev.icons, { ...vars, groupId: tempGroupId }),
-        })
+    ...optimisticConfigCallbacks<Omit<MergeAction, 'groupId'>>(qc, (prev, vars) => {
+      // 临时负数组 id:仅存在于乐观窗口,invalidate 后由服务端分配的真 id 替换
+      const tempGroupId = -Date.now()
+      return {
+        ...prev,
+        icons: mergeIcons(prev.icons, { ...vars, groupId: tempGroupId }),
       }
-      return { prev }
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev) qc.setQueryData<Config>(['config'], ctx.prev)
-    },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: ['config'] })
-    },
+    }),
   })
 }
 
@@ -363,22 +308,9 @@ export function useDissolveGroup() {
   return useMutation({
     mutationFn: (id: number) =>
       apiFetch<void>(`/api/icons/${id}/dissolve`, { method: 'POST' }),
-    onMutate: async (id) => {
-      await qc.cancelQueries({ queryKey: ['config'] })
-      const prev = qc.getQueryData<Config>(['config'])
-      if (prev) {
-        qc.setQueryData<Config>(['config'], {
-          ...prev,
-          icons: dissolveGroup(prev.icons, id),
-        })
-      }
-      return { prev }
-    },
-    onError: (_err, _id, ctx) => {
-      if (ctx?.prev) qc.setQueryData<Config>(['config'], ctx.prev)
-    },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: ['config'] })
-    },
+    ...optimisticConfigCallbacks<number>(qc, (prev, id) => ({
+      ...prev,
+      icons: dissolveGroup(prev.icons, id),
+    })),
   })
 }

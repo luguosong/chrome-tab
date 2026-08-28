@@ -45,6 +45,10 @@ _Avoid_: 主题/theme(指明暗模式,另一项独立设置)、图标缩放(已�
 控制抽屉「布局」tab 打开期间的「布局设置」暂存态:控件改动先落草稿并乐观写缓存实时预览,松手(pointerup/keyup/change)或关闭抽屉(Esc/遮罩/×,兜底)时整份 PUT 为权威值;PUT 失败还原服务端值,不留幻影预览。干净草稿(未改动)随服务端并发更新 reseed;一旦改动即脏,关抽屉时本端 LWW 胜出(ADR-0006)。实现载体:前端 `lib/layoutDraft.ts` 纯协议 + `hooks/useLayoutDraft.ts` 接线。
 _Avoid_: draft state、临时设置、未保存更改(用户视角无「保存」动作)。
 
+**乐观 mutation (Optimistic Mutation)**:
+config 写操作(删除/改配置/重排/移动/建组/解散)的缓存协议:取消在途读取 → 快照 → 乐观写目标态;失败还原快照,落定失效重拉服务端权威值——约束由服务端 409 把关,前端乐观失败即回滚。骨架单点于前端 `lib/configMutation.ts`(纯回调工厂,可测),各写 hook 仅声明 mutationFn 与乐观态算法;「布局草稿」的乐观写发生在松手前,不经此骨架。
+_Avoid_: 手抄 onMutate/onError/onSettled 三件套(漏取消在途或漏还原即乐观态污染)、绕过骨架的缓存直写。
+
 **图标类型 (Icon Type)**:
 类型注册表中的一个条目,声明该类图标:详情容器形态、是否单例、配置表单,以及摘要纯函数(ADR-0001 契约;网格渲染已由各类型专属 body 承接,该字段暂无消费方)。类型分基础与扩展两类。
 _Avoid_: 组件、widget、block。
