@@ -7,6 +7,7 @@ import { TtlCache } from './common'
 import type { Db } from './db'
 import type { AuthEnv } from './auth'
 import { BadRequest, ConflictError, fetchText, numericParam } from './common'
+import { makeTailQueue, upsertThenPrune } from './pollPersist'
 
 /**
  * 视频更新(博主投稿跟踪,CONTEXT.md「视频更新/博主/分类」;ADR-0023/0024)。
@@ -211,8 +212,8 @@ type BloggerRow = {
 }
 
 export class VideoUpdatesService {
-  /** 同 ChangelogService.exclusive:cron 全量轮询与首添投递排同一条链串行(B站错峰不被并发破坏)。 */
-  private tail: Promise<unknown> = Promise.resolve()
+  /** cron 全量轮询与首添投递排同一条链串行(B站错峰不被并发破坏;骨架收在 pollPersist,ADR-0039)。 */
+  private readonly queue = makeTailQueue()
 
   constructor(
     private readonly db: Db,
@@ -324,7 +325,7 @@ export class VideoUpdatesService {
       .returningAll()
       .executeTakeFirstOrThrow()
     // 首添即时首取:进尾链排队(不待下个整点、不阻塞本请求;失败由轮询口径自愈)
-    void this.enqueue(() => this.backfill(row.id))
+    void this.queue.enqueue(() => this.backfill(row.id))
     return this.toBloggerWire(row)
   }
 
@@ -397,12 +398,12 @@ export class VideoUpdatesService {
 
   /** cron 入口:全量轮询入队,失败只记日志(轮询即天然重试,禁密集重试)。 */
   pollAllQuietly(): void {
-    void this.enqueue(() => this.pollAll())
+    void this.queue.enqueue(() => this.pollAll())
   }
 
   /** 等待尾链排空(测试对账;生产无消费方)。 */
-  async idle(): Promise<void> {
-    await this.tail
+  idle(): Promise<void> {
+    return this.queue.idle()
   }
 
   private async pollAll() {
@@ -467,11 +468,14 @@ export class VideoUpdatesService {
     console.error(`视频更新(${b.platform}/${b.name})取数失败(连续 ${streak} 轮):`, e)
   }
 
-  /** 入库(upsert 防重)+ 同事务裁剪 50 条窗口;顺带用 feed 携带的作者名刷新博主名(免费信息)。 */
+  /** 入库(upsert 防重)+ 同事务裁剪 50 条窗口;顺带用 feed 携带的作者名刷新博主名(免费信息,
+   *  域后缀留事务外)。拉空 = 博主未投稿,算成功,取数层不因空而失败(ADR-0039)。 */
   private async saveVideos(b: BloggerRow, items: FeedVideo[]) {
-    await this.db.transaction().execute(async (tx) => {
-      for (const it of items) {
-        await tx
+    await upsertThenPrune(
+      this.db,
+      items,
+      (tx, it) =>
+        tx
           .insertInto('videos')
           .values({
             blogger_id: b.id,
@@ -484,31 +488,27 @@ export class VideoUpdatesService {
             created_at: nowIso(),
           })
           .onConflict((oc) => oc.columns(['blogger_id', 'platform_video_id']).doNothing())
-          .execute()
-      }
-      await tx
-        .deleteFrom('videos')
-        .where('blogger_id', '=', b.id)
-        .where('id', 'not in', (eb) =>
-          eb
-            .selectFrom('videos')
-            .select('id')
-            .where('blogger_id', '=', b.id)
-            .orderBy('published_at', 'desc')
-            .limit(KEEP_PER_BLOGGER),
-        )
-        .execute()
-    })
+          .execute(),
+      (tx) =>
+        tx
+          .deleteFrom('videos')
+          .where('blogger_id', '=', b.id)
+          .where('id', 'not in', (eb) =>
+            eb
+              .selectFrom('videos')
+              .select('id')
+              .where('blogger_id', '=', b.id)
+              // 裸列排序的前提是 videos.published_at NOT NULL(schema 承重);可空新鲜度列
+              // 的域抄本模板须改用 news 的 coalesce 口径,否则重演窗口逐轮翻转的裁剪键 bug
+              .orderBy('published_at', 'desc')
+              .limit(KEEP_PER_BLOGGER),
+          )
+          .execute(),
+    )
     const name = items[0]?.authorName
     if (name && name !== b.name) {
       await this.db.updateTable('video_bloggers').set({ name }).where('id', '=', b.id).execute()
     }
-  }
-
-  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.tail.then(fn, fn) // 前序失败不阻塞后来者
-    this.tail = run.catch(() => {})
-    return run
   }
 
   // —— 取数(YouTube / B站;全部经 deps.fetchText)——

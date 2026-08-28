@@ -8,6 +8,7 @@ import type { AuthEnv } from '../auth'
 import type { NewsDeps } from './sources/types'
 import { NEWS_GETTERS } from './sources'
 import { makeTranslationStore, type TranslationStore } from '../translate'
+import { makeTailQueue, upsertThenPrune } from '../pollPersist'
 import { prodTitleTranslator, TRANSLATED_SOURCES } from './translate'
 
 /**
@@ -27,8 +28,8 @@ const nowIso = () => new Date().toISOString()
 const VALID_SOURCES = new Set(NEWS_SOURCES.map((s) => s.id))
 
 export class NewsService {
-  /** 同 VideoUpdatesService.exclusive:勾选首取与 cron 轮询排一条链串行。 */
-  private tail: Promise<unknown> = Promise.resolve()
+  /** 勾选首取与 cron 轮询排一条链串行(骨架收在 pollPersist,ADR-0039)。 */
+  private readonly queue = makeTailQueue()
 
   /** 标题译文仓(ADR-0034):原文键 load/ensure,哈希派生与补译骨架收进 store。 */
   private readonly translations: TranslationStore
@@ -126,19 +127,19 @@ export class NewsService {
       }
     })
     // 仅新勾源即时首取(整份重抓会放大上游请求,且新源要排在重抓的冗余任务后面)
-    for (const source of added) void this.enqueue(() => this.pollSource(source))
+    for (const source of added) void this.queue.enqueue(() => this.pollSource(source))
     return this.feed(userId)
   }
 
   // —— 轮询(尾链内串行)——
 
   pollAllQuietly(): void {
-    void this.enqueue(() => this.pollAll())
+    void this.queue.enqueue(() => this.pollAll())
   }
 
   /** 等待尾链排空(测试对账)。 */
-  async idle(): Promise<void> {
-    await this.tail
+  idle(): Promise<void> {
+    return this.queue.idle()
   }
 
   private async pollAll() {
@@ -202,12 +203,14 @@ export class NewsService {
     }
   }
 
-  /** 入库(upsert 防重)+ 同事务裁剪 50 条窗口(按 id 降序,spec 口径)。 */
+  /** 入库(upsert 防重)+ 同事务裁剪 50 条窗口(按 id 降序,spec 口径)。空判在
+   *  pollSource(拉空 = 上游改版判失败,ADR-0039),走到这里必非空。 */
   private async saveItems(source: string, items: Array<{ id: string; title: string; url: string; publishedAt: number | null }>) {
-    if (items.length === 0) return
-    await this.db.transaction().execute(async (tx) => {
-      for (const it of items) {
-        await tx
+    await upsertThenPrune(
+      this.db,
+      items,
+      (tx, it) =>
+        tx
           .insertInto('news_items')
           .values({
             source,
@@ -218,24 +221,24 @@ export class NewsService {
             created_at: nowIso(),
           })
           .onConflict((oc) => oc.columns(['source', 'item_id']).doNothing())
-          .execute()
-      }
-      await tx
-        .deleteFrom('news_items')
-        .where('source', '=', source)
-        .where('id', 'not in', (eb) =>
-          eb
-            .selectFrom('news_items')
-            .select('id')
-            .where('source', '=', source)
-            // 裁剪键与 feed 排序同口径(coalesce 数值比较):聚合源多 feed 拼接时按新鲜度
-            // 而非插入序保留,窗口稳定不逐轮翻转(裸 id 会把首个 feed 的条目整批删光)
-            .orderBy(sql`coalesce(published_at, cast(strftime('%s', created_at) as integer))`, 'desc')
-            .orderBy('id', 'desc')
-            .limit(KEEP_PER_SOURCE),
-        )
-        .execute()
-    })
+          .execute(),
+      (tx) =>
+        tx
+          .deleteFrom('news_items')
+          .where('source', '=', source)
+          .where('id', 'not in', (eb) =>
+            eb
+              .selectFrom('news_items')
+              .select('id')
+              .where('source', '=', source)
+              // 裁剪键与 feed 排序同口径(coalesce 数值比较):聚合源多 feed 拼接时按新鲜度
+              // 而非插入序保留,窗口稳定不逐轮翻转(裸 id 会把首个 feed 的条目整批删光)
+              .orderBy(sql`coalesce(published_at, cast(strftime('%s', created_at) as integer))`, 'desc')
+              .orderBy('id', 'desc')
+              .limit(KEEP_PER_SOURCE),
+          )
+          .execute(),
+    )
   }
 
   /** 英文源补译(ADR-0029):扫该源池内缺译文标题 → 批量译 → 写哈希表;失败仅 warn
@@ -257,12 +260,6 @@ export class NewsService {
     } catch (e) {
       console.warn(`新闻源 ${source} 标题译制失败,保持英文:`, e)
     }
-  }
-
-  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.tail.then(fn, fn)
-    this.tail = run.catch(() => {})
-    return run
   }
 }
 
