@@ -6,26 +6,16 @@ import {
   TouchSensor,
   useSensor,
   useSensors,
-  type DragEndEvent,
-  type DragOverEvent,
-  type DragStartEvent,
 } from '@dnd-kit/core'
-import { useQueryClient } from '@tanstack/react-query'
-import { useConfig, useMergeIcons, useMoveIcon } from '../api/config'
-import { ApiError } from '../api/client'
-import { moveIcon } from '../lib/iconReducer'
-import { moveIntoGroup, topLevelOf } from '../lib/groupReducer'
-import {
-  collisionDetection,
-  dragEndDecision,
-  dragOverDecision,
-  parseOver,
-} from '../lib/iconDrag'
+import { useConfig } from '../api/config'
+import { topLevelOf } from '../lib/groupReducer'
+import { collisionDetection } from '../lib/iconDrag'
 import { withDefaults } from '../lib/layoutSettings'
-import { GroupGestureContext, useGroupGestureDwell } from '../context/GroupGestureContext'
+import { GroupGestureContext } from '../context/GroupGestureContext'
 import { EditModeProvider, useEditMode } from '../context/EditModeContext'
 import { IconDataProvider } from '../context/IconDataContext'
 import { LayoutSettingsProvider } from '../context/LayoutSettingsContext'
+import { useDragSession } from '../hooks/useDragSession'
 import SearchBox from '../components/SearchBox'
 import Background from '../components/Background'
 import Clock from '../components/Clock'
@@ -36,7 +26,7 @@ import IconView from '../components/Icon'
 import { ICON_TYPE_UI } from '../components/iconTypeUi'
 import GroupOverlay from '../components/GroupOverlay'
 import ControlDrawer from '../components/ControlDrawer'
-import type { Config, Icon, IconTypeId, Page } from '../lib/types'
+import type { Icon, IconTypeId, Page } from '../lib/types'
 
 /** 页板底色 RGB(暗色恒定;与 globals.css 的 .dark .page-panel 同源,改色须两处同步)。 */
 const PAGE_PANEL_RGB = '18,18,23'
@@ -80,7 +70,7 @@ function Dashboard() {
   const DetailView = detail ? ICON_TYPE_UI[detail.type].detail : undefined
 
   // 打开中的分组弹层(票 08):值为组行 id;组行被删(空组不存活)/解散后落空,
-  // openGroup 派生为 null → 弹层随组行卸载。开关判定在 onDragEnd(见 handleDragEnd)。
+  // openGroup 派生为 null → 弹层随组行卸载。开关判定在拖拽会话的 end 决策(iconDrag)。
   const [openGroupId, setOpenGroupId] = useState<number | null>(null)
 
   // 控制抽屉开关(issue 09):右上角 ⚙ 唤起,tab 切换「新增 / 布局 / 账号」,与编辑模式职责分离。
@@ -96,35 +86,18 @@ function Dashboard() {
   //     scroll-snap 的「触控横滑翻页」(即时位移 >5px)在此取消拖拽,不抢走滑动手势。
   //   单用 PointerSensor 的 delay 模式会让鼠标「按下即拖」的位移在 5px 容差内超限而 handleCancel,
   //   导致拖拽无反应——故按输入类型拆成两个 sensor。查看模式与编辑模式均启用拖拽。
-  const moveIconMut = useMoveIcon()
-  const mergeMut = useMergeIcons()
-  const qc = useQueryClient()
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
   )
 
-  // 合并手势 dwell(票 07,ADR-0011 建组手势):计时/反馈状态收在 hook,语义见其 JSDoc。
-  const { dwellTargetId, clearDwell, updateDwell } = useGroupGestureDwell()
-
-  // 拖拽中的图标 id:供 DragOverlay 渲染跟随光标的只读副本(spec user story 35 视觉反馈)。
-  // onDragStart 置位,onDragEnd/onDragCancel 清空。查看/编辑模式拖拽期间均会置位。
-  const [activeIconId, setActiveIconId] = useState<number | null>(null)
-
-  // 拖拽起点聚合快照(07):记录 dragStart 时刻的 ['config'] 缓存。两个用途:
-  //   - onDragEnd:与"当前缓存"对比判断是否跨页 + 取最终位置(直接读缓存,不依赖 render 闭包新鲜度)。
-  //   - onDragCancel:整份回写,撤销 onDragOver 期间的乐观跨页写入(ESC 取消时缓存不留幻影移动)。
-  const dragSnapshotRef = useRef<Config | null>(null)
-
-  // 容量拒绝等短暂提示(07):目标页满时 onDragOver 反复触发,setState 同值 React 会 bail-out,
-  // 故不会抖动;计时器在最后一次触发后 1.8s 清掉。
-  const [notice, setNotice] = useState<string | null>(null)
-  const noticeTimerRef = useRef<number | null>(null)
-  function showNotice(msg: string) {
-    setNotice(msg)
-    if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current)
-    noticeTimerRef.current = window.setTimeout(() => setNotice(null), 1800)
-  }
+  // 拖拽会话(CONTEXT.md「拖拽编排」):策略(决策 iconDrag)+ 会话生命周期
+  // (dragSession 纯状态机,快照取/还、新鲜度、编辑门)单点于 lib 层;本 hook 只做
+  // 接线与 Effect 执行。页面只剩:绑 handler、渲染幽灵/notice、下发 dwell 反馈。
+  const drag = useDragSession({
+    openGroupId,
+    onCloseOverlay: () => setOpenGroupId(null),
+  })
 
   // ── 长按进入编辑模式(票 07 辅助入口;右键为主)───────────────────────────
   // 指针静止按住 550ms → 进入编辑模式(仅查看态;编辑态长按不退出,退出仍走右键防误触)。
@@ -157,10 +130,6 @@ function Dashboard() {
   const pages = data?.pages ?? []
   const icons = data?.icons ?? []
 
-  // 拖拽幽灵数据源:按 activeIconId 在 icons 里查(icons 在此之后才声明,故派生放这里)。
-  const activeIcon =
-    activeIconId != null ? icons.find((i) => i.id === activeIconId) ?? null : null
-
   // 打开中的分组弹层组行(票 08):组行被删(空组不存活/解散)后落空 → 弹层卸载
   const openGroup =
     openGroupId != null
@@ -177,134 +146,6 @@ function Dashboard() {
   // activeIndex 由 Carousel 滚动停稳时向上通知;但删页/重排(issue 08)后 Carousel 内部
   // 会夹住自身 active,若未触发滚动则此处的 activeIndex 可能短暂越界,故读取时再夹一次。
   const activePageId = pages[Math.min(activeIndex, Math.max(0, pages.length - 1))]?.id
-
-  // 拖拽起终点 + 跨页移动(06 同页排序 / 07 跨页)。策略(容量门、落点位序、
-  // dwell 建组/入组判定、弹层开关判定)单点于 lib/iconDrag 的纯决策函数
-  // (CONTEXT.md「拖拽编排」);本组件只做接线:组装 ctx → 执行 Action。
-  //
-  // 跨页机制(spec user story 31/32,ADR-0003):
-  //   - 边缘翻页由 Carousel 内的 EdgeDropZone 自管(拖到左右边缘停留 400ms → goTo(±1))。
-  //   - onDragOver 检测落点与被拖项当前页不同 → 把图标乐观移入目标页(直接写 ['config']
-  //     缓存,不发请求),使其进入目标页 SortableContext,实现"跟随光标进入新页网格"。
-  //     目标页满则拒绝并提示(对齐后端 requireCapacity)。
-  //   - onDragEnd 持久化:跨页时缓存已是最终态,按被拖项当前 (pageId, sortOrder) 提交;
-  //     同页时按 over 落点提交(06 原逻辑)。统一走 useMoveIcon(PATCH /api/icons/move),
-  //     其 onSettled invalidate 兜底,服务端权威数据最终校正(失败亦自愈)。
-  function handleDragStart(e: DragStartEvent) {
-    const id = Number(e.active.id) || null
-    setActiveIconId(id)
-    // 快照此刻的聚合缓存,供 onDragEnd 比较与 onDragCancel 整份回写
-    dragSnapshotRef.current = qc.getQueryData<Config>(['config']) ?? null
-  }
-
-  /** onDragOver 各分支共用的乐观搬移:直写 ['config'] 缓存(无网络),moveIcon 与
-   *  useMoveIcon 同一纯 reducer,保证乐观态与权威态一致(06/07 既有约定)。 */
-  function optimisticMove(id: number, toPageId: number, toIndex: number) {
-    qc.setQueryData<Config>(['config'], (prev) =>
-      prev ? { ...prev, icons: moveIcon(prev.icons, { id, toPageId, toIndex }) } : prev,
-    )
-  }
-  function handleDragOver(e: DragOverEvent) {
-    // 直接读缓存(不依赖 render 闭包新鲜度);缓存未就绪直接不处理(镜像提取源早退)
-    const currentIcons = qc.getQueryData<Config>(['config'])?.icons
-    if (currentIcons == null) return
-    const actions = dragOverDecision({
-      icons: currentIcons,
-      snapshotIcons: dragSnapshotRef.current?.icons ?? null,
-      editing,
-      over: parseOver(e.over),
-      draggedId: Number(e.active.id),
-    })
-    for (const action of actions) {
-      switch (action.type) {
-        case 'clearDwell':
-          clearDwell()
-          break
-        case 'updateDwell':
-          // 合并手势 dwell 计时(仅编辑模式;同起点页判定防跨页 409,见 hook JSDoc)
-          updateDwell(
-            action.dragged,
-            action.startPageId,
-            action.overId,
-            action.overIsPage,
-            currentIcons,
-          )
-          break
-        case 'optimisticMove':
-          optimisticMove(action.id, action.toPageId, action.toIndex)
-          break
-        case 'optimisticIntoGroup':
-          qc.setQueryData<Config>(['config'], (prev) =>
-            prev
-              ? { ...prev, icons: moveIntoGroup(prev.icons, { id: action.id, groupId: action.groupId }) }
-              : prev,
-          )
-          break
-        case 'notice':
-          showNotice(action.message)
-          break
-      }
-    }
-  }
-  function handleDragEnd(e: DragEndEvent) {
-    setActiveIconId(null)
-    const snapshot = dragSnapshotRef.current
-    dragSnapshotRef.current = null
-    // 直接读缓存取"最终态"(跨页时 onDragOver 已写入),不依赖 render 闭包的新鲜度
-    const currentIcons = qc.getQueryData<Config>(['config'])?.icons ?? icons
-    const actions = dragEndDecision({
-      icons: currentIcons,
-      snapshotIcons: snapshot?.icons ?? null,
-      over: parseOver(e.over),
-      draggedId: Number(e.active.id),
-      dwellTargetId,
-      openGroupId,
-    })
-    for (const action of actions) {
-      switch (action.type) {
-        case 'clearDwell':
-          clearDwell()
-          break
-        case 'commitIntoGroup':
-          // 拖 nav 到组上:入组(后端忽略 toIndex、恒落组内末尾)
-          moveIconMut.mutate(
-            { id: action.id, toPageId: action.toPageId, toIndex: 0, parentId: action.groupId },
-            { onError: (err) => showNotice(err instanceof ApiError ? err.message : '加入分组失败') },
-          )
-          break
-        case 'commitMergeGroup':
-          // nav 拖到 nav 上:建组(memberIds 有序 = [被拖 A, 悬停目标 B],组行继承 B 位)
-          mergeMut.mutate(
-            { pageId: action.pageId, memberIds: action.memberIds },
-            { onError: (err) => showNotice(err instanceof ApiError ? err.message : '创建分组失败') },
-          )
-          break
-        case 'rollback':
-          // 整份回写 dragStart 快照,撤销 onDragOver 期间的乐观写入(不留幻影)
-          if (snapshot) qc.setQueryData<Config>(['config'], snapshot)
-          break
-        case 'closeOverlay':
-          setOpenGroupId(null)
-          break
-        case 'commitMove':
-          moveIconMut.mutate(
-            action.parentId != null
-              ? { id: action.id, toPageId: action.toPageId, toIndex: action.toIndex, parentId: action.parentId }
-              : { id: action.id, toPageId: action.toPageId, toIndex: action.toIndex },
-          )
-          break
-      }
-    }
-  }
-  function handleDragCancel() {
-    setActiveIconId(null)
-    clearDwell()
-    // 撤销 onDragOver 期间的乐观跨页写入:整份回写 dragStart 快照,缓存不留幻影移动
-    if (dragSnapshotRef.current) {
-      qc.setQueryData<Config>(['config'], dragSnapshotRef.current)
-    }
-    dragSnapshotRef.current = null
-  }
 
   return (
     // 固定画布(ADR-0002 / CONTEXT.md「页面」):h-screen + overflow-hidden,
@@ -414,14 +255,14 @@ function Dashboard() {
               sensors={sensors}
               collisionDetection={collisionDetection}
               autoScroll={false}
-              onDragStart={handleDragStart}
-              onDragOver={handleDragOver}
-              onDragEnd={handleDragEnd}
-              onDragCancel={handleDragCancel}
+              onDragStart={drag.onDragStart}
+              onDragOver={drag.onDragOver}
+              onDragEnd={drag.onDragEnd}
+              onDragCancel={drag.onDragCancel}
             >
               <IconDataProvider icons={icons}>
               {/* 合并手势 dwell 目标下发(Icon 放大反馈);随 DndContext 生命周期,拖拽结束即清 */}
-              <GroupGestureContext.Provider value={dwellTargetId}>
+              <GroupGestureContext.Provider value={drag.dwellTargetId}>
                 <Carousel
                   labels={pages.map((p) => p.name)}
                   onActiveChange={setActiveIndex}
@@ -443,7 +284,7 @@ function Dashboard() {
                     置于 IconDataProvider 内以拿到 quotes/weather 上下文(React 上下文随 React 树,
                     不随 portal DOM)。dropAnimation=null 让落定即隐藏,避免与乐观重排动画叠加抖动。 */}
                 <DragOverlay dropAnimation={null}>
-                  {activeIcon && <IconView icon={activeIcon} overlay />}
+                  {drag.activeIcon && <IconView icon={drag.activeIcon} overlay />}
                 </DragOverlay>
                 {/* 分组弹层(票 08):portal 到 body 但调用点在根 DndContext React 子树内
                     (useSortable 注册的硬约束);开关判定在 onDragEnd,拖拽中 ESC 走
@@ -451,7 +292,7 @@ function Dashboard() {
                 {openGroup && (
                   <GroupOverlay
                     group={openGroup}
-                    dragging={activeIconId != null}
+                    dragging={drag.activeIcon != null}
                     onClose={() => setOpenGroupId(null)}
                   />
                 )}
@@ -479,12 +320,12 @@ function Dashboard() {
       </LayoutSettingsProvider>
 
       {/* 容量拒绝等短暂提示(07):底部居中浮层,pointer-events-none 不挡交互 */}
-      {notice && (
+      {drag.notice && (
         <div className="fixed bottom-8 inset-x-0 z-50 flex justify-center pointer-events-none">
           {/* animate-pop-in 入场;shadow-lg 删——glass-panel 的 unlayered box-shadow
               恒胜 Tailwind layered 工具类,该类本就无效(项目已知 CSS 层叠特性) */}
           <span className="glass-panel animate-pop-in text-white/90 text-sm px-4 py-2 rounded-full">
-            {notice}
+            {drag.notice}
           </span>
         </div>
       )}

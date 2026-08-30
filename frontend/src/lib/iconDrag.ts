@@ -3,7 +3,8 @@
  *
  * DashboardPage 的拖拽策略(跨页乐观搬移、容量门、组员移出、dwell 建组/入组、
  * 弹层开关判定、快照回滚)的**纯决策**单点:输入纯数据 ctx,输出 Action 列表,
- * 由 DashboardPage 接线层执行(写 ['config'] 缓存 / mutate / 提示 / dwell hook)。
+ * 由拖拽会话接线层(hooks/useDragSession,经 lib/dragSession 状态机编排)执行
+ * (写 ['config'] 缓存 / mutate / 提示 / 手势计时)。
  * DOM-free、零 @dnd-kit 依赖(决策 interface 只吃纯数据),可直接 Vitest 表驱动断言
  * (iconDrag.test.ts 逐用例映射提取源行号)。
  *
@@ -169,17 +170,20 @@ export function dragOverDecision(ctx: DragOverCtx): DragOverAction[] {
     return actions
   }
 
-  // ── dwell 计时接线(编辑模式判定在 hook 内):同起点页判定防跨页 409。
+  // ── dwell 计时接线:同起点页判定防跨页 409。编辑模式门在此(合并手势仅编辑
+  //    模式)——查看态不发 updateDwell,计时层不判编辑(此前判在 hook,两半合一)。
   const startPageId =
     snapshotIcons?.find((i) => i.id === draggedId)?.pageId ?? dragged.pageId
   const overIsPage = over.kind === 'page'
-  actions.push({
-    type: 'updateDwell',
-    dragged,
-    startPageId,
-    overId: over.numericOverId,
-    overIsPage,
-  })
+  if (editing) {
+    actions.push({
+      type: 'updateDwell',
+      dragged,
+      startPageId,
+      overId: over.numericOverId,
+      overIsPage,
+    })
+  }
 
   // ── 组成员拖出:查看态守卫(移出仅编辑模式),编辑态容量门(组员恒 1 格,
   //    不带被拖格数)后落 over 位序。
@@ -251,7 +255,7 @@ export type DragEndCtx = {
   /** parseOver(e.over) 的解析结果 */
   over: OverTarget
   draggedId: number
-  /** 达标的 dwell 目标(useGroupGestureDwell),null = 未达标 */
+  /** 达标的 dwell 目标(拖拽会话 hook),null = 未达标 */
   dwellTargetId: number | null
   /** 打开中的分组弹层组行 id,null = 无 */
   openGroupId: number | null

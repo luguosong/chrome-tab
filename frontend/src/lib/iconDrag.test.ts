@@ -159,13 +159,10 @@ describe('dragOverDecision — 组成员拖出(275-304)', () => {
   }
   const iconOver = { id: '12', data: { current: { sortable: { containerId: '2' } } } }
 
-  it('查看态 → 提示(284-287)', () => {
+  it('查看态 → 提示,不发 dwell(284-287;编辑门上提:此前 hook 内拦,行为等价)', () => {
     expect(
       dragOverDecision(overCtx(iconOver, { ...base, editing: false })),
-    ).toEqual([
-      { type: 'updateDwell', dragged, startPageId: 1, overId: 12, overIsPage: false },
-      { type: 'notice', message: '移出分组需先右键进入编辑模式' },
-    ])
+    ).toEqual([{ type: 'notice', message: '移出分组需先右键进入编辑模式' }])
   })
 
   it('编辑态 + 落图标 over → 落 over 位序移出(288-303)', () => {
