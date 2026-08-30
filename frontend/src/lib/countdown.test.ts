@@ -124,6 +124,18 @@ describe('getAllCountdowns 全量口径(图标块内下一条/Modal 节假日分
     expect(tied.map((i) => i.name)).toEqual(['生日', '国庆'])
   })
 
+  it('农历节日带 lunar 农历月日(公历反查);公历节日与用户条目无', () => {
+    const items = getAllCountdowns(new Date(2026, 8, 1), [user({ name: '农历生日', date: '1990-07-14', calendar: 'lunar' })])
+    expect(items.find((i) => i.name === '中秋')?.lunar).toBe('八月十五')
+    expect(items.find((i) => i.name === '国庆')?.lunar).toBeUndefined()
+    expect(items.find((i) => i.source === 'user')?.lunar).toBeUndefined()
+  })
+
+  it('除夕 lunar 随腊月大小浮动,非写死(2027 除夕=2-5 反查腊月廿九)', () => {
+    const items = getAllCountdowns(new Date(2027, 0, 10), [])
+    expect(items.find((i) => i.name === '除夕')?.lunar).toBe('腊月廿九')
+  })
+
   it('窗口口径是其子集:getCountdowns 恒为 getAllCountdowns 的 30 天切片', () => {
     const dates = [user({ name: '生日', date: '1990-09-10' }), user({ name: '交房', date: '2026-09-05', repeat: 'once' })]
     const all = getAllCountdowns(new Date(2026, 7, 25), dates)

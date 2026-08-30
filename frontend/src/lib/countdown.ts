@@ -18,11 +18,19 @@ export type CountdownItem = {
   days: number
   date: Date
   source: 'holiday' | 'user'
+  /** 农历节日的农历月日中文(公历日期反查,如「八月十五」;除夕随腊月大小浮动)。 */
+  lunar?: string
 }
 
 // ── 节假日:内置清单,代码即配置(同「外源」枚举模式),用户不可增删 ──────────
 
-type HolidayDef = { key: string; name: string; dateInYear: (gy: number) => Date | null }
+type HolidayDef = {
+  key: string
+  name: string
+  dateInYear: (gy: number) => Date | null
+  /** 农历定义的节日:条目带农历月日(展示层括注在公历日期后)。 */
+  lunar?: true
+}
 
 /** Solar(lunar-typescript 历表对象)→ 本地 Date(两处换算共用)。 */
 const solarToDate = (s: Solar) => new Date(s.getYear(), s.getMonth() - 1, s.getDay())
@@ -86,9 +94,9 @@ function easter(gy: number): Date {
 /** 21 项内置节假日(grilling 定案:法定 7 + 传统 5 + 国际/西方固定 5 + 浮动 4)。 */
 const HOLIDAYS: HolidayDef[] = [
   { key: 'new-year', name: '元旦', dateInYear: solarOn(1, 1) },
-  { key: 'chuxi', name: '除夕', dateInYear: chuxi },
-  { key: 'spring-festival', name: '春节', dateInYear: lunarOn(1, 1) },
-  { key: 'lantern', name: '元宵', dateInYear: lunarOn(1, 15) },
+  { key: 'chuxi', name: '除夕', dateInYear: chuxi, lunar: true },
+  { key: 'spring-festival', name: '春节', dateInYear: lunarOn(1, 1), lunar: true },
+  { key: 'lantern', name: '元宵', dateInYear: lunarOn(1, 15), lunar: true },
   { key: 'valentine', name: '情人节', dateInYear: solarOn(2, 14) },
   { key: 'women', name: '妇女节', dateInYear: solarOn(3, 8) },
   { key: 'qingming', name: '清明', dateInYear: qingming },
@@ -97,15 +105,15 @@ const HOLIDAYS: HolidayDef[] = [
   { key: 'mothers-day', name: '母亲节', dateInYear: nthWeekday(5, 2, 0) },
   { key: 'children', name: '儿童节', dateInYear: solarOn(6, 1) },
   { key: 'fathers-day', name: '父亲节', dateInYear: nthWeekday(6, 3, 0) },
-  { key: 'dragon-boat', name: '端午', dateInYear: lunarOn(5, 5) },
-  { key: 'qixi', name: '七夕', dateInYear: lunarOn(7, 7) },
-  { key: 'mid-autumn', name: '中秋', dateInYear: lunarOn(8, 15) },
+  { key: 'dragon-boat', name: '端午', dateInYear: lunarOn(5, 5), lunar: true },
+  { key: 'qixi', name: '七夕', dateInYear: lunarOn(7, 7), lunar: true },
+  { key: 'mid-autumn', name: '中秋', dateInYear: lunarOn(8, 15), lunar: true },
   { key: 'national-day', name: '国庆', dateInYear: solarOn(10, 1) },
   { key: 'halloween', name: '万圣节', dateInYear: solarOn(10, 31) },
-  { key: 'chongyang', name: '重阳', dateInYear: lunarOn(9, 9) },
+  { key: 'chongyang', name: '重阳', dateInYear: lunarOn(9, 9), lunar: true },
   { key: 'thanksgiving', name: '感恩节', dateInYear: nthWeekday(11, 4, 4) },
   { key: 'christmas', name: '圣诞', dateInYear: solarOn(12, 25) },
-  { key: 'laba', name: '腊八', dateInYear: lunarOn(12, 8) },
+  { key: 'laba', name: '腊八', dateInYear: lunarOn(12, 8), lunar: true },
 ]
 
 // ── 重要日子:下一次出现(CONTEXT.md「重要日子」;annual 年份无意义)──────────
@@ -142,18 +150,34 @@ function nextUserDate(d: ImportantDate, today: Date): Date | null {
 
 /** 全量条目(不限窗,升序混排;过期不进列):图标块内取 [0] 作常显下一条,详情
  *  Modal 节假日分区按 source 过滤——不限窗是常驻 glance 视图的取舍(看着它逼近)。 */
+/** 公历日期反查农历月日中文(如「八月十五」;闰月带「闰」前缀)。 */
+const lunarText = (d: Date): string => {
+  const l = Lunar.fromDate(d)
+  return `${l.getMonthInChinese()}月${l.getDayInChinese()}`
+}
+
 export function getAllCountdowns(now: Date, userDates: ImportantDate[]): CountdownItem[] {
   const today = startOfDay(now)
   const items: CountdownItem[] = []
-  const push = (key: string, name: string, date: Date | null, source: 'holiday' | 'user') => {
+  const push = (
+    key: string,
+    name: string,
+    date: Date | null,
+    source: 'holiday' | 'user',
+    lunar?: string,
+  ) => {
     if (!date) return
     const days = Math.round((date.getTime() - today.getTime()) / 86_400_000)
-    if (days >= 0) items.push({ key, name, days, date, source })
+    if (days >= 0) items.push({ key, name, days, date, source, ...(lunar ? { lunar } : {}) })
   }
   // 用户条目先入列:同日撞期(如生日与国庆)时排节假日前——块内 [0] 与弹层首行
   // 不被内置清单遮蔽(sort 稳定,入列顺序决出并列)
   for (const u of userDates) push(u.id, u.name, nextUserDate(u, today), 'user')
-  for (const h of HOLIDAYS) push(h.key, h.name, nextAnnual(h.dateInYear, today), 'holiday')
+  for (const h of HOLIDAYS) {
+    const date = nextAnnual(h.dateInYear, today)
+    // 农历标注由换算后公历反查——除夕随腊月大小浮动(廿九/三十),写死必错
+    push(h.key, h.name, date, 'holiday', h.lunar && date ? lunarText(date) : undefined)
+  }
   return items.sort((a, b) => a.days - b.days)
 }
 

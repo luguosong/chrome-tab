@@ -15,7 +15,8 @@ import DetailModal from './DetailModal'
  * 弹层迁入),列表 CRUD 每动作即时整份 PUT(useUpdateLayoutSettings,与布局草稿同一
  * 持久化通道),不设草稿暂存——列表 ≤100 条,PUT 轻量,即时反馈免掉「保存/放弃」
  * 两层状态;「节假日」tab 只读——内置清单从今天起按剩余天数升序,行附当年公历
- * 日期(查「春节是哪天」的主诉求),恰逢当天的条目 accent 高亮。
+ * 日期与农历括注(农历定义的节日,如「9月25日(八月十五)」;查「春节是哪天」的
+ * 主诉求),恰逢当天的条目 accent 高亮。
  * 数据寄放布局设置(ADR-0026),无独立查询,不用骨架查询状态机。
  */
 
@@ -296,7 +297,7 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
               <span className="text-white/70">
                 {h.name}
                 <span className={`ml-2 tabular-nums ${h.days === 0 ? 'text-accent' : 'text-white/40'}`}>
-                  {h.date.getMonth() + 1}月{h.date.getDate()}日
+                  {h.date.getMonth() + 1}月{h.date.getDate()}日{h.lunar ? `(${h.lunar})` : ''}
                 </span>
               </span>
               <span className={`tabular-nums ${h.days === 0 ? 'text-accent' : 'text-white/90'}`}>
