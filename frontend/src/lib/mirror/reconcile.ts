@@ -12,6 +12,21 @@ export type MirrorRecord = {
 
 export type ReconcileAction = 'pull' | 'push' | 'none' | 'conflict'
 
+/** QueryCache 事件 action 的最小形状(manual = TanStack 对手动写的标记)。 */
+export type CacheUpdateAction = { type: string; manual?: boolean }
+
+/**
+ * 缓存订阅事件是否「网络拉取成功」——内容为服务端权威,可落盘 clean 镜像。
+ * TanStack v5 契约:setQueryData(乐观写/还原快照)派发的同样是 type:'success',
+ * 仅以 manual:true 区分手动写——判 type 不判 manual 会把未验证的乐观数据当权威
+ * 落盘(ADR-0006「在线写入先到服务端、成功后回写本地镜像」;行为契约由
+ * reconcile.test 锁)。例外:和解回填与离线镜像喂缓存虽是手动写,其持久化由
+ * ConfigSyncProvider.reconcile 内显式 saveMirror 保证,不经缓存订阅路径。
+ */
+export function isAuthoritativeCacheUpdate(action: CacheUpdateAction): boolean {
+  return action.type === 'success' && action.manual !== true
+}
+
 /**
  * 把服务端 ISO 时间戳(可能带纳秒小数)归一为可比的 epoch 毫秒;null/非法 → -∞(最旧)。
  * 截到秒级避免纳秒小数导致 Date 解析歧义;LWW 只需稳定序,秒级足够(写间隔通常 ≫ 1s)。

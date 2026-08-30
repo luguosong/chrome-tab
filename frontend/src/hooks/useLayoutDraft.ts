@@ -30,9 +30,13 @@ export function useLayoutDraft(layout: LayoutSettings) {
     setState(next)
   }
 
+  /** 草稿会话首写前清一次在途 GET(乐观 mutation 词条:防旧响应后到覆盖预览);
+   *  后续 tick 不重复取消——滑条高频,每 tick cancel 是全缓存扫描的 no-op。 */
   function apply<K extends keyof LayoutSettings>(key: K, value: LayoutSettings[K]) {
+    const first = !stateRef.current.dirty
     const next = applyLayoutField(stateRef.current, key, value)
     update(next)
+    if (first) void qc.cancelQueries({ queryKey: ['config'] })
     qc.setQueryData<Config>(['config'], (prev) =>
       prev ? { ...prev, layoutSettings: next.draft } : prev,
     )

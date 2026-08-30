@@ -4,7 +4,7 @@ import { useAuth } from './AuthContext'
 import { apiFetch } from '../api/client'
 import { fetchConfigOnce } from '../api/config'
 import type { Config } from '../lib/types'
-import { decideReconciliation, type MirrorRecord } from '../lib/mirror/reconcile'
+import { decideReconciliation, isAuthoritativeCacheUpdate, type MirrorRecord } from '../lib/mirror/reconcile'
 import { toBackupPayload, toWireConfig } from '../lib/mirror/backup'
 import { downloadJson } from '../lib/mirror/download'
 import {
@@ -119,15 +119,16 @@ export function ConfigSyncProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id])
 
-  // 缓存订阅:仅在网络拉取成功(action.type==='success')时落盘 clean 镜像。
-  // 关键:乐观写(setQueryData)派发的是 SetStateAction 而非 success,故不会把"未验证的乐观数据"
-  // 当成权威落盘——避免"标签页在写未 settle 时关闭"留下幻影数据造成静默丢失(ADR-0006 Req6)。
+  // 缓存订阅:仅在网络拉取成功时落盘 clean 镜像。判别在 lib/mirror/reconcile:
+  // TanStack v5 的 setQueryData(乐观写/还原快照)派发的同样是 type:'success',
+  // 仅以 manual:true 区分手动写——判 type 不判 manual 会把未验证的乐观数据当权威落盘,
+  // "标签页在写未 settle 时关闭"即留幻影造成静默丢失(ADR-0006「成功后回写本地镜像」)。
   useEffect(() => {
     if (!user) return
     const unsub = qc.getQueryCache().subscribe((event) => {
       if (event.type !== 'updated') return
       if (event.query.queryKey[0] !== 'config') return
-      if (event.action.type !== 'success') return
+      if (!isAuthoritativeCacheUpdate(event.action)) return
       const data = qc.getQueryData<Config>(['config'])
       if (!data || !readyRef.current) return
       void saveMirror(user.id, { config: data, updatedAt: data.updatedAt ?? null, dirty: false })
