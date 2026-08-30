@@ -284,6 +284,21 @@ export const QWEN_BASELINE: BaselineModel[] = [
   },
   {
     provider: 'alibaba',
+    officialId: 'qwen3.8-flash',
+    name: 'Qwen3.8-Flash',
+    kind: 'multimodal_understanding', // 输入 Image/Text/Video、输出 Text,与 27B 同类原生多模态
+    stage: 'ga',
+    availability: ['api'], // 未开放权重;同日发布的 Flash-Next(AA slug qwen3-8-flash-next)是另一模型,勿误配
+    summary: 'Qwen3.8 系列多模态高性价比档,原生百万上下文,兼容 OpenAI/Anthropic 协议',
+    sources: [DOC('qwen3.8-flash')],
+    pricing: textPrice('0.8', '2.7'),
+    limits: ctxLimits('1,000,000', '131,072'),
+    trainingParams: null,
+    matchAliases: ['qwen3.8-flash'],
+    events: [rel('api_available', '2026-08-26', 'Qwen3.8-Flash 百炼上架')],
+  },
+  {
+    provider: 'alibaba',
     officialId: 'qwen3.6-open',
     name: 'Qwen3.6 开源系列',
     kind: 'text',
