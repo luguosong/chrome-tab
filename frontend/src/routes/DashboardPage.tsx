@@ -6,10 +6,6 @@ import {
   TouchSensor,
   useSensor,
   useSensors,
-  closestCorners,
-  pointerWithin,
-  rectIntersection,
-  type CollisionDetection,
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
@@ -18,9 +14,13 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useConfig, useMergeIcons, useMoveIcon } from '../api/config'
 import { ApiError } from '../api/client'
 import { moveIcon } from '../lib/iconReducer'
-import { groupMembers, moveIntoGroup, topLevelOf } from '../lib/groupReducer'
-import { canFit, DEFAULT_PAGE_CAPACITY } from '../lib/iconCapacity'
-import { iconCells } from '../lib/iconTypeRegistry'
+import { moveIntoGroup, topLevelOf } from '../lib/groupReducer'
+import {
+  collisionDetection,
+  dragEndDecision,
+  dragOverDecision,
+  parseOver,
+} from '../lib/iconDrag'
 import { withDefaults } from '../lib/layoutSettings'
 import { GroupGestureContext, useGroupGestureDwell } from '../context/GroupGestureContext'
 import { EditModeProvider, useEditMode } from '../context/EditModeContext'
@@ -30,36 +30,16 @@ import SearchBox from '../components/SearchBox'
 import Background from '../components/Background'
 import Clock from '../components/Clock'
 import { LensBox } from '../components/LensBox'
-import Carousel, { EDGE_DROP_ID } from '../components/Carousel'
+import Carousel from '../components/Carousel'
 import IconGrid from '../components/IconGrid'
 import IconView from '../components/Icon'
 import { ICON_TYPE_UI } from '../components/iconTypeUi'
-import GroupOverlay, { isGroupContainerId, parseGroupContainerId } from '../components/GroupOverlay'
+import GroupOverlay from '../components/GroupOverlay'
 import ControlDrawer from '../components/ControlDrawer'
 import type { Config, Icon, IconTypeId, Page } from '../lib/types'
 
 /** 页板底色 RGB(暗色恒定;与 globals.css 的 .dark .page-panel 同源,改色须两处同步)。 */
 const PAGE_PANEL_RGB = '18,18,23'
-
-/**
- * 多尺寸 grid 的碰撞检测自定义 fallback 链(ADR-0003):
- * pointerWithin(指针落在 droppable 内)→ rectIntersection(矩形相交)→ closestCorners。
- * 默认 rectIntersection 在可滚动 + 多尺寸容器中已知异常,故套两层兜底。
- */
-const collisionDetection: CollisionDetection = (args) => {
-  const pointer = pointerWithin(args)
-  // 边缘翻页区(07)优先:光标落在左右 w-12 边缘条内时,让 EdgeDropZone 命中而非其下的
-  // 页/图标,保证「拖到边缘持续翻页」不被新增的空页 droppable 或图标遮挡打断
-  // (尤其修复空页场景下「穿过空页继续翻」被打断的问题)。
-  const edge = pointer.filter(
-    (d) => d.id === EDGE_DROP_ID.left || d.id === EDGE_DROP_ID.right,
-  )
-  if (edge.length > 0) return edge
-  if (pointer.length > 0) return pointer
-  const rect = rectIntersection(args)
-  if (rect.length > 0) return rect
-  return closestCorners(args)
-}
 
 /**
  * 走马灯每屏的内容:取该页的图标,按 sortOrder 升序,交给 IconGrid 渲染。
@@ -198,13 +178,15 @@ function Dashboard() {
   // 会夹住自身 active,若未触发滚动则此处的 activeIndex 可能短暂越界,故读取时再夹一次。
   const activePageId = pages[Math.min(activeIndex, Math.max(0, pages.length - 1))]?.id
 
-  // 拖拽起终点 + 跨页移动(06 同页排序 / 07 跨页)。
+  // 拖拽起终点 + 跨页移动(06 同页排序 / 07 跨页)。策略(容量门、落点位序、
+  // dwell 建组/入组判定、弹层开关判定)单点于 lib/iconDrag 的纯决策函数
+  // (CONTEXT.md「拖拽编排」);本组件只做接线:组装 ctx → 执行 Action。
   //
   // 跨页机制(spec user story 31/32,ADR-0003):
   //   - 边缘翻页由 Carousel 内的 EdgeDropZone 自管(拖到左右边缘停留 400ms → goTo(±1))。
-  //   - onDragOver 检测 over 的 sortable.containerId 与被拖项当前 pageId 不同 → 把图标乐观移入
-  //     目标页(直接写 ['config'] 缓存,不发请求),使其进入目标页 SortableContext,实现"跟随光标
-  //     进入新页网格"。目标页满则拒绝并提示(对齐后端 requireCapacity)。
+  //   - onDragOver 检测落点与被拖项当前页不同 → 把图标乐观移入目标页(直接写 ['config']
+  //     缓存,不发请求),使其进入目标页 SortableContext,实现"跟随光标进入新页网格"。
+  //     目标页满则拒绝并提示(对齐后端 requireCapacity)。
   //   - onDragEnd 持久化:跨页时缓存已是最终态,按被拖项当前 (pageId, sortOrder) 提交;
   //     同页时按 over 落点提交(06 原逻辑)。统一走 useMoveIcon(PATCH /api/icons/move),
   //     其 onSettled invalidate 兜底,服务端权威数据最终校正(失败亦自愈)。
@@ -223,222 +205,96 @@ function Dashboard() {
     )
   }
   function handleDragOver(e: DragOverEvent) {
-    const { active, over } = e
-    if (!over) {
-      clearDwell() // 指针拖离所有 droppable:熄灭合并反馈,防「不在目标上却建组」
-      return
-    }
-    // 边缘 droppable 由 EdgeDropZone 自管计时器翻页,这里不处理其落点
-    if (over.id === EDGE_DROP_ID.left || over.id === EDGE_DROP_ID.right) {
-      clearDwell()
-      return
-    }
-    const activeId = Number(active.id)
-    const cur = qc.getQueryData<Config>(['config'])
-    if (!cur) return
-    const dragged = cur.icons.find((i) => i.id === activeId)
-    if (!dragged) return
-
-    // 空页落点(07 限制修复):空页只有页级 useDroppable(见 IconGrid.PageDropArea),
-    // over.data.current.type==='page',无 sortable.containerId。命中即把图标移入空页位序 0。
-    const overData = over.data.current
-    const overIsPage = overData?.type === 'page'
-    const overContainer = overData?.sortable?.containerId
-
-    // ── 弹层容器(票 08)────────────────────────────────────────────────
-    // over 落在组弹层的 SortableContext 内(id=group-{组id}):
-    // - 被拖项是「本次拖拽中被乐观搬出」的组成员(dragStart 快照 parentId=该组且当前
-    //   已在顶层)→ 乐观搬回组(MultipleContainers 双向搬移;落组内末尾,松手按 over
-    //   位序走组内重排提交或整快照回滚)。快照匹配守卫同时防普通网格图标误入组——
-    //   入组走 07 的 dwell 手势——并天然防渲染循环(over 不变不触发)。
-    // - 其余 = 组内排序/悬停,不参与页面序列搬移;dwell 目标须网格顶层行,一并熄灭。
-    const overGroupId =
-      typeof overContainer === 'string' ? parseGroupContainerId(overContainer) : null
-    if (overGroupId != null) {
-      clearDwell()
-      const startParentId =
-        dragSnapshotRef.current?.icons.find((i) => i.id === activeId)?.parentId ?? null
-      if (dragged.parentId == null && startParentId === overGroupId) {
-        qc.setQueryData<Config>(['config'], (prev) =>
-          prev
-            ? { ...prev, icons: moveIntoGroup(prev.icons, { id: activeId, groupId: overGroupId }) }
-            : prev,
-        )
+    // 直接读缓存(不依赖 render 闭包新鲜度);缓存未就绪直接不处理(镜像提取源早退)
+    const currentIcons = qc.getQueryData<Config>(['config'])?.icons
+    if (currentIcons == null) return
+    const actions = dragOverDecision({
+      icons: currentIcons,
+      snapshotIcons: dragSnapshotRef.current?.icons ?? null,
+      editing,
+      over: parseOver(e.over),
+      draggedId: Number(e.active.id),
+    })
+    for (const action of actions) {
+      switch (action.type) {
+        case 'clearDwell':
+          clearDwell()
+          break
+        case 'updateDwell':
+          // 合并手势 dwell 计时(仅编辑模式;同起点页判定防跨页 409,见 hook JSDoc)
+          updateDwell(
+            action.dragged,
+            action.startPageId,
+            action.overId,
+            action.overIsPage,
+            currentIcons,
+          )
+          break
+        case 'optimisticMove':
+          optimisticMove(action.id, action.toPageId, action.toIndex)
+          break
+        case 'optimisticIntoGroup':
+          qc.setQueryData<Config>(['config'], (prev) =>
+            prev
+              ? { ...prev, icons: moveIntoGroup(prev.icons, { id: action.id, groupId: action.groupId }) }
+              : prev,
+          )
+          break
+        case 'notice':
+          showNotice(action.message)
+          break
       }
-      return
     }
-    // 合并手势 dwell 计时(仅编辑模式;同起点页判定防跨页 409,见 hook JSDoc)
-    const startPageId =
-      dragSnapshotRef.current?.icons.find((i) => i.id === activeId)?.pageId ?? dragged.pageId
-    updateDwell(dragged, startPageId, Number(over.id), overIsPage, cur.icons)
-
-    // ── 组成员拖出(票 08)────────────────────────────────────────────
-    // 被拖项在组内且 over 落在页面网格(图标或空页 droppable):乐观 move-out——
-    // moveIcon 清 parentId、canFit 判「已用 + 被拖格数 ≤ 容量」(组内成员恒 NAV、1 格,ADR-0021)、
-    // 落 over 位序,图标拖拽中即现身目标页网格。落回弹层
-    // 已被上方守卫早退;搬移后 parentId 变 null,后续 onDragOver 走顶层同页早退,
-    // 不往复搬移(防渲染循环,#735/#1421)。dwell 已挡成员(hook 判 parentId),不冲突。
-    // 查看态守卫:组内排序两模式均可拖,但**移出分组仍仅编辑模式**(CONTEXT.md「分组」)——
-    // 不做乐观搬出,松手走 onDragEnd 的组内重排分支(over 非组内成员 → findIndex=-1
-    // 不提交),图标自然弹回原位,弹层保持开。
-    if (dragged.parentId != null && !editing) {
-      showNotice('移出分组需先右键进入编辑模式')
-      return
-    }
-    if (dragged.parentId != null) {
-      const targetPageId = overIsPage ? overData.pageId : Number(overContainer)
-      if (!overIsPage && (overContainer == null || Number.isNaN(targetPageId))) return
-      const targetIcons = cur.icons.filter(
-        (i) => i.pageId === targetPageId && i.parentId === null,
-      )
-      if (!canFit(targetIcons, DEFAULT_PAGE_CAPACITY)) {
-        showNotice('目标页已满,无法移出')
-        return
-      }
-      const overId = Number(over.id)
-      const overIdx = [...targetIcons]
-        .sort((a, b) => a.sortOrder - b.sortOrder)
-        .findIndex((i) => i.id === overId)
-      optimisticMove(activeId, targetPageId, overIdx === -1 ? targetIcons.length : overIdx)
-      return
-    }
-
-    if (overIsPage) {
-      const targetPageId = overData.pageId
-      if (targetPageId === dragged.pageId) return
-      // 容量只计顶层行(cellsUsed 内跳过组内成员,ADR-0011);被拖项按类型格数计(ADR-0021)
-      const targetIcons = cur.icons.filter((i) => i.pageId === targetPageId)
-      if (!canFit(targetIcons, DEFAULT_PAGE_CAPACITY, iconCells(dragged.type))) {
-        showNotice('目标页已满,无法移入')
-        return
-      }
-      optimisticMove(activeId, targetPageId, 0)
-      return
-    }
-
-    // over 所在容器(页)id —— IconGrid 的 SortableContext id=String(page.id)
-    const containerId = overData?.sortable?.containerId
-    if (containerId == null) return
-    const targetPageId = Number(containerId)
-    if (Number.isNaN(targetPageId) || targetPageId === dragged.pageId) return // 同页:交给落点提交
-
-    // 跨页容量预校验:目标页当前不含被拖项,canFit 直接判断"已用 + 被拖格数 ≤ 容量"
-    // (cellsUsed 只计顶层行;此处同样只滤顶层行——页上有组时成员混入 sortOrder 序列
-    // 会让下方 toIndex 偏移,08 修正 07 遗留;被拖项按类型格数计,ADR-0021)
-    const targetIcons = cur.icons.filter(
-      (i) => i.pageId === targetPageId && i.parentId === null,
-    )
-    if (!canFit(targetIcons, DEFAULT_PAGE_CAPACITY, iconCells(dragged.type))) {
-      showNotice('目标页已满,无法移入')
-      return
-    }
-    // 落点 = over 项在目标页顶层序列(按 sortOrder 升序;组内成员不参与页面序列,ADR-0011)
-    // 中的位序;over 非目标页成员则追加末尾
-    const overId = Number(over.id)
-    const overIdx = [...targetIcons]
-      .sort((a, b) => a.sortOrder - b.sortOrder)
-      .findIndex((i) => i.id === overId)
-    const toIndex = overIdx === -1 ? targetIcons.length : overIdx
-
-    // 乐观更新缓存(无网络):被拖项立即进入目标页 SortableContext,视觉上"跟随光标进入新页"。
-    // 最终位置在 onDragEnd 持久化;此处复用与 useMoveIcon 同一的纯 reducer moveIcon,保证语义一致。
-    optimisticMove(activeId, targetPageId, toIndex)
   }
   function handleDragEnd(e: DragEndEvent) {
     setActiveIconId(null)
-    const { active, over } = e
-    const activeId = Number(active.id)
     const snapshot = dragSnapshotRef.current
     dragSnapshotRef.current = null
-
     // 直接读缓存取"最终态"(跨页时 onDragOver 已写入),不依赖 render 闭包的新鲜度
     const currentIcons = qc.getQueryData<Config>(['config'])?.icons ?? icons
-    const current = currentIcons.find((i) => i.id === activeId)
-    const startIcon = snapshot?.icons.find((i) => i.id === activeId) ?? null
-    if (!current || !startIcon) return
-
-    // ── 合并手势收尾(票 07):dwell 达标**且指针仍停在目标上**才建组/入组;
-    // 达标后又拖离(over ≠ 目标)则熄灭反馈、落回下方排序/移动逻辑。
-    // 目标从缓存现取(dwell 期间 over 恒定则 onDragOver 不再触发,缓存稳定)。
-    if (dwellTargetId != null) {
-      const dwellOver = over != null && Number(over.id) === dwellTargetId
-      const target = currentIcons.find((i) => i.id === dwellTargetId) ?? null
-      const groupId = target?.type === 'group' ? target.id : null
-      clearDwell()
-      if (dwellOver && target) {
-        if (groupId != null) {
+    const actions = dragEndDecision({
+      icons: currentIcons,
+      snapshotIcons: snapshot?.icons ?? null,
+      over: parseOver(e.over),
+      draggedId: Number(e.active.id),
+      dwellTargetId,
+      openGroupId,
+    })
+    for (const action of actions) {
+      switch (action.type) {
+        case 'clearDwell':
+          clearDwell()
+          break
+        case 'commitIntoGroup':
           // 拖 nav 到组上:入组(后端忽略 toIndex、恒落组内末尾)
           moveIconMut.mutate(
-            { id: activeId, toPageId: target.pageId, toIndex: 0, parentId: groupId },
+            { id: action.id, toPageId: action.toPageId, toIndex: 0, parentId: action.groupId },
             { onError: (err) => showNotice(err instanceof ApiError ? err.message : '加入分组失败') },
           )
-        } else {
+          break
+        case 'commitMergeGroup':
           // nav 拖到 nav 上:建组(memberIds 有序 = [被拖 A, 悬停目标 B],组行继承 B 位)
           mergeMut.mutate(
-            { pageId: target.pageId, memberIds: [activeId, target.id] },
+            { pageId: action.pageId, memberIds: action.memberIds },
             { onError: (err) => showNotice(err instanceof ApiError ? err.message : '创建分组失败') },
           )
-        }
-        return
+          break
+        case 'rollback':
+          // 整份回写 dragStart 快照,撤销 onDragOver 期间的乐观写入(不留幻影)
+          if (snapshot) qc.setQueryData<Config>(['config'], snapshot)
+          break
+        case 'closeOverlay':
+          setOpenGroupId(null)
+          break
+        case 'commitMove':
+          moveIconMut.mutate(
+            action.parentId != null
+              ? { id: action.id, toPageId: action.toPageId, toIndex: action.toIndex, parentId: action.parentId }
+              : { id: action.id, toPageId: action.toPageId, toIndex: action.toIndex },
+          )
+          break
       }
     }
-
-    // ── 分组弹层拖拽收尾(票 08)────────────────────────────────────────
-    const overData = over?.data.current
-    const overContainer = overData?.sortable?.containerId
-    const overOnPageGrid =
-      over != null &&
-      (overData?.type === 'page' ||
-        (typeof overContainer === 'string' && !isGroupContainerId(overContainer)))
-
-    // 拖出后未落在页面网格(over 空 / 落回弹层):整份回写 dragStart 快照,回滚
-    // onDragOver 的乐观 move-out、组态还原(对齐 onDragCancel;不持久化,不留幻影)
-    if (startIcon.parentId != null && current.parentId == null && !overOnPageGrid) {
-      if (snapshot) qc.setQueryData<Config>(['config'], snapshot)
-      return
-    }
-
-    // 组内重排:起终同组(未拖出)——toIndex = over 项在组内全序列的绝对位序
-    // (后端 alreadyInside 分支剔除自身后夹紧插入,镜像见 moveIntoGroup)
-    if (current.parentId != null && startIcon.parentId === current.parentId) {
-      if (!over || active.id === over.id) return
-      const overIdx = groupMembers(currentIcons, current.parentId).findIndex(
-        (i) => i.id === Number(over.id),
-      )
-      if (overIdx === -1) return
-      moveIconMut.mutate({
-        id: activeId,
-        toPageId: current.pageId,
-        toIndex: overIdx,
-        parentId: current.parentId,
-      })
-      return
-    }
-
-    // 弹层关闭判定放 onDragEnd(票 08):被拖项确已脱离组(落页面网格)才关;
-    // 组内重排 / 上方回滚均保持开——拖拽中途绝不卸载弹层(research 结论 5)
-    if (
-      openGroupId != null &&
-      startIcon.parentId === openGroupId &&
-      current.parentId == null &&
-      overOnPageGrid
-    ) {
-      setOpenGroupId(null)
-    }
-
-    // 跨页:缓存已是最终态,持久化最终页 + 位序
-    if (current.pageId !== startIcon.pageId) {
-      moveIconMut.mutate({ id: activeId, toPageId: current.pageId, toIndex: current.sortOrder })
-      return
-    }
-
-    // 同页(06):缓存未在拖拽中改过(视觉由 dnd-kit transform 负责),按 over 落点提交。
-    // 落点位序按顶层序列解释(组内成员不参与,ADR-0011)。
-    if (!over || active.id === over.id) return
-    const overId = Number(over.id)
-    const overIdx = topLevelOf(currentIcons, current.pageId).findIndex((i) => i.id === overId)
-    if (overIdx === -1) return
-    moveIconMut.mutate({ id: activeId, toPageId: current.pageId, toIndex: overIdx })
   }
   function handleDragCancel() {
     setActiveIconId(null)

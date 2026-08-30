@@ -8,6 +8,7 @@ import { get } from '../lib/iconTypeRegistry'
 import ConfirmButton from './ConfirmButton'
 import { EditForm } from './Icon'
 import { groupMembers, groupPageCount, groupPageSlice } from '../lib/groupReducer'
+import { groupContainerId } from '../lib/iconDrag'
 import { extractString, navIconSrc } from '../lib/iconData'
 import type { Icon } from '../lib/types'
 
@@ -201,24 +202,6 @@ export default function GroupOverlay({
   )
 }
 
-/** 弹层 SortableContext 的容器 id:`group-{组id}`(前缀与页 id 纯数字串区分,
- *  DashboardPage 的 onDragOver/onDragEnd 据此判「落点在弹层内还是页面网格」)。 */
-export function groupContainerId(groupId: number): string {
-  return `group-${groupId}`
-}
-
-/** 容器 id 是否属于组弹层(与 {@link groupContainerId} 同源,防前缀两处手写漂移)。 */
-export function isGroupContainerId(containerId: string): boolean {
-  return containerId.startsWith('group-')
-}
-
-/** 容器 id → 组 id;非弹层容器返回 null(与 {@link groupContainerId} 同源)。 */
-export function parseGroupContainerId(containerId: string): number | null {
-  return isGroupContainerId(containerId)
-    ? Number(containerId.slice('group-'.length))
-    : null
-}
-
 /**
  * 弹层内单个子图标(组成员恒为 nav,后端把关)。查看态 = div role=link,点击/中键/
  * Enter 显式 window.open 新标签打开后关弹层(见下方查看态分支注释);编辑态 =
@@ -237,7 +220,6 @@ function MemberTile({ member, onClose }: { member: Icon; onClose: () => void }) 
   const [editOpen, setEditOpen] = useState(false)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: member.id,
-    data: { pageId: member.pageId },
   })
 
   const name = extractString(member.data, 'name')

@@ -33,7 +33,6 @@ import { EditorFields, prefillFields, serializeFields } from './editorFields'
  * 查看模式与编辑模式均可拖。激活策略由 DashboardPage 的 Mouse/TouchSensor 决定(鼠标移动即拖、
  * 触控长按拖),点击(轻点)因激活阈值/延迟与拖拽分流,链接/详情照常打开。attributes 仅在
  * 编辑模式注入(保留 nav `<a>` 原生 role=link 语义与无障碍行为),listeners 在两种模式都注入。
- * data 带 pageId 供 DndContext handler 读取(跨页 07 用)。
  * 编辑模式角标(EditActions)的交互按钮 onPointerDown stopPropagation,避免点角标误启拖拽。
  */
 
@@ -71,12 +70,11 @@ export default function Icon({
   // 编辑配置 popover(✎)。
   const [editOpen, setEditOpen] = useState(false)
 
-  // 拖拽(06):查看模式与编辑模式均启用;data 带 pageId 供 DndContext handler 读取(见 issue 06 checklist)。
+  // 拖拽(06):查看模式与编辑模式均启用。
   // overlay 副本强制 disabled,避免在 DragOverlay(脱离 SortableContext)里重复注册可拖节点。
   // 点击与拖拽的分流由 DashboardPage 的 Mouse/TouchSensor 激活策略负责(鼠标移动即拖、触控长按)。
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: icon.id,
-    data: { pageId: icon.pageId },
     disabled: overlay,
   })
 

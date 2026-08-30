@@ -13,6 +13,7 @@ import { useDndContext, useDroppable } from '@dnd-kit/core'
 import PageTabs from './PageTabs'
 import { resolveWrapPage, wrapSlidePlan } from '../lib/carouselNav'
 import { pageTransitionFrame } from '../lib/pageTransition'
+import { EDGE_DROP_ID } from '../lib/iconDrag'
 
 /**
  * 走马灯：基于 CSS scroll-snap，原生顺滑、自带触控/触控板支持。
@@ -32,16 +33,6 @@ import { pageTransitionFrame } from '../lib/pageTransition'
  * 目标页 DOM 快照(cloneNode,纯 DOM——不进 React/dnd-kit,无 droppable id 冲突)
  * 填进对应克隆位,弹簧滑过去后无动画瞬移回真页位(两处内容相同,无感)。
  */
-
-/**
- * 边缘翻页 droppable 的 id(07)。EdgeDropZone 在此定义,DashboardPage 的 onDragOver
- * 据此识别"落在边缘"并放行(边缘翻页由 EdgeDropZone 自管计时器,不走跨页移动逻辑)。
- * 集中常量避免两处字面量漂移。
- */
-export const EDGE_DROP_ID = {
-  left: 'edge-left',
-  right: 'edge-right',
-} as const
 
 /** 接近区宽度(外层):光标进入此范围开始淡入方块(px)。仅视觉提示,不翻页。 */
 const APPROACH_PX = 120
