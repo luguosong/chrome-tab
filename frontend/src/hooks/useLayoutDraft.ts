@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useUpdateLayoutSettings } from '../api/config'
+import { CONFIG_KEY, useUpdateLayoutSettings } from '../api/config'
 import {
   applyLayoutField,
   commitLayoutDraft,
@@ -36,8 +36,8 @@ export function useLayoutDraft(layout: LayoutSettings) {
     const first = !stateRef.current.dirty
     const next = applyLayoutField(stateRef.current, key, value)
     update(next)
-    if (first) void qc.cancelQueries({ queryKey: ['config'] })
-    qc.setQueryData<Config>(['config'], (prev) =>
+    if (first) void qc.cancelQueries({ queryKey: CONFIG_KEY })
+    qc.setQueryData<Config>(CONFIG_KEY, (prev) =>
       prev ? { ...prev, layoutSettings: next.draft } : prev,
     )
   }

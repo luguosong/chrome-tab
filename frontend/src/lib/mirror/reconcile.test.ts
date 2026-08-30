@@ -8,6 +8,7 @@ import {
   type MirrorRecord,
 } from './reconcile'
 import type { Config } from '../types'
+import { CONFIG_KEY } from '../../api/config'
 import { DEFAULT_LAYOUT_SETTINGS } from '../layoutSettings'
 
 function cfg(): Config {
@@ -66,7 +67,7 @@ describe('isAuthoritativeCacheUpdate — 镜像落盘判别(锁 TanStack 行为�
   function collectActions(qc: QueryClient): CacheUpdateAction[] {
     const actions: CacheUpdateAction[] = []
     qc.getQueryCache().subscribe((e) => {
-      if (e.type === 'updated' && e.query.queryKey[0] === 'config') {
+      if (e.type === 'updated' && e.query.queryKey[0] === CONFIG_KEY[0]) {
         actions.push(e.action as CacheUpdateAction)
       }
     })
@@ -76,7 +77,7 @@ describe('isAuthoritativeCacheUpdate — 镜像落盘判别(锁 TanStack 行为�
   it('契约:setQueryData 派发 type:"success" + manual:true(手动写不是网络拉取)', () => {
     const qc = new QueryClient()
     const actions = collectActions(qc)
-    qc.setQueryData<Config>(['config'], cfg())
+    qc.setQueryData<Config>(CONFIG_KEY, cfg())
     expect(actions).toHaveLength(1)
     expect(actions[0].type).toBe('success')
     expect(actions[0].manual).toBe(true)
@@ -85,7 +86,7 @@ describe('isAuthoritativeCacheUpdate — 镜像落盘判别(锁 TanStack 行为�
   it('契约:网络 fetch 成功派发 type:"success" 且无 manual 标记', async () => {
     const qc = new QueryClient()
     const actions = collectActions(qc)
-    await qc.fetchQuery({ queryKey: ['config'], queryFn: async () => cfg() })
+    await qc.fetchQuery({ queryKey: CONFIG_KEY, queryFn: async () => cfg() })
     expect(actions.some((a) => a.type === 'success')).toBe(true)
     expect(actions.every((a) => a.manual !== true)).toBe(true)
   })
@@ -94,10 +95,10 @@ describe('isAuthoritativeCacheUpdate — 镜像落盘判别(锁 TanStack 行为�
     const qc = new QueryClient()
     const actions = collectActions(qc)
     const inflight = qc.fetchQuery({
-      queryKey: ['config'],
+      queryKey: CONFIG_KEY,
       queryFn: () => new Promise<Config>(() => {}),
     })
-    await qc.cancelQueries({ queryKey: ['config'] })
+    await qc.cancelQueries({ queryKey: CONFIG_KEY })
     await inflight.then(
       () => {},
       () => {},
@@ -109,8 +110,8 @@ describe('isAuthoritativeCacheUpdate — 镜像落盘判别(锁 TanStack 行为�
   it('判别:乐观写/还原快照(手动)拒,网络拉取收——乐观态不得落盘 clean 镜像', async () => {
     const qc = new QueryClient()
     const actions = collectActions(qc)
-    qc.setQueryData<Config>(['config'], cfg()) // 乐观写/还原快照同款手动路径
-    await qc.fetchQuery({ queryKey: ['config'], queryFn: async () => cfg() }) // 网络权威
+    qc.setQueryData<Config>(CONFIG_KEY, cfg()) // 乐观写/还原快照同款手动路径
+    await qc.fetchQuery({ queryKey: CONFIG_KEY, queryFn: async () => cfg() }) // 网络权威
     // fetch 前另有 {type:'fetch'} 状态事件(判别同样拒收),只看 success 序列
     const verdicts = actions.filter((a) => a.type === 'success').map(isAuthoritativeCacheUpdate)
     expect(verdicts).toEqual([false, true])

@@ -1,6 +1,6 @@
 import { useState, type ChangeEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useReplaceConfig } from '../api/config'
+import { CONFIG_KEY, useReplaceConfig } from '../api/config'
 import { ApiError } from '../api/client'
 import type { Config } from '../lib/types'
 import { mergeBlobs, parseBackupPayload, toBackupPayload, type WireConfig } from '../lib/mirror/backup'
@@ -16,7 +16,7 @@ export function BackupRestore() {
   const [msg, setMsg] = useState<string | null>(null)
 
   function doExport() {
-    const cfg = qc.getQueryData<Config>(['config'])
+    const cfg = qc.getQueryData<Config>(CONFIG_KEY)
     if (!cfg) return
     downloadJson(`chrome-tab-backup-${new Date().toISOString().slice(0, 10)}.json`, toBackupPayload(cfg))
   }
@@ -31,7 +31,7 @@ export function BackupRestore() {
     setMsg(null)
     try {
       const payload = parseBackupPayload(JSON.parse(await f.text()))
-      const cur = qc.getQueryData<Config>(['config'])
+      const cur = qc.getQueryData<Config>(CONFIG_KEY)
       const body: WireConfig =
         mode === 'replace' ? payload.config : cur ? mergeBlobs(cur, payload.config) : payload.config
       await replace.mutateAsync(body)

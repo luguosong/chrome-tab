@@ -12,7 +12,7 @@
 import { useCallback, useRef, useState } from 'react'
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from '@dnd-kit/core'
 import { useQueryClient } from '@tanstack/react-query'
-import { useConfig, useMergeIcons, useMoveIcon } from '../api/config'
+import { CONFIG_KEY, useConfig, useMergeIcons, useMoveIcon } from '../api/config'
 import { ApiError } from '../api/client'
 import { useEditMode } from '../context/EditModeContext'
 import {
@@ -108,12 +108,12 @@ export function useDragSession({
       for (const eff of effects) {
         switch (eff.kind) {
           case 'cacheIcons':
-            qc.setQueryData<Config>(['config'], (prev) =>
+            qc.setQueryData<Config>(CONFIG_KEY, (prev) =>
               prev ? { ...prev, icons: eff.icons } : prev,
             )
             break
           case 'restoreSnapshot':
-            qc.setQueryData<Config>(['config'], eff.config)
+            qc.setQueryData<Config>(CONFIG_KEY, eff.config)
             break
           case 'dwellClear':
             clearDwell()
@@ -159,7 +159,7 @@ export function useDragSession({
   const apply = useCallback(
     (event: Parameters<typeof dragSessionEvent>[1]) => {
       const env = {
-        cacheConfig: qc.getQueryData<Config>(['config']) ?? null,
+        cacheConfig: qc.getQueryData<Config>(CONFIG_KEY) ?? null,
         editing,
         openGroupId,
       }

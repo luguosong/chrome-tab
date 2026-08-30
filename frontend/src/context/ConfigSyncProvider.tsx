@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from './AuthContext'
 import { apiFetch } from '../api/client'
-import { fetchConfigOnce } from '../api/config'
+import { CONFIG_KEY, fetchConfigOnce } from '../api/config'
 import type { Config } from '../lib/types'
 import { decideReconciliation, isAuthoritativeCacheUpdate, type MirrorRecord } from '../lib/mirror/reconcile'
 import { toBackupPayload, toWireConfig } from '../lib/mirror/backup'
@@ -52,7 +52,7 @@ export function ConfigSyncProvider({ children }: { children: ReactNode }) {
       // 离线/服务端不可达:有本地镜像则直接喂缓存(只读展示),否则等网络
       const local = await loadMirror(uid)
       if (local) {
-        qc.setQueryData<Config>(['config'], local.config)
+        qc.setQueryData<Config>(CONFIG_KEY, local.config)
       }
       return
     }
@@ -66,7 +66,7 @@ export function ConfigSyncProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify(toWireConfig(local.config)),
       })
       const fresh = await fetchConfigOnce()
-      qc.setQueryData<Config>(['config'], fresh)
+      qc.setQueryData<Config>(CONFIG_KEY, fresh)
       await saveMirror(uid, { config: fresh, updatedAt: fresh.updatedAt, dirty: false })
       return
     }
@@ -77,7 +77,7 @@ export function ConfigSyncProvider({ children }: { children: ReactNode }) {
       setState((s) => ({ ...s, conflict: true }))
     }
     await saveMirror(uid, { config: server, updatedAt: server.updatedAt, dirty: false })
-    qc.setQueryData<Config>(['config'], server)
+    qc.setQueryData<Config>(CONFIG_KEY, server)
   }
 
   // boot:user 变化跑一次和解,完成后 ready
@@ -127,9 +127,9 @@ export function ConfigSyncProvider({ children }: { children: ReactNode }) {
     if (!user) return
     const unsub = qc.getQueryCache().subscribe((event) => {
       if (event.type !== 'updated') return
-      if (event.query.queryKey[0] !== 'config') return
+      if (event.query.queryKey[0] !== CONFIG_KEY[0]) return
       if (!isAuthoritativeCacheUpdate(event.action)) return
-      const data = qc.getQueryData<Config>(['config'])
+      const data = qc.getQueryData<Config>(CONFIG_KEY)
       if (!data || !readyRef.current) return
       void saveMirror(user.id, { config: data, updatedAt: data.updatedAt ?? null, dirty: false })
     })

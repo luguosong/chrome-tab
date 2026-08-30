@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '../api/client'
 import type { TodoBundle, TodoTask } from '../lib/todo'
+import { optimisticCallbacks } from '../lib/optimisticMutation'
 
 /**
  * 滴答待办取数与写回(单例图标,CONTEXT.md「待办」;首个可写类型)。不进
@@ -11,9 +12,11 @@ import type { TodoBundle, TodoTask } from '../lib/todo'
  * 即清);前端 30s staleTime + 5min 轮询维持温度。勾选完成走乐观更新(点掉即从
  * 当前视图消失,失败回滚);速记创建落收集箱,成功后 invalidate 对账。
  */
+const TODO_KEY = ['todo'] as const
+
 export function useTodo() {
   return useQuery<TodoBundle | null>({
-    queryKey: ['todo'],
+    queryKey: TODO_KEY,
     queryFn: () => apiFetch<TodoBundle | null>('/api/todo'),
     staleTime: 30_000,
     refetchInterval: 5 * 60_000,
@@ -21,7 +24,9 @@ export function useTodo() {
   })
 }
 
-/** 点掉即完成:从三视图乐观移除,失败回滚快照,收尾 invalidate 对账。 */
+/** 点掉即完成:从三视图乐观移除,失败回滚快照,收尾 invalidate 对账。乐观协议
+ *  经 optimisticMutation 工厂(ADR-0044)——T 为 TodoBundle|null:null 缓存跳过
+ *  乐观写、null 快照照常还原,双层判空契约由工厂测试面背书。 */
 export function useCompleteTodo() {
   const qc = useQueryClient()
   return useMutation({
@@ -30,22 +35,11 @@ export function useCompleteTodo() {
         method: 'POST',
         body: JSON.stringify({ projectId: t.projectId, taskId: t.id }),
       }),
-    onMutate: async (t) => {
-      await qc.cancelQueries({ queryKey: ['todo'] })
-      const prev = qc.getQueryData<TodoBundle | null>(['todo'])
-      if (prev) {
-        qc.setQueryData<TodoBundle>(['todo'], {
-          today: prev.today.filter((x) => x.id !== t.id),
-          week: prev.week.filter((x) => x.id !== t.id),
-          inbox: prev.inbox.filter((x) => x.id !== t.id),
-        })
-      }
-      return { prev }
-    },
-    onError: (_e, _t, ctx) => {
-      if (ctx?.prev !== undefined) qc.setQueryData<TodoBundle | null>(['todo'], ctx.prev)
-    },
-    onSettled: () => void qc.invalidateQueries({ queryKey: ['todo'] }),
+    ...optimisticCallbacks<TodoBundle | null, TodoTask>(qc, TODO_KEY, (prev, t) => ({
+      today: prev.today.filter((x) => x.id !== t.id),
+      week: prev.week.filter((x) => x.id !== t.id),
+      inbox: prev.inbox.filter((x) => x.id !== t.id),
+    })),
   })
 }
 
@@ -55,6 +49,6 @@ export function useCreateTodo() {
   return useMutation({
     mutationFn: (title: string) =>
       apiFetch('/api/todo', { method: 'POST', body: JSON.stringify({ title }) }),
-    onSettled: () => void qc.invalidateQueries({ queryKey: ['todo'] }),
+    onSettled: () => void qc.invalidateQueries({ queryKey: TODO_KEY }),
   })
 }
