@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getCountdowns } from './countdown'
+import { describeDays, getAllCountdowns, getCountdowns } from './countdown'
 import type { ImportantDate } from 'chrome-tab-shared'
 
 // 对拍基准:农历节日公历日期已用 lunar-typescript 实测核对(2026/2027 两年),
@@ -99,5 +99,44 @@ describe('getCountdowns 重要日子', () => {
   it('与节假日混排:按剩余天数升序,不分来源', () => {
     const items = getCountdowns(new Date(2026, 8, 20), [user({ name: '纪念日', date: '2000-09-23' })])
     expect(items.map((i) => i.name)).toEqual(['纪念日', '中秋', '国庆', '重阳'])
+  })
+})
+
+describe('getAllCountdowns 全量口径(图标块内下一条/Modal 节假日分区,不限 30 天窗)', () => {
+  it('出窗条目仍在列:2026-08-01 时圣诞(12-25)146 天、腊八滚 2027-01-15', () => {
+    const items = getAllCountdowns(new Date(2026, 7, 1), [])
+    expect(items.find((i) => i.name === '圣诞')?.days).toBe(146)
+    expect(items.find((i) => i.name === '腊八')?.days).toBe(167)
+  })
+
+  it('用户 annual 滚次年仍显示(块内常显下一条哪怕 364 天):首个=全量最近', () => {
+    const birthday = user({ name: '生日', date: '1990-09-10' })
+    const items = getAllCountdowns(new Date(2026, 8, 11), [birthday])
+    expect(items[0]).toMatchObject({ name: '中秋', days: 14 })
+    expect(items.find((i) => i.source === 'user')).toMatchObject({ name: '生日', days: 364 })
+  })
+
+  it('同日撞期:用户重要日子排节假日前(块内下一条/弹层首行不被内置清单遮蔽)', () => {
+    const birthday = user({ name: '生日', date: '2000-10-01' })
+    const items = getAllCountdowns(new Date(2026, 8, 20), [birthday])
+    // 中秋(9-25,5 天)在前;并列的 11 天组内 user 先于 holiday(sort 稳定,入列顺序决出)
+    const tied = items.filter((i) => i.days === 11)
+    expect(tied.map((i) => i.name)).toEqual(['生日', '国庆'])
+  })
+
+  it('窗口口径是其子集:getCountdowns 恒为 getAllCountdowns 的 30 天切片', () => {
+    const dates = [user({ name: '生日', date: '1990-09-10' }), user({ name: '交房', date: '2026-09-05', repeat: 'once' })]
+    const all = getAllCountdowns(new Date(2026, 7, 25), dates)
+    expect(all.map((i) => i.name).slice(0, 3)).toEqual(['交房', '生日', '中秋']) // 中秋 31 天仅在全量
+    expect(getCountdowns(new Date(2026, 7, 25), dates).every((i) => i.days <= 30)).toBe(true)
+  })
+})
+
+describe('describeDays 措辞映射', () => {
+  it('0=今天、1=明天、其余「N 天」(弹层/块内/Modal 三处共用)', () => {
+    expect(describeDays(0)).toBe('今天')
+    expect(describeDays(1)).toBe('明天')
+    expect(describeDays(24)).toBe('24 天')
+    expect(describeDays(364)).toBe('364 天')
   })
 })

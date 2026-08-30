@@ -5,6 +5,8 @@ import AiHotIconBody from './AiHotIcon'
 import AiHotModal from './AiHotModal'
 import ChangelogIconBody from './ChangelogIcon'
 import ChangelogModal from './ChangelogModal'
+import CountdownIconBody from './CountdownIcon'
+import CountdownModal from './CountdownModal'
 import {
   ChangelogDetail,
   GroupIconBody,
@@ -41,6 +43,7 @@ describe('图标类型 UI adapter', () => {
     ['news', NewsIconBody, NewsModal, 'header'],
     ['trending', TrendingIconBody, TrendingModal, 'header'],
     ['servers', ServersIconBody, ServersModal, 'header'],
+    ['countdown', CountdownIconBody, CountdownModal, 'block'],
     ['group', GroupIconBody, undefined, undefined],
   ] satisfies Array<[IconTypeId, unknown, unknown, 'block' | 'header' | undefined]>)(
     '%s 的图标块、详情与入口策略映射固定',

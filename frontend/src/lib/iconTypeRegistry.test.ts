@@ -153,3 +153,22 @@ describe('新闻类型 news(单例;CONTEXT.md「新闻」,ADR-0027)', () => {
     expect(canAdd('news', ['nav', 'news'])).toBe(false)
   })
 })
+
+describe('倒计时类型 countdown(单例;CONTEXT.md「倒计时」)', () => {
+  it('登记为扩展、单例', () => {
+    expect(get('countdown')?.label).toBe('倒计时')
+    expect(get('countdown')?.kind).toBe('extension')
+    expect(get('countdown')?.singleton).toBe(true)
+  })
+
+  it('1×1 不声明 size;无实例参数(重要日子寄放布局设置,ADR-0026,不进 data)', () => {
+    expect(get('countdown')?.size).toBeUndefined()
+    expect(iconCells('countdown')).toBe(1)
+    expect(get('countdown')?.editor).toEqual([])
+  })
+
+  it('单例:不存在时允许,已存在时拒绝(新增抽屉置灰的判据)', () => {
+    expect(canAdd('countdown', ['nav', 'aihot'])).toBe(true)
+    expect(canAdd('countdown', ['nav', 'countdown'])).toBe(false)
+  })
+})

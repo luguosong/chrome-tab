@@ -2,9 +2,10 @@ import { Lunar, type Solar } from 'lunar-typescript'
 import type { ImportantDate } from 'chrome-tab-shared'
 
 /**
- * 倒计时(CONTEXT.md;时钟 hover 弹层的日期临近视图):汇集内置「节假日」与用户
- * 配置「重要日子」,凡距今 ≤30 天者按剩余天数升序混排。纯函数、前端本地推算,
- * 与农历宜忌同为确定性计算(按天重算,10s 心跳不触发)。
+ * 倒计时(CONTEXT.md「倒计时」,双形态):汇集内置「节假日」与用户配置「重要日子」,
+ * 按剩余天数升序混排。两口径:全量 getAllCountdowns(图标块内下一条/详情 Modal
+ * 节假日分区,不限窗)与窗口 getCountdowns(时钟 hover 弹层只读分区,≤30 天)。
+ * 纯函数、前端本地推算,与农历宜忌同为确定性计算(按天重算,10s 心跳不触发)。
  */
 
 export const COUNTDOWN_WINDOW_DAYS = 30
@@ -139,16 +140,29 @@ function nextUserDate(d: ImportantDate, today: Date): Date | null {
   }
 }
 
-/** 倒计时窗口内条目(≤30 天,升序混排;空窗 = 空数组,展示层隐藏分区)。 */
-export function getCountdowns(now: Date, userDates: ImportantDate[]): CountdownItem[] {
+/** 全量条目(不限窗,升序混排;过期不进列):图标块内取 [0] 作常显下一条,详情
+ *  Modal 节假日分区按 source 过滤——不限窗是常驻 glance 视图的取舍(看着它逼近)。 */
+export function getAllCountdowns(now: Date, userDates: ImportantDate[]): CountdownItem[] {
   const today = startOfDay(now)
   const items: CountdownItem[] = []
   const push = (key: string, name: string, date: Date | null, source: 'holiday' | 'user') => {
     if (!date) return
     const days = Math.round((date.getTime() - today.getTime()) / 86_400_000)
-    if (days >= 0 && days <= COUNTDOWN_WINDOW_DAYS) items.push({ key, name, days, date, source })
+    if (days >= 0) items.push({ key, name, days, date, source })
   }
-  for (const h of HOLIDAYS) push(h.key, h.name, nextAnnual(h.dateInYear, today), 'holiday')
+  // 用户条目先入列:同日撞期(如生日与国庆)时排节假日前——块内 [0] 与弹层首行
+  // 不被内置清单遮蔽(sort 稳定,入列顺序决出并列)
   for (const u of userDates) push(u.id, u.name, nextUserDate(u, today), 'user')
+  for (const h of HOLIDAYS) push(h.key, h.name, nextAnnual(h.dateInYear, today), 'holiday')
   return items.sort((a, b) => a.days - b.days)
+}
+
+/** 倒计时窗口内条目(≤30 天,升序混排;空窗 = 空数组,展示层隐藏分区)。 */
+export function getCountdowns(now: Date, userDates: ImportantDate[]): CountdownItem[] {
+  return getAllCountdowns(now, userDates).filter((i) => i.days <= COUNTDOWN_WINDOW_DAYS)
+}
+
+/** 剩余天数措辞(0=今天、1=明天、其余「N 天」):弹层/图标块内/详情 Modal 三处共用。 */
+export function describeDays(days: number): string {
+  return days === 0 ? '今天' : days === 1 ? '明天' : `${days} 天`
 }

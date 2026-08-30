@@ -9,6 +9,8 @@ import AiHotIconBody from './AiHotIcon'
 import AiHotModal from './AiHotModal'
 import ChangelogIconBody from './ChangelogIcon'
 import ChangelogModal from './ChangelogModal'
+import CountdownIconBody from './CountdownIcon'
+import CountdownModal from './CountdownModal'
 import ModelIconBody from './ModelIcon'
 import ModelModal from './ModelModal'
 import NewsIconBody from './NewsIcon'
@@ -72,6 +74,7 @@ export const ICON_TYPE_UI: Record<IconTypeId, IconTypeUiAdapter> = {
   news: { body: NewsIconBody, detail: NewsModal, detailEntry: 'header' },
   trending: { body: TrendingIconBody, detail: TrendingModal, detailEntry: 'header' },
   servers: { body: ServersIconBody, detail: ServersModal, detailEntry: 'header' },
+  countdown: { body: CountdownIconBody, detail: CountdownModal, detailEntry: 'block' },
   group: { body: GroupIconBody },
 }
 

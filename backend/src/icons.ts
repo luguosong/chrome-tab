@@ -32,11 +32,11 @@ const cellsOf = (rows: ReadonlyArray<{ type: string }>): number => {
   return sum
 }
 /** icon type 大写枚举 wire(config 全量替换校验复用)。 */
-export const ICON_TYPES = ['NAV', 'STOCK', 'CHANGELOG', 'WEATHER', 'AIHOT', 'TODO', 'VIDEO', 'MODEL', 'NEWS', 'TRENDING', 'SERVERS', 'GROUP'] as const
+export const ICON_TYPES = ['NAV', 'STOCK', 'CHANGELOG', 'WEATHER', 'AIHOT', 'TODO', 'VIDEO', 'MODEL', 'NEWS', 'TRENDING', 'SERVERS', 'COUNTDOWN', 'GROUP'] as const
 type IconType = (typeof ICON_TYPES)[number]
 
 /** 单例类型(见 CONTEXT.md「单例类型」):全局仅一个实例,新增/全量替换两入口同校验。 */
-export const SINGLETON_TYPES: readonly IconType[] = ['AIHOT', 'TODO', 'VIDEO', 'MODEL', 'NEWS', 'TRENDING', 'SERVERS']
+export const SINGLETON_TYPES: readonly IconType[] = ['AIHOT', 'TODO', 'VIDEO', 'MODEL', 'NEWS', 'TRENDING', 'SERVERS', 'COUNTDOWN']
 
 type IconRow = {
   id: number

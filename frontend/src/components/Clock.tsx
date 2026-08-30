@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getAlmanac } from '../lib/lunar'
-import { getCountdowns } from '../lib/countdown'
+import { describeDays, getCountdowns } from '../lib/countdown'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
-import CountdownEditModal from './CountdownEditModal'
+import useNow from '../hooks/useNow'
 
 /** 生肖轮固定序(0=鼠)与地支序一一对应;本命年 = 农历年回退到该生肖最近年份 */
 const ZODIAC = '鼠牛虎兔龙蛇马羊猴鸡狗猪'.split('')
@@ -38,8 +38,7 @@ const XINGZUO = [
  *  DashboardPage 侧本组件 absolute 出流,搜索框位置与时钟高度解耦。 */
 export default function Clock() {
   const { clockFont, clock24h, importantDates } = useLayoutSettings()
-  const [editing, setEditing] = useState(false)
-  const [now, setNow] = useState(() => new Date())
+  const now = useNow(10_000) // 分钟级精度足够
   // 弹层显隐:JS hover-intent 而非 group-hover——时钟与弹层间的 8px 视觉间隙
   // (mt-2 margin)在 DOM 上不属于本组件任何元素,慢速穿越时 CSS :hover 断链、
   // 弹层即收,弹层内的可点内容(编辑钮)不可达。onMouseLeave 后 250ms 宽限,
@@ -82,10 +81,6 @@ export default function Clock() {
       window.removeEventListener('mousemove', onMove)
       clearTimeout(hideTimer.current)
     }
-  }, [])
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 10_000) // 10s：分钟级精度足够
-    return () => clearInterval(t)
   }, [])
   const time = now.toLocaleTimeString('zh-CN', {
     hour: '2-digit',
@@ -136,30 +131,17 @@ export default function Clock() {
         }`}
       >
         {/* 倒计时分区(CONTEXT.md「倒计时」):弹层最顶部——实用信息先于命理趣味。
-            空窗隐藏列表但保留一行入口,否则第一条无处可加;「编辑」开 CountdownEditModal。 */}
-        <div className="pb-1.5 mb-1.5 border-b border-white/10 space-y-0.5">
-          {countdowns.length === 0 ? (
-            <div className="text-white/50">暂无临近日子</div>
-          ) : (
-            countdowns.map((c) => (
+            只读(「重要日子」编辑迁「倒计时」图标详情 Modal);空窗分区整体隐藏。 */}
+        {countdowns.length > 0 && (
+          <div className="pb-1.5 mb-1.5 border-b border-white/10 space-y-0.5">
+            {countdowns.map((c) => (
               <div key={c.key} className="flex justify-between gap-x-8">
                 <span className="text-white/70">{c.name}</span>
-                <span className="tabular-nums text-white/90">
-                  {c.days === 0 ? '今天' : c.days === 1 ? '明天' : `${c.days} 天`}
-                </span>
+                <span className="tabular-nums text-white/90">{describeDays(c.days)}</span>
               </div>
-            ))
-          )}
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="min-h-8 -mr-2 px-2 rounded-full text-white/45 hover:text-white/80 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
-            >
-              编辑
-            </button>
+            ))}
           </div>
-        </div>
+        )}
 
         <div className="flex gap-x-1.5">
           {ZODIAC.map((z, i) => {
@@ -236,8 +218,6 @@ export default function Clock() {
           })}
         </div>
       </div>
-
-      {editing && <CountdownEditModal onClose={() => setEditing(false)} />}
     </div>
   )
 }

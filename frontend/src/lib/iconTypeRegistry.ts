@@ -195,6 +195,19 @@ const REGISTRY: Record<IconTypeId, IconTypeDefinition> = {
     editor: [],
   },
 
+  /** 倒计时:扩展类型,单例(「重要日子」是账号级配置、「节假日」内置枚举,实例无可绑
+   *  参数,见 CONTEXT.md「倒计时」)。data 无字段;1×1 普通占格——块内 = 下一条临近
+   *  条目(主行剩余天数 + 次行名称,不限 30 天窗),点块打开详情 Modal(「重要日子」
+   *  编辑的全局唯一入口 +「节假日」只读分区);时钟 hover 弹层另保留只读 30 天窗分区。
+   *  纯前端本地推算(lib/countdown),无后端取数、零迁移(ADR-0026 寄放不动)。 */
+  countdown: {
+    id: 'countdown',
+    label: '倒计时',
+    kind: 'extension',
+    singleton: true,
+    editor: [],
+  },
+
   /** 分组(ADR-0011):iOS 文件夹式收纳容器(块内成员 favicon 3×2 迷你预览,ADR-0015)。
    *  kind='group' 不属于 base/extension 任一分区,
    *  新增抽屉按分区渲染时自然不列出——组只能经编辑模式合并手势诞生(POST /icons/merge),
