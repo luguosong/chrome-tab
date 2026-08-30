@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { asRec, BadRequest, cachedOrNull, ConflictError, str } from './common'
+import { asRec, BadRequest, cachedOrNull, ConflictError, FETCH_TIMEOUT, fetchRes, str } from './common'
 
 /**
  * 滴答清单待办代理(CONTEXT.md「待办」):单例图标的取数与写回——首个可写图标类型。
@@ -121,14 +121,21 @@ export function createDidaService(cfg: DidaConfig, baseUrl = DEFAULT_BASE) {
     if (!token.trim()) throw new BadRequest('滴答清单未配置(DIDA365_TOKEN 缺失)')
   }
 
-  /** 非 2xx → 502 透上游状态(读侧被 catch 降级,写侧直达 app.onError)。 */
+  /** 非 2xx → 502 透上游状态(读侧被 catch 降级,写侧直达 app.onError);超时防挂起
+   *  经 fetchRes 原语(ADR-0017/0045);content-type 判非 JSON 响应为 undefined(如空体)。 */
   async function postJson(path: string, body?: unknown): Promise<unknown> {
-    const res = await fetch(new URL(path, baseUrl), {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    })
-    if (!res.ok) throw new ConflictError(502, `滴答上游 HTTP ${res.status}`)
+    let res: Response
+    try {
+      res = await fetchRes(new URL(path, baseUrl), FETCH_TIMEOUT, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      })
+    } catch (e) {
+      const status = (e as { status?: number }).status
+      if (typeof status === 'number') throw new ConflictError(502, `滴答上游 HTTP ${status}`)
+      throw e
+    }
     const ct = res.headers.get('content-type')
     return ct?.includes('application/json') ? res.json() : undefined
   }

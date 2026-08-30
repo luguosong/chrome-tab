@@ -122,9 +122,12 @@ export const str = (m: Rec, k: string): string | null => {
 }
 
 /**
- * 上游文本抓取(超时防挂起,ADR-0017;status/body 挂错误上供调用方分类)。
- * changelog/videoUpdates/modelTracking 三处同形,自第三处起收归共享。
- * 统一 Chrome UA 与默认超时(news 源 2026-08-26 起,「GitHub 趋势」剥离成第二消费者后收归)。
+ * 上游抓取原语族:超时防挂起(ADR-0017)+ 非 2xx 抛带 status/body 的错(供调用方
+ * 分类),此两不变量全 backend 单点。changelog/videoUpdates/modelTracking 三处同形
+ * 自第三处收归;2026-08-30 weather/dida/aihot/servermon 的裸 fetch(无超时,weather
+ * 有线上事故前科)收编(ADR-0045)。不收:ai/agent——LLM 长读超时自成一族,且已有
+ * AgentDeps 注入 seam。统一 Chrome UA 与默认超时(news 源 2026-08-26 起,「GitHub
+ * 趋势」剥离成第二消费者后收归)。
  */
 export const CHROME_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
@@ -136,7 +139,8 @@ export const chromeHeaders = (extra: Record<string, string> = {}): RequestInit =
 /** 匿名抓取默认超时(newnow myFetch 同款)。 */
 export const FETCH_TIMEOUT = 10_000
 
-export async function fetchText(url: string, timeoutMs: number, init?: RequestInit): Promise<string> {
+/** Response 底形态:要看响应头/流式消费的调用方用(dida 判 content-type)。 */
+export async function fetchRes(url: string | URL, timeoutMs: number, init?: RequestInit): Promise<Response> {
   const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
   if (!res.ok) {
     throw Object.assign(new Error(`${init?.method ?? 'GET'} ${url} → HTTP ${res.status}`), {
@@ -144,19 +148,20 @@ export async function fetchText(url: string, timeoutMs: number, init?: RequestIn
       body: (await res.text()).slice(0, 200),
     })
   }
-  return res.text()
+  return res
 }
 
-/** 同 fetchText 的二进制形态(新闻·联合早报 gb2312 页面,ADR-0027)。 */
-export async function fetchBuffer(url: string, timeoutMs: number, init?: RequestInit): Promise<ArrayBuffer> {
-  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
-  if (!res.ok) {
-    throw Object.assign(new Error(`${init?.method ?? 'GET'} ${url} → HTTP ${res.status}`), {
-      status: res.status,
-      body: (await res.text()).slice(0, 200),
-    })
-  }
-  return res.arrayBuffer()
+export async function fetchText(url: string | URL, timeoutMs: number, init?: RequestInit): Promise<string> {
+  return (await fetchRes(url, timeoutMs, init)).text()
+}
+
+export async function fetchJson(url: string | URL, timeoutMs: number, init?: RequestInit): Promise<unknown> {
+  return (await fetchRes(url, timeoutMs, init)).json()
+}
+
+/** 二进制形态(新闻·联合早报 gb2312 页面,ADR-0027)。 */
+export async function fetchBuffer(url: string | URL, timeoutMs: number, init?: RequestInit): Promise<ArrayBuffer> {
+  return (await fetchRes(url, timeoutMs, init)).arrayBuffer()
 }
 
 /** config_version bump(ADR-0006):upsert 当前用户版本为 now。必须在写事务末尾调用,与配置写原子。 */

@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { asRec, cachedOrNull, str } from './common'
+import { asRec, cachedOrNull, FETCH_TIMEOUT, fetchJson, str } from './common'
 
 /**
  * AIHOT 后端代理(CONTEXT.md「AI 热点」):单例图标类型的唯一取数来源,匿名只读、
@@ -165,11 +165,8 @@ export function parseDaily(resp: unknown): AihotDailyDto {
 function createCachedSource<T>(baseUrl: string, path: string, ttlMs: number, parse: (resp: unknown) => T) {
   const source = cachedOrNull({
     ttlMs,
-    fetch: async (p: string) => {
-      const res = await fetch(new URL(p, baseUrl), { headers: { 'User-Agent': USER_AGENT } })
-      if (!res.ok) throw new Error(`AIHOT 上游 HTTP ${res.status}`)
-      return parse(await res.json())
-    },
+    fetch: async (p: string) =>
+      parse(await fetchJson(new URL(p, baseUrl), FETCH_TIMEOUT, { headers: { 'User-Agent': USER_AGENT } })),
     warnLabel: (p) => `AIHOT 取数失败(${p})`,
   })
   return (): Promise<T | null> => source.get(path)

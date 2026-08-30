@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { asRec, str, type Rec } from './common'
-import { TtlCache } from './common'
+import { FETCH_TIMEOUT, fetchJson, TtlCache } from './common'
 
 /**
  * 天气后端代理(ADR-0009,契约 §7)。五端点 per 位置:实况 /v7/weather/now、空气
@@ -321,13 +321,12 @@ export function createWeatherService(cfg: WeatherConfig) {
     }
   }
 
-  /** 对齐 RestClient.retrieve():非 2xx 抛(4xx 错误体排障 + 降级路径统一走异常) */
+  /** 对齐 RestClient.retrieve():非 2xx 抛(4xx 错误体排障 + 降级路径统一走异常);
+   *  超时防挂起经 fetchJson 原语(ADR-0017/0045)。 */
   async function getJson(path: string, params: Record<string, string>): Promise<unknown> {
     const url = new URL(path, base)
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
-    const res = await fetch(url, { headers: { 'X-QW-Api-Key': apiKey } })
-    if (!res.ok) throw new Error(`和风上游 HTTP ${res.status}`)
-    return res.json()
+    return fetchJson(url, FETCH_TIMEOUT, { headers: { 'X-QW-Api-Key': apiKey } })
   }
 
   /** 城市搜索(GeoAPI),供新增抽屉城市选择器消歧。 */

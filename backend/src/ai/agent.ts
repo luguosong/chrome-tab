@@ -128,7 +128,7 @@ export function prodAgentDeps(): AgentDeps {
         method: 'POST',
         headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(READ_TIMEOUT_MS), // read 上界;connect 10s 见常量注释
+        signal: AbortSignal.timeout(READ_TIMEOUT_MS), // read 上界;connect 10s 见常量注释;不经 common fetch 原语(LLM 长读族,ADR-0045)
       })
       if (!res.ok) throw new Error(`chat/completions → HTTP ${res.status}`)
       return res.json()

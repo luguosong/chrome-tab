@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import type { ServerMonEntry, ServerMonHistoryPoint, ServerMonSnapshot } from 'chrome-tab-shared'
 import type { AuthEnv } from './auth'
 import type { Db } from './db'
-import { asRec, BadRequest, str } from './common'
+import { asRec, BadRequest, fetchJson, str } from './common'
 
 /**
  * 「服务器状态」(CONTEXT.md「服务器状态」):thinkpad/aliyun 各跑一个 servermon
@@ -31,11 +31,7 @@ export interface ServerMonDeps {
 }
 
 export const prodServerMonDeps = (): ServerMonDeps => ({
-  fetchJson: async (url, timeoutMs) => {
-    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
-    if (!res.ok) throw new Error(`servermon → HTTP ${res.status}`)
-    return res.json()
-  },
+  fetchJson: (url, timeoutMs) => fetchJson(url, timeoutMs),
 })
 
 /** exporter JSON(snake_case)→ 契约 DTO(camelCase);残体收敛不抛(防御式,同 weather 口径)。 */
