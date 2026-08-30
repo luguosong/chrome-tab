@@ -4,18 +4,26 @@ import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import { useUpdateLayoutSettings } from '../api/config'
 import { describeDays, getAllCountdowns } from '../lib/countdown'
 import useNow from '../hooks/useNow'
+import type { TabItem } from '../lib/detailModalState'
 import type { Icon } from '../lib/types'
 import ConfirmButton from './ConfirmButton'
 import DetailModal from './DetailModal'
 
 /**
- * 倒计时详情 Modal(CONTEXT.md「倒计时」,单 tab 两分区):点块打开(detailEntry:
- * 'block')。「重要日子」可编辑分区——「重要日子」编辑的**全局唯一入口**(自时钟
- * hover 弹层迁入),列表 CRUD 每动作即时整份 PUT(useUpdateLayoutSettings,与布局
- * 草稿同一持久化通道),不设草稿暂存——列表 ≤100 条,PUT 轻量,即时反馈免掉
- * 「保存/放弃」两层状态;「节假日」只读分区——内置清单从今天起按剩余天数升序。
+ * 倒计时详情 Modal(CONTEXT.md「倒计时」,双 tab):点块打开(detailEntry:'block')。
+ * 「重要日子」tab(默认)可编辑——「重要日子」编辑的**全局唯一入口**(自时钟 hover
+ * 弹层迁入),列表 CRUD 每动作即时整份 PUT(useUpdateLayoutSettings,与布局草稿同一
+ * 持久化通道),不设草稿暂存——列表 ≤100 条,PUT 轻量,即时反馈免掉「保存/放弃」
+ * 两层状态;「节假日」tab 只读——内置清单从今天起按剩余天数升序,行附当年公历
+ * 日期(查「春节是哪天」的主诉求),恰逢当天的条目 accent 高亮。
  * 数据寄放布局设置(ADR-0026),无独立查询,不用骨架查询状态机。
  */
+
+type CountdownTab = 'important' | 'holiday'
+const TABS: readonly TabItem<CountdownTab>[] = [
+  { key: 'important', label: '重要日子' },
+  { key: 'holiday', label: '节假日' },
+]
 
 /** 表单草稿:日期拆年/月/日输入(annual 年份无意义,shared 契约语义)。 */
 type Draft = {
@@ -76,6 +84,7 @@ function Seg<T extends string>({
 export default function CountdownModal({ onClose }: { icon: Icon; onClose: () => void }) {
   const layout = useLayoutSettings()
   const save = useUpdateLayoutSettings()
+  const [tab, setTab] = useState<CountdownTab>('important')
   const [draft, setDraft] = useState<Draft | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
@@ -129,11 +138,12 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
       scroll
       className="p-5 text-sm text-white/90"
       title="倒计时"
+      tabs={TABS}
+      tab={tab}
+      onTabChange={setTab}
     >
-      {/* ── 重要日子(可编辑,全局唯一入口)── */}
-      <section>
-        <div className="text-meta uppercase tracking-wider text-white/50 mb-2">重要日子</div>
-        {draft === null ? (
+      {tab === 'important' ? (
+        draft === null ? (
           <>
             <div className="space-y-1">
               {layout.importantDates.length === 0 && (
@@ -272,21 +282,30 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
               </button>
             </div>
           </>
-        )}
-      </section>
-
-      {/* ── 节假日(内置,只读:从今天起升序)── */}
-      <section className="mt-4 pt-3 border-t border-white/10">
-        <div className="text-meta uppercase tracking-wider text-white/50 mb-2">节假日</div>
-        <div className="space-y-0.5">
+        )
+      ) : (
+        /* ── 节假日(内置,只读:从今天起升序,行附当年公历日期;当天 accent)── */
+        <div className="space-y-1">
           {holidays.map((h) => (
-            <div key={h.key} className="flex justify-between gap-x-8 text-xs">
-              <span className="text-white/70">{h.name}</span>
-              <span className="tabular-nums text-white/90">{describeDays(h.days)}</span>
+            <div
+              key={h.key}
+              className={`flex justify-between gap-x-8 text-xs rounded-lg px-3 py-2 ${
+                h.days === 0 ? 'bg-accent/15' : ''
+              }`}
+            >
+              <span className="text-white/70">
+                {h.name}
+                <span className={`ml-2 tabular-nums ${h.days === 0 ? 'text-accent' : 'text-white/40'}`}>
+                  {h.date.getMonth() + 1}月{h.date.getDate()}日
+                </span>
+              </span>
+              <span className={`tabular-nums ${h.days === 0 ? 'text-accent' : 'text-white/90'}`}>
+                {describeDays(h.days)}
+              </span>
             </div>
           ))}
         </div>
-      </section>
+      )}
     </DetailModal>
   )
 }
