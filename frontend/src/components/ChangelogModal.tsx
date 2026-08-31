@@ -1,5 +1,10 @@
 import { useMemo } from 'react'
-import { getChangelogSource, type ChangelogSourceId } from 'chrome-tab-shared'
+import {
+  getChangelogSource,
+  hasChangelogRaw,
+  isPrereleaseVersion,
+  type ChangelogSourceId,
+} from 'chrome-tab-shared'
 import { useChangelog, useTranslateStatus, useTranslateVersions } from '../hooks/useChangelog'
 import { inline } from '../lib/changelogParser'
 import DetailModal, { QueryPane } from './DetailModal'
@@ -31,9 +36,10 @@ export default function ChangelogModal({
 }) {
   const def = getChangelogSource(source)
   const sourceLabel = def.label
-  // 无原文源(如 Codex,changelogUrl 缺省):版本流为 npm 合成空块,无条目无译制,
-  // 每版本行给 GitHub 外链代替,「翻译」按钮不渲染。
-  const noRaw = !def.changelogUrl
+  // 无原文源(两地址皆缺省,现无实例):版本流为 npm 合成空块,无条目无译制,
+  // 每版本行给 GitHub 外链代替,「翻译」按钮不渲染。判别轴 = shared 的
+  // hasChangelogRaw(ADR-0050,直取 changelogUrl 或合成 githubReleasesApiUrl 皆算)。
+  const noRaw = !hasChangelogRaw(def)
   const { data, isError, refetch } = useChangelog(source)
   const translateMut = useTranslateVersions(source)
   // 译制可观察:pending 期间轮询后端阶段;translating 显模型/耗时,idle 即排队(互斥链)
@@ -50,7 +56,9 @@ export default function ChangelogModal({
 
   const versions = data?.versions ?? []
   const times = data?.releaseTimes ?? {}
-  const latest = versions[0]?.title
+  // 「最新」= 最新稳定版(与块内滚动榜同轴,ADR-0050):全览位列表含预发布占位行,但
+  // accent/药丸不给 alpha——同一源对「最新」只给一个答案
+  const latest = versions.find((v) => !isPrereleaseVersion(v.title))?.title
   const translated = useMemo(() => new Set(data?.translatedVersions ?? []), [data?.translatedVersions])
 
   // 译制失败感知:后端译制失败仅记日志、保持英文仍返 200(如 LLM 网关不可达),
@@ -152,7 +160,9 @@ export default function ChangelogModal({
                               GitHub ↗
                             </a>
                           )}
-                          {!noRaw && !translated.has(v.title) && (
+                          {/* 无可渲染条目(如合成源的预发布占位块)不给翻译按钮——可渲染性以
+                              本组件的 groups 结构为准,与后端译窗口守卫(有内容行)语义相近而非同一谓词 */}
+                          {!noRaw && groups.length > 0 && !translated.has(v.title) && (
                             <button
                               type="button"
                               disabled={translateMut.isPending}

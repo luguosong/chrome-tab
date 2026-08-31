@@ -6,6 +6,7 @@ import { bootstrap } from './seed'
 import { expectError, setupApp } from './testUtils'
 import {
   ChangelogService,
+  composeReleasesMarkdown,
   prodChangelogDeps,
   refreshQuietly,
   splitBlocks,
@@ -73,7 +74,7 @@ describe('splitBlocks(块边界即哈希边界,错一字符即失配)', () => {
   })
 })
 
-describe('synthesizeVersionsMarkdown(无原文源版本流合成,如 codex)', () => {
+describe('synthesizeVersionsMarkdown(无原文源版本流合成——ADR-0050 后无实例、类别保留)', () => {
   // npm time 表形态:含 created/modified 元键,prerelease(alpha)比稳定版多且新
   const CODEX_TIMES = {
     created: '2025-04-01T00:00:00.000Z',
@@ -90,6 +91,51 @@ describe('synthesizeVersionsMarkdown(无原文源版本流合成,如 codex)', ()
 
   it('空表 → 空串(splitBlocks 得 0 块,前端空榜)', () => {
     expect(synthesizeVersionsMarkdown({})).toBe('')
+  })
+})
+
+describe('composeReleasesMarkdown(GitHub Releases 正文合成,ADR-0050)', () => {
+  // codex 线上形态:alpha body 一行占位,正式版完整小节(## 级,须降 ### 免被切版本块;
+  // Changelog 节 = compare 链接 + 全量 PR 清单);API 按 created_at 序、published_at 有
+  // 倒置(实测 18/100);杂项 tag(rusty-v8 crate bump)混在流里
+  const RELEASES = [
+    { tag_name: 'rust-v0.152.0-alpha.6', published_at: '2026-08-31T02:12:53Z', body: 'Release 0.152.0-alpha.6' },
+    {
+      tag_name: 'rust-v0.151.0',
+      published_at: '2026-08-28T10:00:00Z',
+      body: '## New Features\n- Added a grace period for MCP tools.\n\n## Changelog\n- Full Changelog: rust-v0.150.0...rust-v0.151.0\n- #41183 Account subagent tokens @copyberry\n\n## Bug Fixes\n- Fixed a crash.\n',
+    },
+    // published 晚于 0.151.0 但 API 序在后——不按 published_at 倒排就会错位
+    { tag_name: 'rust-v0.151.5', published_at: '2026-08-30T09:00:00Z', body: null },
+    // 实测杂项 tag:剥不出版本号,整条滤除
+    { tag_name: 'rusty-v8-v150.4.0', published_at: '2026-07-29T00:00:00Z', body: null },
+  ]
+
+  it('published_at 倒排(不保 API 序);rust-v 剥离;杂项 tag 滤除;占位/空正文仅标题;## 降 ###;噪音小节整节剔除', () => {
+    expect(composeReleasesMarkdown(RELEASES)).toBe(
+      '## 0.152.0-alpha.6\n' +
+        '## 0.151.5\n' +
+        '## 0.151.0\n### New Features\n- Added a grace period for MCP tools.\n\n### Bug Fixes\n- Fixed a crash.\n',
+    )
+  })
+
+  it('纯 prose 正文(无条目行)仅标题——空块判定与 parseChangelog 渲染语义对齐,占位措辞变化自愈', () => {
+    expect(composeReleasesMarkdown([{ tag_name: 'v1.0.0', body: 'Misc polish.\nSecond line.' }])).toBe('## 1.0.0\n')
+  })
+
+  it('``` 围栏内的 ## 行原样(不降级);噪音小节后的 #### 标题恢复内容', () => {
+    expect(
+      composeReleasesMarkdown([
+        {
+          tag_name: 'v2.0.0',
+          body: '## Setup\n```\n## not a heading\n```\n\n## Changelog\n- diff link\n\n#### Notes\n- real content\n',
+        },
+      ]),
+    ).toBe('## 2.0.0\n### Setup\n```\n## not a heading\n```\n\n#### Notes\n- real content\n')
+  })
+
+  it('空表 → 空串', () => {
+    expect(composeReleasesMarkdown([])).toBe('')
   })
 })
 
@@ -126,6 +172,19 @@ describe('ChangelogService 编排(ADR-0017)', () => {
     )
 
     expect(splitBlocks((await s.get()).markdown).blocks.map((b) => b.title)).toEqual(['2.0', '1.0'])
+  })
+
+  it('译制窗口跳过空块(合成源预发布占位块仅标题行,ADR-0050):取最近 N 个有内容块', async () => {
+    const db = openDb(':memory:').db
+    const seen: string[] = []
+    const s = makeService(db, {
+      fetchMarkdown: async () => '## 0.2.0-alpha.1\n## 0.1.0\n- one\n## 0.0.9\n- zero\n',
+      translate: async (b) => (seen.push(b), b),
+    })
+
+    await s.get()
+
+    expect(seen.map((b) => b.split('\n')[0])).toEqual(['## 0.1.0', '## 0.0.9'])
   })
 
   it('同一原文再次 refresh:块哈希全命中 → 零 LLM 调用', async () => {
@@ -390,7 +449,8 @@ describe('多源(ADR-0020:每源一 Service,快照按源分行;译文按块哈�
   })
 })
 
-describe('无原文源(codex:changelogUrl 缺省,版本流 npm 合成、零译制)', () => {
+// 无原文源(两地址皆缺省,现无实例,ADR-0050 类别保留):版本流 npm 合成、零译制
+describe('无原文源源的 Service 构造(source 参数借用 codex 行键)', () => {
   const CODEX_TIMES = {
     created: '2025-04-01T00:00:00.000Z',
     '0.150.0-alpha.7': '2026-08-23T12:00:00.000Z',
@@ -409,7 +469,7 @@ describe('无原文源(codex:changelogUrl 缺省,版本流 npm 合成、零译�
         translate: async (b) => (calls++, TRANSLATOR(b)),
         fetchReleaseInfo: async () => ({ latest: '0.149.1', times: CODEX_TIMES }),
       },
-      0, // index.ts 对无原文源的同款构造
+      0, // index.ts 对无原文源(hasChangelogRaw=false,现无实例)的同款构造
     )
 
     const snap = await s.get()
@@ -677,27 +737,44 @@ describe('translate 分段(大块逐段请求,段失败换候选只重试该段)
   })
 })
 
-describe('无原文源 prodChangelogDeps(codex):fetchMarkdown 走 npm 合成', () => {
+describe('codex prodChangelogDeps:fetchMarkdown/fetchReleaseInfo 走 GitHub Releases 合成(ADR-0050)', () => {
   const realFetch = globalThis.fetch
   afterEach(() => {
     globalThis.fetch = realFetch
+    delete process.env.GITHUB_TOKEN
   })
 
-  it('packument time 表 → 合成 markdown;npm 不可达 → 上抛(refresh 沿用旧快照/冷启动 500 同 CHANGELOG.md 拉取失败)', async () => {
-    globalThis.fetch = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({
-            'dist-tags': { latest: '0.149.1' },
-            time: { created: '2025-04-01T00:00:00.000Z', '0.150.0-alpha.7': '2026-08-23T12:00:00.000Z', '0.148.0': '2026-08-20T00:00:00.000Z', '0.149.1': '2026-08-24T00:28:28.000Z' },
-          }),
-          { status: 200 },
-        ),
-    ) as typeof fetch
-    await expect(prodChangelogDeps('codex').fetchMarkdown()).resolves.toBe('## 0.149.1\n## 0.148.0\n')
+  const RELEASES = [
+    { tag_name: 'rust-v0.152.0-alpha.6', published_at: '2026-08-31T02:12:53Z', body: 'Release 0.152.0-alpha.6' },
+    { tag_name: 'rust-v0.151.0', published_at: '2026-08-28T10:00:00Z', body: '## New Features\n- MCP grace period.\n' },
+  ]
 
-    globalThis.fetch = vi.fn(async () => new Response('nope', { status: 503 })) as typeof fetch
-    await expect(prodChangelogDeps('codex').fetchMarkdown()).rejects.toThrow('npm packument')
+  it('同一 refresh 周期单次抓取两用(~26MB 响应不拉两次):fetchMarkdown 合成 → fetchReleaseInfo 复用;Bearer 打到 codex releases 端点;latest 稳定轴', async () => {
+    process.env.GITHUB_TOKEN = 't0'
+    let calls = 0
+    globalThis.fetch = vi.fn(async (url: unknown, init?: unknown) => {
+      calls++
+      expect(String(url)).toBe('https://api.github.com/repos/openai/codex/releases?per_page=100')
+      expect((init as { headers?: Record<string, string> }).headers).toEqual({ Authorization: 'Bearer t0' })
+      return new Response(JSON.stringify(RELEASES))
+    }) as typeof fetch
+    const deps = prodChangelogDeps('codex')
+
+    await expect(deps.fetchMarkdown()).resolves.toBe(
+      '## 0.152.0-alpha.6\n## 0.151.0\n### New Features\n- MCP grace period.\n',
+    )
+    await expect(deps.fetchReleaseInfo()).resolves.toEqual({
+      latest: '0.151.0', // 稳定轴(与 npm dist-tags.latest 同),不取全量最新的 alpha
+      times: { '0.152.0-alpha.6': '2026-08-31T02:12:53Z', '0.151.0': '2026-08-28T10:00:00Z' },
+    })
+    expect(calls).toBe(1)
+  })
+
+  it('API 不可达:两者均上抛(GitHub 主链不吞错——假成功会钉死空表,refreshQuietly 重试的前提)', async () => {
+    globalThis.fetch = vi.fn(async () => new Response('nope', { status: 403 })) as typeof fetch
+    const deps = prodChangelogDeps('codex')
+    await expect(deps.fetchMarkdown()).rejects.toThrow('HTTP 403')
+    await expect(deps.fetchReleaseInfo()).rejects.toThrow('HTTP 403')
   })
 })
 

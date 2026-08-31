@@ -3,6 +3,7 @@ import { Hono, type Context } from 'hono'
 import {
   DEFAULT_CHANGELOG_SOURCE,
   getChangelogSource,
+  isPrereleaseVersion,
   type ChangelogSourceId,
 } from 'chrome-tab-shared'
 import type { Db } from './db'
@@ -74,15 +75,84 @@ export function splitSegments(block: string, maxChars = 2000): string[] {
   return segments
 }
 
-/** 无原文源(如 Codex,changelogUrl 缺省)的版本流合成:npm time 表 → 每版本一行 `## `
- *  标题空块的 markdown,下游 splitBlocks / 前端 parseChangelog 照常切出版本列表(块内无
- *  条目、也无从译制)。剔 created/modified 元键与 prerelease(alpha 比稳定版多且新,进榜
- *  只添噪);npm time 值为等长 ISO 串,字典序即时间序,倒排 = 新版在前。 */
+/** 块是否含标题行以外的内容:合成源的预发布占位块(仅 `## x.y.z` 一行)无可译内容,
+ *  译窗口与按需补译都跳过(ADR-0050)。 */
+const hasEntries = (b: Block): boolean => b.raw.split('\n').slice(1).some((l) => l.trim())
+
+/** 无原文源(两地址皆缺省,ADR-0050 后无实例、类别保留)的版本流合成:npm time 表 →
+ *  每版本一行 `## ` 标题空块的 markdown,下游 splitBlocks / 前端 parseChangelog 照常切出
+ *  版本列表(块内无条目、也无从译制)。剔 created/modified 元键与 prerelease(shared 的
+ *  isPrereleaseVersion 同源判断);npm time 值为等长 ISO 串,字典序即时间序,倒排 = 新版在前。 */
 export function synthesizeVersionsMarkdown(times: Record<string, string>): string {
   return Object.entries(times)
-    .filter(([v]) => /^\d+(\.\d+)*$/.test(v))
+    .filter(([v]) => !isPrereleaseVersion(v))
     .sort(([, a], [, b]) => b.localeCompare(a))
     .map(([v]) => `## ${v}\n`)
+    .join('')
+}
+
+/** GitHub release tag → CHANGELOG 版本号:codex tag 带 rust- 前缀(rust-v0.151.0),
+ *  matt-skills 为 v1.2.3——一个正则兼容两源。 */
+const versionOfTag = (tag: string) => tag.replace(/^(?:rust-)?v/, '')
+
+/** release 正文固定带的噪音小节(ADR-0050):Changelog = 版本对比链接 + **全量 PR/commit
+ *  清单(实测 2026-08-31 40-100 行/版,commit 级历史)**——时间线里纯噪音,合成时整节剔除
+ *  (信息直达取向;代价:PR 级明细只能去 releases 页看)。Contributors 实测无独立小节,
+ *  保留防御上游模板加回。 */
+const NOISE_SECTIONS = /^(?:Changelog|Contributors)$/
+
+/** 剥前缀后须像版本号才进版本流:数字段 + 可选预发布后缀。滤掉 codex releases 流里的
+ *  杂项 tag(实测 2026-08-31:rusty-v8-v150.4.0 vendored crate bump 混在前 100 里)。 */
+const VERSION_LIKE_RE = /^\d+(\.\d+)*(?:-\S+)?$/
+
+/** 合成原文源(ADR-0050,如 codex)的版本块合成:GitHub Releases API 响应 → `## 版本`
+ *  + 正文的 markdown。转换:① 杂项 tag 滤除(VERSION_LIKE_RE);② 按 published_at 倒排——
+ *  **不保 API 序**:API 按 created_at 排,实测 18/100 的 published_at 倒置,时间线与
+ *  latest 判定都要真发布序;③ 行首 `## ` 降 `### `(release 小节是 ## 级,而 ## 是版本块
+ *  边界,不降级会被 splitBlocks 切成独立版本块;``` 围栏内不降不判标题);④ 噪音小节
+ *  整节剔除(到下一标题止);⑤ 无条目行(无小节标题且无 bullet)仅输出标题行——含占位
+ *  正文与纯 prose:parseChangelog 只渲染条目行,空块判定与前端渲染语义对齐,上游占位
+ *  措辞变化自愈。**含预发布**(Modal 全览位消费;块内滚动榜在前端过滤)。 */
+export function composeReleasesMarkdown(
+  releases: ReadonlyArray<{ tag_name?: string; published_at?: string; body?: string | null }>,
+): string {
+  return releases
+    .filter(
+      (r): r is { tag_name: string; published_at?: string; body?: string | null } =>
+        typeof r.tag_name === 'string',
+    )
+    .map((r) => ({ version: versionOfTag(r.tag_name), at: r.published_at ?? '', body: r.body ?? '' }))
+    .filter((r) => VERSION_LIKE_RE.test(r.version))
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .map((r) => {
+      const lines: string[] = []
+      let inNoise = false
+      let inFence = false
+      for (const line of r.body.split('\n')) {
+        if (!inFence && line.trim().startsWith('```')) {
+          inFence = true
+          lines.push(line)
+          continue
+        }
+        if (inFence) {
+          if (line.trim().startsWith('```')) inFence = false
+          lines.push(line) // 围栏内原样(含形似标题的行,防内容损坏被译文哈希终身缓存)
+          continue
+        }
+        const heading = line.match(/^#{1,6}\s+(.*)$/)
+        if (heading) {
+          inNoise = NOISE_SECTIONS.test(heading[1]!.trim())
+          if (inNoise) continue
+          // ## → ###(其余级别原样):release 小节降为版本块内小节
+          lines.push(line.replace(/^##(?!#)/, '###'))
+        } else if (!inNoise) {
+          lines.push(line)
+        }
+      }
+      const content = lines.join('\n').trimEnd()
+      const hasEntries = /^#{2,3}\s/m.test(content) || /^[-*]\s/m.test(content)
+      return hasEntries ? `## ${r.version}\n${content}\n` : `## ${r.version}\n`
+    })
     .join('')
 }
 
@@ -99,7 +169,8 @@ export interface ChangelogDeps {
     onPhase?: (model: string, attempt: number, total: number) => void,
   ) => Promise<string | null>
   /** 外源全量发布信息:latest + times(版本号→ISO,大 tile 版本榜单一行一版本
-   *  带时间)。失败由实现方吞掉返回 null,不阻塞主链路。 */
+   *  带时间)。npm 日期源失败由实现方吞掉返回 null(降级空表,不阻塞主链路);GitHub
+   *  主链(合成源/matt 日期)失败**上抛**——假成功会钉死空表到下个 6h 窗(ADR-0050)。 */
   fetchReleaseInfo: () => Promise<{ latest: string | null; times: Record<string, string> } | null>
 }
 
@@ -195,7 +266,8 @@ export class ChangelogService {
     const raw = await this.deps.fetchMarkdown()
     const blocks = splitBlocks(raw)
     const byRaw = await this.translations.load(blocks.blocks.map((b) => b.raw))
-    for (const b of blocks.blocks.slice(0, this.translateRecent)) {
+    // 只译最近 N 版中缺失的块;跳过空块(预发布占位)再取窗——否则 alpha 扎堆时窗口被占位块耗尽
+    for (const b of blocks.blocks.filter(hasEntries).slice(0, this.translateRecent)) {
       await this.translateIfMissing(b, byRaw)
     }
     const info = await this.deps.fetchReleaseInfo()
@@ -228,6 +300,7 @@ export class ChangelogService {
    *  不入库待下轮重试。入库经译文仓(空串守卫/onConflict 收在 store,ADR-0034)。 */
   private async translateIfMissing(block: Block, byRaw: Map<string, string>): Promise<void> {
     if (byRaw.has(block.raw)) return
+    if (!hasEntries(block)) return // 空块(直接 API 补译防呆):无可译,translateVersions 路径同守
     let translated: string | null
     try {
       translated = await this.deps.translate(block.raw, (model, attempt, total) => {
@@ -322,26 +395,46 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
   const models = modelCandidates()
   // 解构到 const:narrowing 才能保进 fetchText 回调(属性访问的收窄不进闭包)
   const rawUrl = def.changelogUrl
+  const releasesApiUrl = def.githubReleasesApiUrl
+  /** GitHub Releases 真拉(不吞错、不缓存)。失败不回落 npm——matt 配 GitHub 正因 npm
+   *  版本键错位。 */
+  const fetchGithubReleases = async (): Promise<
+    Array<{ tag_name?: string; published_at?: string; body?: string | null }>
+  > =>
+    // ponytail:只取前 100 个 release;Matt 当前不足 10 个,超过后按 GitHub Link 头分页。
+    JSON.parse(
+      await fetchText(releasesApiUrl!, 30_000, {
+        headers: githubToken ? { Authorization: `Bearer ${githubToken}` } : undefined,
+      }),
+    )
+  // 同周期单次抓取两用:合成源的 doRefresh 先 fetchMarkdown(合成分支拉一次存 promise)
+  // 再 fetchReleaseInfo(复用)——codex 响应 ~26MB(assets 大头),拉两次翻倍带宽/内存/
+  // GitHub 限额。一次性:读完即清,不跨 refresh 周期(matt 走 raw 分支不写,恒真拉)。
+  let composedReleases: Promise<Awaited<ReturnType<typeof fetchGithubReleases>>> | null = null
   const fetchReleaseInfo = async () => {
-    try {
-      if (def.githubReleasesApiUrl) {
-        // ponytail:只取前 100 个 release;Matt 当前不足 10 个,超过后按 GitHub Link 头分页。
-        const releases = JSON.parse(
-          await fetchText(def.githubReleasesApiUrl, 30_000, {
-            headers: githubToken ? { Authorization: `Bearer ${githubToken}` } : undefined,
-          }),
-        ) as Array<{
-          tag_name?: string
-          published_at?: string
-        }>
-        const times: Record<string, string> = {}
-        for (const release of releases) {
-          if (release.tag_name && release.published_at) {
-            times[release.tag_name.replace(/^v/, '')] = release.published_at
-          }
+    if (releasesApiUrl) {
+      // GitHub 主链不吞错:失败上抛 → refresh 整体失败 → refreshQuietly 5min 重试。吞成
+      // null 会被 doRefresh 当成功落空表,日期钉死到下个 6h 窗(2026-08-31 matt 实录,
+      // 81888ea 同动机的收编)。
+      const pending = composedReleases
+      composedReleases = null
+      const releases = await (pending ?? fetchGithubReleases())
+      const times: Record<string, string> = {}
+      for (const release of releases) {
+        if (release.tag_name && release.published_at) {
+          const v = versionOfTag(release.tag_name)
+          if (VERSION_LIKE_RE.test(v)) times[v] = release.published_at
         }
-        return { latest: Object.keys(times)[0] ?? null, times }
       }
+      // latest = 最新稳定版(与 npm dist-tags.latest 同轴):releasedAt 供块内鲜度回退,
+      // 取全量最新会把预发布时间戳算到稳定版头上(codex alpha 日均 2-3 个)
+      const latest =
+        Object.keys(times)
+          .filter((v) => !isPrereleaseVersion(v))
+          .sort((a, b) => times[b]!.localeCompare(times[a]!))[0] ?? null
+      return { latest, times }
+    }
+    try {
       const root = JSON.parse(
         await fetchText(`https://registry.npmjs.org/${def.npmPackage}`, 30_000),
       ) as {
@@ -355,15 +448,22 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
     }
   }
   return {
-    // 无原文源(changelogUrl 缺省,如 codex):版本流从 npm time 表合成。npm 拉不动作
-    // 主链路失败上抛——refresh 沿用旧快照 / 冷启动 500,与「拉 CHANGELOG.md 失败」同语义。
+    // 原文三形态(ADR-0050):changelogUrl 直取 raw CHANGELOG.md;githubReleasesApiUrl
+    // 合成 release 正文;两者皆无 = 无原文源,npm time 合成空块。后两者拉不动作主链路
+    // 失败上抛——refresh 沿用旧快照 / 冷启动 500,与「拉 CHANGELOG.md 失败」同语义。
     fetchMarkdown: rawUrl
       ? () => fetchText(rawUrl, 60_000)
-      : async () => {
-          const info = await fetchReleaseInfo()
-          if (!info) throw new Error(`npm packument(${def.npmPackage}) 拉取失败,无法合成版本流`)
-          return synthesizeVersionsMarkdown(info.times)
-        },
+      : releasesApiUrl
+        ? async () => {
+            const p = fetchGithubReleases()
+            composedReleases = p
+            return composeReleasesMarkdown(await p)
+          }
+        : async () => {
+            const info = await fetchReleaseInfo()
+            if (!info) throw new Error(`npm packument(${def.npmPackage}) 拉取失败,无法合成版本流`)
+            return synthesizeVersionsMarkdown(info.times)
+          },
     fetchReleaseInfo,
     translate: async (block, onPhase) => {
       if (!apiKey) return null // Key 缺失:Service 层据此透传英文原文

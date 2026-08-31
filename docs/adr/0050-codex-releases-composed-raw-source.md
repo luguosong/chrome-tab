@@ -1,0 +1,12 @@
+# Codex 升格 GitHub Releases 合成原文源:「有正文」判别轴与双消费位异版本集
+
+背景:注册表(shared/changelogSources.ts)头注释曾立法「codex 无原文可译」——上游 CHANGELOG.md 仅一行链接、GitHub release 正文是空壳,故版本流由 npm packument 合成空块(剔预发布)、详情只给每版本行 GitHub 外链(ADR-0020 时代设计)。2026-08-31 核验上游推翻其一半:**空壳只对预发布成立**(body 仅一行 `Release 0.152.0-alpha.6` 占位),**正式版 release 有完整 markdown 正文**(New Features / Bug Fixes / Chores;预发布日均 2-3 个)。用户要详情就地看,不跳走。
+
+**决策:Codex 补配 `githubReleasesApiUrl` 升格为「合成原文源」,「有无原文」判别轴从 changelogUrl 单字段扩为「有正文源」,版本流全量含预发布、块内滚动榜再过滤——同源两态。**
+
+1. **通路复用 matt-skills 模式**:fetchMarkdown 从 npm 合成空块改为 Releases API 合成 `## 版本 + 正文`(tag 去 `rust-v` 前缀,同 matt-skills 去 `v` 先例);fetchReleaseInfo 日期同切 Releases API `published_at`,codex 不再依赖 npm packument。GITHUB_TOKEN 认证(2026-08-31 刚加)正好覆盖。
+2. **判别轴演进**:`changelogUrl` 缺省 ≠ 无原文了。后端译窗口 `s.changelogUrl ? 5 : 0` 与前端 `noRaw = !def.changelogUrl` 两处轴同步扩为「有正文源」(shared 的 `hasChangelogRaw` 单点);`changelogUrl` 保留「单一 URL 直取原文」语义。codex 接入译制(空块跳过,预发布天然无译文)。
+3. **正文裁剪**:合成时剔除 `Changelog` 小节——**实测为 compare 链接 + 全量 PR/commit 清单(40-100 行/版,commit 级历史)**,时间线里纯噪音,裁剪是信息直达取向的取舍(代价:PR 级明细只能去 releases 页看;review 实测后从「仅一行对比链接」的初判修正)。`Contributors` 实测无独立小节,正则防御性保留。保留 New Features / Bug Fixes / Chores。
+4. **双消费位异版本集**:版本流(markdown)全量含预发布——Modal 全览位语义,预发布版本仅列版本行、不渲染条目与翻译按钮;块内滚动榜 filter 预发布——信号位语义,预发布刷屏会近乎常亮红点(<24h 判据),稀释「正式版更新了」的信号价值。「最新」标记(药丸/accent/`releasedAt`)统一**稳定轴**(与 npm dist-tags.latest 同):全览位列表含 alpha,但对「最新」只给一个答案,预发布时间戳不算到稳定版头上。prerelease 判断正则驻 shared,后端合成与前端过滤同源一份。
+5. **排序与抓取纪律(code-review 实测补强)**:① 不保 API 序——API 按 created_at 排,实测 18/100 的 published_at 倒置,合成与 times 都按 published_at 倒排;② 同一 refresh 周期**单次抓取两用**(fetchMarkdown 合成分支拉一次,紧跟的 fetchReleaseInfo 复用)——codex 响应 ~26MB(assets 大头),拉两次翻倍带宽/内存/GitHub 限额;③ GitHub 主链(合成与日期)**失败上抛不吞错**——吞成 null 会被 doRefresh 当成功落空表,日期钉死到下个 6h 窗(2026-08-31 matt 实录,81888ea 同动机的收编),npm 日期源保留降级 null 旧约;④ 杂项 tag 滤除(实测 rusty-v8-v150.4.0 vendored crate bump 混在前 100);⑤ 空块判定 = 无条目行(小节标题或 bullet)——与前端 parseChangelog 渲染语义对齐,上游占位措辞变化自愈;⑥ ``` 围栏内不降级标题(防内容损坏被译文哈希终身缓存)。
+6. **明确不做**:① 翻页只取 1 页 100 条(YAGNI:约 1.5-2 个月版本流、正式版 15-20 个,不够再加)。② 不砍「无原文源」类别与 UI 降级臂(npm 合成分支、GitHub 外链按钮)——三源现皆有正文,但上游形态不可预测(matt-skills RSS 停更前科),保留注册表可空性的诚实表达;死分支成本仅数个测试用例。③ 不加 npm 回退链——codex npm 键虽与 releases 对齐,但双链路的复杂度买不回什么:GITHUB_TOKEN 已在 compose 透传,未认证 60/h 仍是兜底(慢而不断)。④ releaseTimes 不落库(ADR 维持,重启恢复窗口走 refreshQuietly)。⑤ 前端行级降级(预发布空块不渲染占位文案,宁缺勿噪)。⑥ 直接 API 对空版本 POST 补译的前端误报文案不修(响应不含该版会被读作「翻译失败」——UI 无入口,仅直接 API 可达,症状是一条提示文案)。

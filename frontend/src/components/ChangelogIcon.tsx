@@ -1,4 +1,4 @@
-import { changelogSourceOf, getChangelogSource } from 'chrome-tab-shared'
+import { changelogSourceOf, getChangelogSource, isPrereleaseVersion } from 'chrome-tab-shared'
 import { useChangelog } from '../hooks/useChangelog'
 import { timeAgo } from '../lib/timeAgo'
 import { isFreshRow } from '../lib/tileBody'
@@ -10,7 +10,8 @@ import { FreshDot, TileBody, TileRow } from './TileBody'
 /**
  * 更新日志图标的专属网格渲染(非单例、每实例绑一个外源,ADR-0020;ADR-0022 跨格
  * 第二消费者):外壳/标头走 BigTile(ADR-0022 抽取),主体 = 单列滚动版本榜(块内
- * 主体骨架走 TileBody,见 CONTEXT.md「块内主体」;一行一版本:版本号 mono + 相对
+ * 主体骨架走 TileBody,见 CONTEXT.md「块内主体」;剔预发布(ADR-0050:信号位,预发布
+ * 刷屏毁红点信号,Modal 全览位仍全量);一行一版本:版本号 mono + 相对
  * 时间;最新版 accent,与 Modal「最新」药丸同强调;发布 <24h 的版本行前置红点新
  * 标记(时间驱动满窗自隐,无时间同时间列降级);行不可点 → 不做 hover 高亮,免暗
  * 示交互 = TileRow 静态臂)。版本时间 = 后端 releaseTimes 全表(ADR-0022),发布
@@ -32,8 +33,10 @@ export default function ChangelogIconBody({
   // data.source 读侧兜底:存量 data=null 图标归默认源(ADR-0020)
   const source = changelogSourceOf(icon.data)
   const { data } = useChangelog(source)
-  const versions = data?.versions ?? []
   const times = data?.releaseTimes ?? {}
+  // 块内信号位剔预发布(ADR-0050):预发布发布频繁(如 codex alpha 日均 2-3 个)近乎常亮
+  // 红点,稀释「正式版更新了」的信号;Modal 全览位仍全量。最新版/鲜度随过滤后口径。
+  const versions = (data?.versions ?? []).filter((v) => !isPrereleaseVersion(v.title))
   const latest = versions[0]
   const fresh = latest ? (times[latest.title] ?? data?.releasedAt ?? null) : null
   const fontSize = tileFont(ICON_SCALE, 'secondary')
