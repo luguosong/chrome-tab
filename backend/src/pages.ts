@@ -1,6 +1,6 @@
-import { Hono, type Context } from 'hono'
+import { Hono } from 'hono'
 import type { AuthEnv } from './auth'
-import { BadRequest, ConflictError, numericParam, touchVersion } from './common'
+import { BadRequest, ConflictError, jsonBody, numericParam, reqInt, reqName, touchVersion } from './common'
 import type { Db } from './db'
 
 /**
@@ -11,7 +11,7 @@ import type { Db } from './db'
 export function pageRoutes(db: Db) {
   return new Hono<AuthEnv>()
     .post('/api/pages', async (c) => {
-      const name = await requireName(c)
+      const name = reqName(await jsonBody(c))
       const userId = c.get('user')!.id
       return await db.transaction().execute(async (tx) => {
         const pages = await tx
@@ -59,7 +59,7 @@ export function pageRoutes(db: Db) {
       return c.json(saved.map(pageWire))
     })
     .put('/api/pages/:id', async (c) => {
-      const name = await requireName(c)
+      const name = reqName(await jsonBody(c))
       const id = numericParam(c, 'id')
       const userId = c.get('user')!.id
       return await db.transaction().execute(async (tx) => {
@@ -105,32 +105,18 @@ export const pageWire = (p: { id: number; name: string; sort_order: number }) =>
   sortOrder: p.sort_order,
 })
 
-/** name 校验(对齐 NameRequest @NotBlank @Size(max=64));服务端 trim 后落库。 */
-async function requireName(c: Context<AuthEnv>): Promise<string> {
-  const body = await c.req.json().catch(() => null)
-  const name = (body ?? {}) as { name?: unknown }
-  if (typeof name.name !== 'string' || !name.name.trim()) {
-    throw new BadRequest('name: must not be blank')
-  }
-  if (name.name.length > 64) {
-    throw new BadRequest('name: size must be between 0 and 64')
-  }
-  return name.name.trim()
-}
-
 /** reorder 请求体:[{id, sortOrder}](sortOrder 缺省 0,对齐 Java int 原始类型)。 */
-async function parseReorderItems(c: Context<AuthEnv>): Promise<Array<{ id: number; sortOrder: number }>> {
-  const body = await c.req.json().catch(() => null)
+async function parseReorderItems(c: { req: { json(): Promise<unknown> } }): Promise<Array<{ id: number; sortOrder: number }>> {
+  const body = await jsonBody(c)
   if (!Array.isArray(body)) throw new BadRequest('请求体必须是 [{id, sortOrder}] 数组')
   return body.map((raw, idx) => {
     const it = (raw ?? {}) as Record<string, unknown>
-    if (typeof it.id !== 'number' || !Number.isInteger(it.id)) {
-      throw new BadRequest(`items[${idx}].id: must not be null`)
-    }
+    const id = reqInt(it, 'id', { prefix: `items[${idx}]` })
+    // sortOrder 不套 optInt:null 在此端点必须 400(显式置 null 是协议错),optInt 会静默落 0——两语义刻意分家(ADR-0048)
     const so = it.sortOrder === undefined ? 0 : it.sortOrder
     if (typeof so !== 'number' || !Number.isInteger(so)) {
       throw new BadRequest(`items[${idx}].sortOrder: 必须是整数`)
     }
-    return { id: it.id, sortOrder: so }
+    return { id, sortOrder: so }
   })
 }

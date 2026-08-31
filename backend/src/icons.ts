@@ -1,6 +1,6 @@
-import { Hono, type Context } from 'hono'
+import { Hono } from 'hono'
 import type { AuthEnv } from './auth'
-import { BadRequest, ConflictError, numericParam, touchVersion } from './common'
+import { asRec, BadRequest, ConflictError, field, numericParam, optInt, optNullableInt, reqInt, jsonBody, touchVersion } from './common'
 import type { Db } from './db'
 
 /**
@@ -63,10 +63,10 @@ export function iconRoutes(db: Db) {
   return new Hono<AuthEnv>()
     .post('/api/icons', async (c) => {
       const userId = c.get('user')!.id
-      const body = (await readJson(c)) as Record<string, unknown>
-      const pageId = requireInt(body, 'pageId')
-      const type = requireType(body)
-      requireDataField(body)
+      const body = (await jsonBody(c)) as Record<string, unknown>
+      const pageId = reqInt(body, 'pageId')
+      const type = reqIconType(body)
+      reqDataField(body)
       return await db.transaction().execute(async (tx) => {
         if (type === 'GROUP') throw new ConflictError(409, '分组需经合并创建，不能直接新建')
         if (SINGLETON_TYPES.includes(type)) await rejectExistingSingleton(tx, userId, type)
@@ -98,10 +98,10 @@ export function iconRoutes(db: Db) {
     // 字面子路径,先于 PATCH /:id 匹配
     .patch('/api/icons/move', async (c) => {
       const userId = c.get('user')!.id
-      const body = (await readJson(c)) as Record<string, unknown>
+      const body = (await jsonBody(c)) as Record<string, unknown>
       const req = {
-        id: requireInt(body, 'id'),
-        toPageId: requireInt(body, 'toPageId'),
+        id: reqInt(body, 'id'),
+        toPageId: reqInt(body, 'toPageId'),
         toIndex: optInt(body, 'toIndex'),
         parentId: optNullableInt(body, 'parentId'),
       }
@@ -114,8 +114,8 @@ export function iconRoutes(db: Db) {
     // 字面子路径,先于 POST /:id/dissolve 之外的动态路由匹配
     .post('/api/icons/merge', async (c) => {
       const userId = c.get('user')!.id
-      const body = (await readJson(c)) as Record<string, unknown>
-      const pageId = requireInt(body, 'pageId')
+      const body = (await jsonBody(c)) as Record<string, unknown>
+      const pageId = reqInt(body, 'pageId')
       if (!Array.isArray(body.memberIds)) throw new BadRequest('memberIds: must not be null')
       const memberIds = body.memberIds.map((v, idx) => {
         if (typeof v !== 'number' || !Number.isInteger(v)) throw new BadRequest(`memberIds[${idx}]: 必须是整数`)
@@ -156,15 +156,13 @@ export function iconRoutes(db: Db) {
       const userId = c.get('user')!.id
       const id = numericParam(c, 'id')
       // 修正白名单⑥:补参数校验(对齐其他写端点的 400 行为;Java 侧唯一无校验的写端点)
-      const body = await readJson(c)
-      if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-        throw new BadRequest('请求体必须是 {data: object|null} 对象')
-      }
-      requireDataField(body as Record<string, unknown>)
+      const body = asRec(await jsonBody(c))
+      if (!body) throw new BadRequest('请求体必须是 {data: object|null} 对象')
+      reqDataField(body)
       return await db.transaction().execute(async (tx) => {
         const icon = await findIcon(tx, userId, id, '图标不存在')
         // data 仅在提供时覆盖(部分更新;null 表示不动)
-        const data = (body as Record<string, unknown>).data
+        const data = body.data
         if (data !== undefined && data !== null) {
           await tx
             .updateTable('icons')
@@ -467,47 +465,27 @@ async function reload(tx: Db, id: number): Promise<IconRow | undefined> {
 
 const clamp = (v: number, max: number) => Math.max(0, Math.min(v, max))
 
-// ── 请求体小件(400 校验)────────────────────────────────────────────────────
+// ── 「图标」域绑定校验件(ADR-0048;int 族/jsonBody 在 common,此两件因绑
+// ICON_TYPES/validateIconData 留域内——common 不反向依赖域文件)──────────────────
 
-async function readJson(c: Context<AuthEnv>): Promise<unknown> {
-  return c.req.json().catch(() => null)
-}
-
-function requireInt(body: Record<string, unknown>, key: string): number {
-  const v = body[key]
-  if (typeof v !== 'number' || !Number.isInteger(v)) throw new BadRequest(`${key}: must not be null`)
-  return v
-}
-
-function optInt(body: Record<string, unknown>, key: string): number {
-  // 缺省或显式 null 都落 0(对齐 Java int 原始类型的 Jackson 默认)
-  const v = body[key] === undefined || body[key] === null ? 0 : body[key]
-  if (typeof v !== 'number' || !Number.isInteger(v)) throw new BadRequest(`${key}: 必须是整数`)
-  return v
-}
-
-function optNullableInt(body: Record<string, unknown>, key: string): number | null {
-  const v = body[key]
-  if (v === undefined || v === null) return null
-  if (typeof v !== 'number' || !Number.isInteger(v)) throw new BadRequest(`${key}: 必须是整数`)
-  return v
-}
-
-function requireType(body: Record<string, unknown>): IconType {
-  const v = body.type
-  if (typeof v !== 'string' || !(ICON_TYPES as readonly string[]).includes(v)) {
-    throw new BadRequest('type: 非法的图标类型')
+/** type 枚举校验;config 全量替换 blob 的条目校验复用(前缀拼 `icons[0].type`)。 */
+export function reqIconType(body: unknown, prefix?: string): IconType {
+  const v = (body ?? {}) as Record<string, unknown>
+  const type = v.type
+  if (typeof type !== 'string' || !(ICON_TYPES as readonly string[]).includes(type)) {
+    throw new BadRequest(`${field('type', prefix)}: 非法的图标类型`)
   }
-  return v as IconType
+  return type as IconType
 }
 
-/** data 字段存在时必须是 object|null(其余端点同形校验)。 */
-function requireDataField(body: Record<string, unknown>): void {
-  const v = body.data
-  if (v !== undefined && v !== null && (typeof v !== 'object' || Array.isArray(v))) {
-    throw new BadRequest('data: 必须是对象')
+/** data 字段存在时必须是 object|null(所有图标写入口与 config blob 同形校验)。 */
+export function reqDataField(body: unknown, prefix?: string): void {
+  const v = (body ?? {}) as Record<string, unknown>
+  const data = v.data
+  if (data !== undefined && data !== null && (typeof data !== 'object' || Array.isArray(data))) {
+    throw new BadRequest(`${field('data', prefix)}: 必须是对象`)
   }
-  validateIconData(v as Record<string, unknown> | null | undefined)
+  validateIconData(data as Record<string, unknown> | null | undefined)
 }
 
 /** 所有图标写入口共用:data: 图标覆盖只能是前端产出的受限 WebP。 */

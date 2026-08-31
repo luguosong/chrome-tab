@@ -2,7 +2,7 @@ import { schedule } from 'node-cron'
 import { sql } from 'kysely'
 import { Hono, type Context } from 'hono'
 import { NEWS_SOURCES, type NewsFeedResponse, type NewsItem, type NewsSourceId, type NewsSourceState } from 'chrome-tab-shared'
-import { BadRequest, fetchBuffer, fetchText } from '../common'
+import { BadRequest, fetchBuffer, fetchText, jsonBody } from '../common'
 import type { Db } from '../db'
 import type { AuthEnv } from '../auth'
 import type { NewsDeps } from './sources/types'
@@ -270,7 +270,7 @@ export function newsRoutes(service: NewsService): Hono<AuthEnv> {
   return new Hono<AuthEnv>()
     .get('/api/news/feed', async (c) => c.json(await service.feed(userId(c))))
     .put('/api/news/sources', async (c) => {
-      const body = (await c.req.json().catch(() => null)) as { sources?: unknown } | null
+      const body = (await jsonBody(c)) as { sources?: unknown } | null
       const ids = body?.sources
       if (!Array.isArray(ids) || ids.some((v) => typeof v !== 'string' || !VALID_SOURCES.has(v as NewsSourceId))) {
         throw new BadRequest('sources: 必须是新闻源 id 数组')

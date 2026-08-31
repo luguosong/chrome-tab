@@ -3,10 +3,9 @@ import { schedule } from 'node-cron'
 import { Hono, type Context } from 'hono'
 import { XMLParser } from 'fast-xml-parser'
 import type { VideoBlogger, VideoCategory, VideoFeedItem } from 'chrome-tab-shared'
-import { TtlCache } from './common'
 import type { Db } from './db'
 import type { AuthEnv } from './auth'
-import { BadRequest, ConflictError, fetchText, numericParam } from './common'
+import { BadRequest, ConflictError, fetchText, jsonBody, numericParam, reqName, TtlCache } from './common'
 import { makeTailQueue, upsertThenPrune } from './pollPersist'
 
 /**
@@ -717,22 +716,16 @@ export class VideoUpdatesService {
 
 export function videoUpdatesRoutes(service: VideoUpdatesService): Hono<AuthEnv> {
   const userId = (c: Context<AuthEnv>) => c.get('user')!.id
-  const body = async (c: Context<AuthEnv>) => await c.req.json().catch(() => null)
-  const requireName = (v: unknown) => {
-    if (typeof v !== 'string' || !v.trim()) throw new BadRequest('name: must not be blank')
-    if (v.length > 64) throw new BadRequest('name: size must be between 0 and 64')
-    return v.trim()
-  }
   return new Hono<AuthEnv>()
     .get('/api/video-updates/videos', async (c) => c.json(await service.feed(userId(c))))
     .get('/api/video-updates/bloggers', async (c) => c.json(await service.bloggers(userId(c))))
     .get('/api/video-updates/categories', async (c) => c.json(await service.categories(userId(c))))
     .post('/api/video-updates/categories', async (c) => {
-      const name = requireName((await body(c) as { name?: unknown })?.name)
+      const name = reqName(await jsonBody(c))
       return c.json(await service.createCategory(userId(c), name), 201)
     })
     .put('/api/video-updates/categories/reorder', async (c) => {
-      const ids = (await body(c) as { ids?: unknown })?.ids
+      const ids = (await jsonBody(c) as { ids?: unknown } | null)?.ids
       if (!Array.isArray(ids) || ids.some((v) => !Number.isInteger(v))) {
         throw new BadRequest('ids: 必须是整数数组')
       }
@@ -740,7 +733,7 @@ export function videoUpdatesRoutes(service: VideoUpdatesService): Hono<AuthEnv> 
       return c.json(await service.categories(userId(c)))
     })
     .put('/api/video-updates/categories/:id', async (c) => {
-      const name = requireName((await body(c) as { name?: unknown })?.name)
+      const name = reqName(await jsonBody(c))
       await service.renameCategory(userId(c), numericParam(c, 'id'), name)
       return c.json(await service.categories(userId(c)))
     })
@@ -749,12 +742,12 @@ export function videoUpdatesRoutes(service: VideoUpdatesService): Hono<AuthEnv> 
       return c.body(null, 204)
     })
     .post('/api/video-updates/bloggers', async (c) => {
-      const url = (await body(c) as { url?: unknown })?.url
+      const url = (await jsonBody(c) as { url?: unknown } | null)?.url
       if (typeof url !== 'string' || !url.trim()) throw new BadRequest('url: must not be blank')
       return c.json(await service.addBlogger(userId(c), url), 201)
     })
     .put('/api/video-updates/bloggers/:id', async (c) => {
-      const categoryId = (await body(c) as { categoryId?: unknown })?.categoryId
+      const categoryId = (await jsonBody(c) as { categoryId?: unknown } | null)?.categoryId
       if (categoryId !== null && !Number.isInteger(categoryId)) {
         throw new BadRequest('categoryId: 必须是整数或 null')
       }

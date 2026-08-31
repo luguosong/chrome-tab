@@ -29,6 +29,68 @@ export function numericParam(c: Context<AuthEnv>, key: string): number {
   return v
 }
 
+// ── 请求体校验小件(ADR-0048)──────────────────────────────────────────────────
+
+/** 用户起名的统一上限(页面名/视频分类名,Java @Size(max=64) 对齐;三域规则独立、恰同值)。 */
+export const NAME_MAX = 64
+
+/** 读请求体;非 JSON/空体收敛 null(不抛)。全 backend 唯一的 `c.req.json()` 持有点(grep 契约断言把关)。 */
+export async function jsonBody(c: { req: { json(): Promise<unknown> } }): Promise<unknown> {
+  return c.req.json().catch(() => null)
+}
+
+/** 嵌套定位拼接:`icons[0].type` 形 400 消息的字段路径(前缀惯例全仓单点)。 */
+export const field = (key: string, prefix?: string) => (prefix ? `${prefix}.${key}` : key)
+const rec = (b: unknown): Record<string, unknown> => (b ?? {}) as Record<string, unknown>
+
+interface IntOpts {
+  /** 数组项等嵌套定位(config 全量替换 blob 的 `icons[0].id`)。 */
+  prefix?: string
+  /** 闭区间范围;两端必同传——半开会让消息渲染出 undefined,类型上直接封死。 */
+  range?: { min: number; max: number }
+  /** optInt 的缺省值(缺字段/null 都落此,对齐 Java int 原始类型的 Jackson 默认)。 */
+  def?: number
+}
+
+/** 必填名字(对齐 @NotBlank @Size(max=NAME_MAX)),trim 后返回、服务端 trim 落库。 */
+export function reqName(b: unknown, key = 'name', prefix?: string): string {
+  const v = rec(b)[key]
+  if (typeof v !== 'string' || !v.trim()) throw new BadRequest(`${field(key, prefix)}: must not be blank`)
+  if (v.length > NAME_MAX) throw new BadRequest(`${field(key, prefix)}: size must be between 0 and ${NAME_MAX}`)
+  return v.trim()
+}
+
+function assertRange(v: number, key: string, opts?: IntOpts): number {
+  const r = opts?.range
+  if (r && (v < r.min || v > r.max)) {
+    throw new BadRequest(`${field(key, opts?.prefix)}: 必须在 ${r.min}~${r.max} 之间`)
+  }
+  return v
+}
+
+/** 必填整数;非整数/缺失 400(消息对齐 Java「must not be null」)。 */
+export function reqInt(b: unknown, key: string, opts?: IntOpts): number {
+  const v = rec(b)[key]
+  if (typeof v !== 'number' || !Number.isInteger(v)) throw new BadRequest(`${field(key, opts?.prefix)}: must not be null`)
+  return assertRange(v, key, opts)
+}
+
+/** 可缺省整数:缺字段/null 落 def(默认 0);非法 400「必须是整数」。 */
+export function optInt(b: unknown, key: string, opts?: IntOpts): number {
+  const v = rec(b)[key]
+  if (v === undefined || v === null) return opts?.def ?? 0
+  if (typeof v !== 'number' || !Number.isInteger(v)) throw new BadRequest(`${field(key, opts?.prefix)}: 必须是整数`)
+  return assertRange(v, key, opts)
+}
+
+/** 可空整数:缺字段/null → null(「移动图标」的 parentId 形态);非法 400。 */
+export function optNullableInt(b: unknown, key: string, prefix?: string): number | null {
+  const v = rec(b)[key]
+  if (v === undefined || v === null) return null
+  if (typeof v !== 'number' || !Number.isInteger(v)) throw new BadRequest(`${field(key, prefix)}: 必须是整数`)
+  return v
+}
+
 /** 简易 TTL 缓存(自 weather.ts 提为共享):仅存成功结果,过期失效;重启清空可接受(分钟级数据,重拉无感)。
  *  无降级语义——要「失败宁旧勿空」用 cachedOrNull(ADR-0042),两者刻意共存:
  *  weather 段级隐藏(air=null 即「省略该段」)与 wbi 日更密钥等场景,回落旧值反而有害。 */

@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import type { AuthEnv } from './auth'
-import { BadRequest, touchVersion } from './common'
+import { asRec, BadRequest, jsonBody, optInt, reqInt, touchVersion } from './common'
 import type { Db } from './db'
 import type { ImportantDate } from 'chrome-tab-shared'
 
@@ -60,18 +60,18 @@ export async function readLayout(db: Db, userId: number): Promise<LayoutWire> {
 export async function updateLayout(db: Db, userId: number, body: Record<string, unknown>): Promise<LayoutWire> {
   // gridWidth 下限 768(ADR-0021 随 9×9 扩容上调,原 640):9 列轨道下图标不缩过旧 8 列
   // 最小档——「网格最小宽度变大,1×1 图标视觉不变」的容量侧配套。
-  const gridWidth = reqInt(body, 'gridWidth', 768, 1536)
-  const gridGap = reqInt(body, 'gridGap', 0, 24)
-  const gridGapY = optInt(body, 'gridGapY', 0, 32, LAYOUT_DEFAULTS.gridGapY)
-  const panelFog = optInt(body, 'panelFog', 0, 60, LAYOUT_DEFAULTS.panelFog)
-  const searchBarWidth = optInt(body, 'searchBarWidth', 320, 1024, LAYOUT_DEFAULTS.searchBarWidth)
+  const gridWidth = reqInt(body, 'gridWidth', { range: { min: 768, max: 1536 } })
+  const gridGap = reqInt(body, 'gridGap', { range: { min: 0, max: 24 } })
+  const gridGapY = optInt(body, 'gridGapY', { range: { min: 0, max: 32 }, def: LAYOUT_DEFAULTS.gridGapY })
+  const panelFog = optInt(body, 'panelFog', { range: { min: 0, max: 60 }, def: LAYOUT_DEFAULTS.panelFog })
+  const searchBarWidth = optInt(body, 'searchBarWidth', { range: { min: 320, max: 1024 }, def: LAYOUT_DEFAULTS.searchBarWidth })
   const searchBarVisible = optBool(body, 'searchBarVisible', true)
   const searchEngine = optEngine(body)
   const clockVisible = optBool(body, 'clockVisible', true)
-  const clockFont = optInt(body, 'clockFont', 28, 72, LAYOUT_DEFAULTS.clockFont)
+  const clockFont = optInt(body, 'clockFont', { range: { min: 28, max: 72 }, def: LAYOUT_DEFAULTS.clockFont })
   const clock24h = optBool(body, 'clock24h', true)
   const labelVisible = optBool(body, 'labelVisible', true)
-  const labelSize = optInt(body, 'labelSize', 10, 16, LAYOUT_DEFAULTS.labelSize)
+  const labelSize = optInt(body, 'labelSize', { range: { min: 10, max: 16 }, def: LAYOUT_DEFAULTS.labelSize })
   const labelColor = optColor(body)
   const importantDates = optDates(body)
 
@@ -102,12 +102,10 @@ export async function updateLayout(db: Db, userId: number, body: Record<string, 
 export function layoutRoutes(db: Db) {
   return new Hono<AuthEnv>().put('/api/layout-settings', async (c) => {
     const userId = c.get('user')!.id
-    const body = await c.req.json().catch(() => null)
-    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-      throw new BadRequest('请求体必须是布局设置对象')
-    }
+    const body = asRec(await jsonBody(c))
+    if (!body) throw new BadRequest('请求体必须是布局设置对象')
     const layout = await db.transaction().execute(async (tx) => {
-      const result = await updateLayout(tx, userId, body as Record<string, unknown>)
+      const result = await updateLayout(tx, userId, body)
       await touchVersion(tx, userId)
       return result
     })
@@ -115,19 +113,7 @@ export function layoutRoutes(db: Db) {
   })
 }
 
-// ── 字段小件(范围/类型/pattern 违例 → 400)──────────────────────────────────
-
-function reqInt(b: Record<string, unknown>, key: string, min: number, max: number): number {
-  const v = b[key]
-  if (typeof v !== 'number' || !Number.isInteger(v)) throw new BadRequest(`${key}: must not be null`)
-  if (v < min || v > max) throw new BadRequest(`${key}: 必须在 ${min}~${max} 之间`)
-  return v
-}
-
-function optInt(b: Record<string, unknown>, key: string, min: number, max: number, def: number): number {
-  if (b[key] === undefined || b[key] === null) return def
-  return reqInt(b, key, min, max)
-}
+// ── 域特有小件(bool/pattern/枚举/结构;int 族在 common,ADR-0048)──────────────
 
 function optBool(b: Record<string, unknown>, key: string, def: boolean): boolean {
   const v = b[key]

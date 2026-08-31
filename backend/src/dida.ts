@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { asRec, BadRequest, cachedOrNull, ConflictError, FETCH_TIMEOUT, fetchRes, str } from './common'
+import { asRec, BadRequest, cachedOrNull, ConflictError, FETCH_TIMEOUT, fetchRes, jsonBody, str } from './common'
 
 /**
  * 滴答清单待办代理(CONTEXT.md「待办」):单例图标的取数与写回——首个可写图标类型。
@@ -170,7 +170,7 @@ export function createDidaService(cfg: DidaConfig, baseUrl = DEFAULT_BASE) {
 export function didaRoutes(cfg?: DidaConfig, baseUrl?: string): Hono {
   const svc = createDidaService(cfg ?? { token: '' }, baseUrl)
   const readStr = async (c: { req: { json(): Promise<unknown> } }, key: string): Promise<string> => {
-    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>
+    const body = ((await jsonBody(c)) ?? {}) as Record<string, unknown>
     const v = body[key]
     return typeof v === 'string' ? v.trim() : ''
   }

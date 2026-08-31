@@ -254,6 +254,10 @@ _Avoid_: 指定网页、首页(浏览器 homepage 是另一回事)。
 一次登录建立的设备级凭据,载体是 HttpOnly 持久 cookie 指向服务端会话表的一行。寿命是 **30 天滑动窗口**:活跃即永生(每次使用自动续满),连续闲置 30 天才需重新登录;续期按日节流,每设备每天最多一次写。服务器重启不掉线(会话落库);登出 = 删本设备会话;改密码 = 手工流程中顺带清空全部会话(所有设备重登)。
 _Avoid_: 记住我、token、JWT。
 
+**请求体校验 (Request Body Validation)**:
+后端写端点请求体字段校验的小件族契约:坏 body 收敛 null、字段级 400(必填/缺省落默认/可空三种整数形态;名字按 @NotBlank @Size(max=NAME_MAX) 语义 trim 后落库)、嵌套定位前缀(「本地镜像」全量替换 blob 的 `icons[0].type`)。「图标」条目校验同表两入口合一:icons 六端点与 config PUT 走同一批件(type 枚举 + data/WebP 校验 `reqIconType`/`reqDataField` 域绑定 icons.ts),全量替换不再持旁门校验。实现载体:无域小件族(`jsonBody`/`reqName`/`reqInt`/`optInt`/`optNullableInt` + `NAME_MAX`)单点 backend `common.ts`(ADR-0048);`c.req.json()` 全仓唯 jsonBody 触达(grep 契约断言把关)。刻意分家:页面重排的 sortOrder 显式 null 必 400;blob 页名不 trim(忠实恢复,trim 是页面端点写入语义)。
+_Avoid_: 校验器/validator(无 schema DSL,一组纯函数)、validation 库。
+
 ### 数据同步与备份
 
 **本地镜像 (Local Mirror)**:

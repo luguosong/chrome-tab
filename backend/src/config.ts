@@ -1,8 +1,8 @@
 import { Hono } from 'hono'
 import type { AuthEnv } from './auth'
-import { BadRequest, ConflictError, touchVersion } from './common'
+import { NAME_MAX, asRec, BadRequest, ConflictError, jsonBody, optNullableInt, reqInt, touchVersion } from './common'
 import type { Db } from './db'
-import { CAPACITY_CELLS, ICON_TYPES, SINGLETON_TYPES, iconWire, spanOf, validateIconData } from './icons'
+import { CAPACITY_CELLS, ICON_TYPES, SINGLETON_TYPES, iconWire, reqDataField, reqIconType, spanOf } from './icons'
 import { readLayout, updateLayout } from './layout'
 import { pageWire } from './pages'
 
@@ -48,11 +48,9 @@ export function configRoutes(db: Db) {
     .get('/api/config', async (c) => c.json(await readConfig(db, c.get('user')!.id)))
     .put('/api/config', async (c) => {
       const userId = c.get('user')!.id
-      const body = await c.req.json().catch(() => null)
-      if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-        throw new BadRequest('请求体必须是配置对象')
-      }
-      const req = parseReplaceRequest(body as Record<string, unknown>)
+      const body = asRec(await jsonBody(c))
+      if (!body) throw new BadRequest('请求体必须是配置对象')
+      const req = parseReplaceRequest(body)
       validate(req)
       await db.transaction().execute(async (tx) => {
         // 1. 全清当前 user 的 icons + pages。parent FK 是 RESTRICT(ADR-0011),
@@ -135,39 +133,30 @@ function parseReplaceRequest(body: Record<string, unknown>): {
   return {
     pages: body.pages.map((raw, idx) => {
       const p = (raw ?? {}) as Record<string, unknown>
-      if (typeof p.id !== 'number' || !Number.isInteger(p.id)) throw new BadRequest(`pages[${idx}].id: must not be null`)
+      const id = reqInt(p, 'id', { prefix: `pages[${idx}]` })
+      // 页名不 trim:blob 是镜像/导入的忠实恢复,trim 是 pages 端点的写入语义(ADR-0048 记档的两入口分叉)
       if (typeof p.name !== 'string' || !p.name.trim()) throw new BadRequest(`pages[${idx}].name: must not be blank`)
-      if (p.name.length > 64) throw new BadRequest(`pages[${idx}].name: size must be between 0 and 64`)
-      if (typeof p.sortOrder !== 'number' || !Number.isInteger(p.sortOrder)) {
-        throw new BadRequest(`pages[${idx}].sortOrder: must not be null`)
+      if (p.name.length > NAME_MAX) throw new BadRequest(`pages[${idx}].name: size must be between 0 and ${NAME_MAX}`)
+      return {
+        id,
+        name: p.name,
+        sortOrder: reqInt(p, 'sortOrder', { prefix: `pages[${idx}]` }),
       }
-      return { id: p.id, name: p.name, sortOrder: p.sortOrder }
     }),
     icons: body.icons.map((raw, idx) => {
       const i = (raw ?? {}) as Record<string, unknown>
-      if (typeof i.id !== 'number' || !Number.isInteger(i.id)) throw new BadRequest(`icons[${idx}].id: must not be null`)
-      if (typeof i.pageId !== 'number' || !Number.isInteger(i.pageId)) {
-        throw new BadRequest(`icons[${idx}].pageId: must not be null`)
-      }
-      if (i.parentId !== undefined && i.parentId !== null && (typeof i.parentId !== 'number' || !Number.isInteger(i.parentId))) {
-        throw new BadRequest(`icons[${idx}].parentId: 必须是整数`)
-      }
-      if (typeof i.type !== 'string' || !(ICON_TYPES as readonly string[]).includes(i.type)) {
-        throw new BadRequest(`icons[${idx}].type: 非法的图标类型`)
-      }
-      if (typeof i.sortOrder !== 'number' || !Number.isInteger(i.sortOrder)) {
-        throw new BadRequest(`icons[${idx}].sortOrder: must not be null`)
-      }
-      if (i.data !== undefined && i.data !== null && (typeof i.data !== 'object' || Array.isArray(i.data))) {
-        throw new BadRequest(`icons[${idx}].data: 必须是对象`)
-      }
-      validateIconData(i.data as Record<string, unknown> | null | undefined)
+      const id = reqInt(i, 'id', { prefix: `icons[${idx}]` })
+      const pageId = reqInt(i, 'pageId', { prefix: `icons[${idx}]` })
+      const parentId = optNullableInt(i, 'parentId', `icons[${idx}]`)
+      const type = reqIconType(i, `icons[${idx}]`)
+      const sortOrder = reqInt(i, 'sortOrder', { prefix: `icons[${idx}]` })
+      reqDataField(i, `icons[${idx}]`)
       return {
-        id: i.id,
-        pageId: i.pageId,
-        parentId: (i.parentId ?? null) as number | null,
-        type: i.type as IconItem['type'],
-        sortOrder: i.sortOrder,
+        id,
+        pageId,
+        parentId,
+        type,
+        sortOrder,
         data: (i.data ?? null) as Record<string, unknown> | null,
       }
     }),

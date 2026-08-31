@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
 import { getCookie, setCookie } from 'hono/cookie'
 import type { Context, Handler, MiddlewareHandler } from 'hono'
+import { jsonBody } from './common'
 import type { Db } from './db'
 import { verifyPassword } from './password'
 
@@ -74,7 +75,7 @@ export function publicAuthRoutes(db: Db, cookieSecure: boolean) {
     new Hono<AuthEnv>()
       .post('/api/login', async (c) => {
         // 缺 body / 非 JSON / 字段缺失或非串都归一为空串 → 400(@NotBlank 语义)
-        const body: unknown = await c.req.json().catch(() => null)
+        const body: unknown = await jsonBody(c)
         const { username, password } = (body ?? {}) as Record<string, unknown>
         const u = typeof username === 'string' ? username : ''
         const p = typeof password === 'string' ? password : ''

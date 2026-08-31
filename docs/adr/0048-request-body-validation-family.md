@@ -1,0 +1,12 @@
+# 请求体校验小件族:jsonBody/int 族单点 common,「图标」条目两入口合一
+
+背景:写端点的请求体校验一直是「每文件一撮私有件」——icons.ts 六件(readJson/requireInt/optInt/optNullableInt/requireType/requireDataField)、layout.ts 范围族(reqInt/optInt 位置参 min/max/def)、pages.ts 的 requireName、videoUpdates.ts 的 requireName(值参形态)各自手抄,body 读取习语 9 文件(8 处 `.catch(() => null)` + dida 一处 `.catch(() => ({}))`——收敛目标分叉的孤例;auth 是架构评审走查漏数的第 9 家,grep 补证,ADR-0046 smartbox 同款情节)。最尖锐的一对:icons 六端点与 config PUT 全量替换写**同一张 icons 表**,却各持一套条目校验(config.ts:147-170 手写重写 icons 的小件)——端点新增的规则若漏同步进 blob 路径,全量替换就是绕过端点校验的旁门;name ≤64 字面量三拷(pages/config/videoUpdates)。消息文本不属契约(契约测试对校验消息零断言),但前端 BackupRestore/PageTabs 会展示 400 消息原文。
+
+**决策:校验小件族单点收编,同表两入口走同一批件;严格零行为变化(三处已知微变记档);三处域内分叉刻意保留。**
+
+1. **无域小件族进 common.ts**(BadRequest 已在此、10 文件已 import,顺既有 seam 入住不开新文件,ADR-0032「搬家而非新层」判据):`jsonBody`(全仓唯一 `c.req.json()` 持有点,坏 body 收敛 null)、`reqName`(@NotBlank @Size 语义,trim 返回)、`reqInt`/`optInt`(缺省 def 默认 0,对齐 Java int 原始类型的 Jackson 默认)/`optNullableInt`(可空形态)——均带可选 `prefix` 拼嵌套定位(config blob 的 `icons[0].type`),min/max/def 走 opts 对象(吸收 layout 的位置参形态)。`NAME_MAX = 64` 常量单点三处引用(页面名/分类名/blob 页名三规则独立、恰同值——常量消除「改一处忘两处」而不预设三域永远同值)。
+2. **域绑定件留域**:`reqIconType`/`reqDataField` 住 icons.ts 导出(绑 ICON_TYPES/validateIconData;common 不得反向依赖域文件),config blob 与 icons 端点**同用这批件**——旁门闭合靠小件共享本身,不建「条目解析」层(config blob 是唯一 7 字段全量消费者,one adapter = hypothetical seam;POST 的字段子集复用它反而别扭)。
+3. **三处域内分叉刻意保留**(收编零行为变化的代价,各有语义理由):pages reorder 的 `sortOrder` null 必 400(optInt 会静默落 0——显式置 null 是协议错);videoUpdates 的 `categoryId` 不接受 undefined 且文案「必须是整数或 null」;config blob 的页名**不 trim**(blob 是镜像/导入的忠实恢复,trim 是 pages 端点的写入语义)。
+4. **三处已知微变**(均为修正向,记档不视为回归):layout `optInt` 非法消息从「must not be null」归一为「必须是整数」(原版委托 reqInt 的形状副作用;契约测试零断言,前端「布局草稿」先校验故 UI 不可见);非 JSON body 对 icons 写端点从 TypeError→500 收敛为字段缺失 400(小件的 null body 容忍);dida 两端点对合法 JSON `null` body 从 TypeError→500 收敛为 400(原 readStr 的 `.catch(() => ({}))` 只兜解析失败不兜 JSON-null——收敛目标分叉的孤例,迁移后统一走 jsonBody 的 null 收敛)。终审另复核一处疑似:config pages 条目的校验顺序已复原为迁移前的 id→name→sortOrder(消息优先级零变化)。
+5. **明确不收**:schema DSL(一组纯函数即够,声明式是 YAGNI);消息方言全面归一(Java 英文与中文并存是历史层理,纯化妆不打包);layout 的 optBool/optDates/optEngine/optColor(单域消费者,升共享层是假 seam);dida 的 readStr(宽容读取非校验,非串落空串);`reqName`/`optNullableInt` 的裸 prefix 位置参与 `reqInt`/`optInt` 的 opts 对象并存(单键无需包对象,错形态由 tsc 抓)。
+6. **grep 契约断言**:`c.req.(json|text|parseBody|arrayBuffer)` 仅 common.ts 可触(ADR-0045 先例,srcFiles walk 助手共用;text 等旁通道同禁,防绕开 json 通道另立收敛点);小件直测表驱动进 common.test——契约测试不覆盖的消息文案与 null body 容忍由它唯一把关;`field` 前缀拼接惯例导出单点(common 与 icons 的域绑定件共用,防嵌套定位格式漂移)。

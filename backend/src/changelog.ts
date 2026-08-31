@@ -7,7 +7,7 @@ import {
 } from 'chrome-tab-shared'
 import type { Db } from './db'
 import type { AuthEnv } from './auth'
-import { fetchText } from './common'
+import { fetchText, jsonBody } from './common'
 import {
   callModel,
   isCandidateExhausted,
@@ -292,7 +292,7 @@ export function changelogRoutes(services: ChangelogServices): Hono<AuthEnv> {
     .get('/api/changelog', async (c) => c.json(toResponse(await pick(c).get())))
     .get('/api/changelog/translate/status', (c) => c.json(pick(c).translatePhase()))
     .post('/api/changelog/translate', async (c) => {
-      const body = await c.req.json().catch(() => null)
+      const body = await jsonBody(c)
       const versions = (body as { versions?: unknown } | null)?.versions
       const list = Array.isArray(versions) ? versions.filter((v): v is string => typeof v === 'string') : []
       return c.json(toResponse(await pick(c).translateVersions(list)))
