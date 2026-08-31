@@ -35,9 +35,8 @@ export default function TodoModal({ onClose }: { onClose: () => void }) {
   /** 窄窗降级的二级详情(与图标块入口同一形态)。 */
   const [detail, setDetail] = useState<TodoTask | null>(null)
   const narrow = useNarrow()
-  // 失败 = 网络错(isError)或后端从未取到(data===null,HTTP 200);
-  // data===undefined 是首次加载中,不算失败(区别于 null,AiHotModal 同款)。
-  const failed = isError || data === null
+  // 「从未取到」(200-null)已在 queryFn 归一为 error(ADR-0049),失败判定只剩 isError
+  const failed = isError
   const unconfigured = error instanceof ApiError && error.status === 400
 
   /** 切 tab 即收起详情:选中项多半不在新列表,保留无意义。 */

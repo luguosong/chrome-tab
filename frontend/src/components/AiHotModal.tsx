@@ -33,9 +33,8 @@ export default function AiHotModal({ icon, onClose }: { icon: Icon; onClose: () 
   const { data, isError, refetch, isFetching } = useAiHot()
   // 默认日报(2026-08-25 起块内即日报,「更多」= 块内内容展开,默认视图随之)
   const [tab, setTab] = useState<Tab>('daily')
-  // 失败 = 网络错(isError)或后端从未取到(data===null,HTTP 200);
-  // data===undefined 是首次加载中,不算失败(区别于 null,WeatherModal 同款显式加载态)。
-  const failed = isError || data === null
+  // 「从未取到」(200-null)已在 queryFn 归一为 error(ADR-0049),失败判定只剩 isError
+  const failed = isError
   const topics = data ?? []
 
   return (
@@ -117,7 +116,7 @@ export default function AiHotModal({ icon, onClose }: { icon: Icon; onClose: () 
 /** 模型精选 tab 面板:懒挂载(只在选中时渲染),三态走 QueryPane 零件(ADR-0040)。 */
 function ModelPicksPanel() {
   const { data, isError, refetch, isFetching } = useAiHotModelPicks()
-  const failed = isError || data === null
+  const failed = isError
   const picks = data ?? []
 
   return (
@@ -175,7 +174,7 @@ function ModelPicksPanel() {
  */
 function DailyPanel() {
   const { data, isError, refetch, isFetching } = useAiHotDaily()
-  const failed = isError || data === null
+  const failed = isError
   const sections = data?.sections.filter((s) => s.items.length > 0) ?? []
   const total = sections.reduce((n, s) => n + s.items.length, 0)
 

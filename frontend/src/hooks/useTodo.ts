@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiFetch } from '../api/client'
+import { apiFetch, fetchNonNull, retryUnlessNeverFetched } from '../api/client'
 import type { TodoBundle, TodoTask } from '../lib/todo'
 import { optimisticCallbacks } from '../lib/optimisticMutation'
 
@@ -15,18 +15,19 @@ import { optimisticCallbacks } from '../lib/optimisticMutation'
 const TODO_KEY = ['todo'] as const
 
 export function useTodo() {
-  return useQuery<TodoBundle | null>({
+  return useQuery<TodoBundle>({
     queryKey: TODO_KEY,
-    queryFn: () => apiFetch<TodoBundle | null>('/api/todo'),
+    queryFn: () => fetchNonNull<TodoBundle>('/api/todo'),
     staleTime: 30_000,
     refetchInterval: 5 * 60_000,
-    retry: 1,
+    retry: retryUnlessNeverFetched,
   })
 }
 
 /** 点掉即完成:从三视图乐观移除,失败回滚快照,收尾 invalidate 对账。乐观协议
- *  经 optimisticMutation 工厂(ADR-0044)——T 为 TodoBundle|null:null 缓存跳过
- *  乐观写、null 快照照常还原,双层判空契约由工厂测试面背书。 */
+ *  经 optimisticMutation 工厂(ADR-0044)——T 为 TodoBundle:「从未取到」已在
+ *  queryFn 归一为 error、缓存不落 null(ADR-0049),未就绪(undefined)缓存
+ *  跳过乐观写,双层判空契约由工厂测试面背书。 */
 export function useCompleteTodo() {
   const qc = useQueryClient()
   return useMutation({
@@ -35,7 +36,7 @@ export function useCompleteTodo() {
         method: 'POST',
         body: JSON.stringify({ projectId: t.projectId, taskId: t.id }),
       }),
-    ...optimisticCallbacks<TodoBundle | null, TodoTask>(qc, TODO_KEY, (prev, t) => ({
+    ...optimisticCallbacks<TodoBundle, TodoTask>(qc, TODO_KEY, (prev, t) => ({
       today: prev.today.filter((x) => x.id !== t.id),
       week: prev.week.filter((x) => x.id !== t.id),
       inbox: prev.inbox.filter((x) => x.id !== t.id),

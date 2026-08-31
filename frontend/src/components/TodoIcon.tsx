@@ -95,7 +95,7 @@ export default function TodoIconBody({
         moreTitle="查看全部待办"
         overlay={overlay}
       >
-        {data === undefined || data === null ? null : inbox.length === 0 ? (
+        {!data ? null : inbox.length === 0 ? (
           <div className="flex-1 flex items-center justify-center text-white/40" style={{ fontSize }}>
             收集箱是空的
           </div>

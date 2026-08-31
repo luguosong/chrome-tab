@@ -258,6 +258,10 @@ _Avoid_: 记住我、token、JWT。
 后端写端点请求体字段校验的小件族契约:坏 body 收敛 null、字段级 400(必填/缺省落默认/可空三种整数形态;名字按 @NotBlank @Size(max=NAME_MAX) 语义 trim 后落库)、嵌套定位前缀(「本地镜像」全量替换 blob 的 `icons[0].type`)。「图标」条目校验同表两入口合一:icons 六端点与 config PUT 走同一批件(type 枚举 + data/WebP 校验 `reqIconType`/`reqDataField` 域绑定 icons.ts),全量替换不再持旁门校验。实现载体:无域小件族(`jsonBody`/`reqName`/`reqInt`/`optInt`/`optNullableInt` + `NAME_MAX`)单点 backend `common.ts`(ADR-0048);`c.req.json()` 全仓唯 jsonBody 触达(grep 契约断言把关)。刻意分家:页面重排的 sortOrder 显式 null 必 400;blob 页名不 trim(忠实恢复,trim 是页面端点写入语义)。
 _Avoid_: 校验器/validator(无 schema DSL,一组纯函数)、validation 库。
 
+**从未取到 (Never Fetched)**:
+某数据源在后端**从未成功从上游取得过任何一版数据**的数据态,与「取到过但为空」(走空态文案)、「网络失败」三分;上游失败时后端宁旧勿空(沿用上次成功数据),故该态出现必为从未成功。对用户呈现为刷新失败——与网络失败同文案、可重试,自愈靠轮询(失败态下轮询不断);曾有数据后转入该态时,详情视图显示失败而块内沿用最近成功数据(宁旧勿空对齐,不闪空)。wire 形状 HTTP 200 + null body;三态是后端立法的域语义(cachedOrNull 原语,ADR-0042;后端注释称「从未成功」,同义),前端在取数 seam 归一为失败:顶层 `T|null` 协议的 queryFn 经 `fetchNonNull` 声明「null 即失败」,消费端只面对加载/失败二态;该态不参与 retry(分钟级持续失败,重试无翻盘收益),网络错照旧重试一次(实现载体:前端 `api/client.ts` 的 `fetchNonNull` + `retryUnlessNeverFetched`,ADR-0049)。区别于「天气」的桶内 null(分桶部分失败,随批量响应部分成功,不适用整体归一)。
+_Avoid_: 无数据/空数据(那是「取到过但为空」,走空态)、缓存未命中(后端内部机制词,非用户可感数据态)、null 态(实现形状非域概念)。
+
 ### 数据同步与备份
 
 **本地镜像 (Local Mirror)**:

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { apiFetch } from '../api/client'
+import { fetchNonNull, retryUnlessNeverFetched } from '../api/client'
 import type { AiHotDaily, AiHotModelPick, AiHotTopic } from '../lib/aihot'
 
 /**
@@ -11,12 +11,12 @@ import type { AiHotDaily, AiHotModelPick, AiHotTopic } from '../lib/aihot'
  * 10min 轮询维持网格榜首标题温度——更密只会命中后端同一份缓存。
  */
 export function useAiHot() {
-  return useQuery<AiHotTopic[] | null>({
+  return useQuery<AiHotTopic[]>({
     queryKey: ['aihot'],
-    queryFn: () => apiFetch<AiHotTopic[] | null>('/api/aihot/hot-topics'),
+    queryFn: () => fetchNonNull<AiHotTopic[]>('/api/aihot/hot-topics'),
     staleTime: 5 * 60_000,
     refetchInterval: 10 * 60_000,
-    retry: 1,
+    retry: retryUnlessNeverFetched,
   })
 }
 
@@ -26,12 +26,12 @@ export function useAiHot() {
  * 几次到几十次),轮询同热点 10min 足够;仅 Modal 打开该 tab 才挂载组件、才发请求。
  */
 export function useAiHotModelPicks() {
-  return useQuery<AiHotModelPick[] | null>({
+  return useQuery<AiHotModelPick[]>({
     queryKey: ['aihot', 'model-picks'],
-    queryFn: () => apiFetch<AiHotModelPick[] | null>('/api/aihot/model-picks'),
+    queryFn: () => fetchNonNull<AiHotModelPick[]>('/api/aihot/model-picks'),
     staleTime: 5 * 60_000,
     refetchInterval: 10 * 60_000,
-    retry: 1,
+    retry: retryUnlessNeverFetched,
   })
 }
 
@@ -41,10 +41,10 @@ export function useAiHotModelPicks() {
  * 轮询对定稿数据无意义;staleTime 5min 防同会话重复请求足够。
  */
 export function useAiHotDaily() {
-  return useQuery<AiHotDaily | null>({
+  return useQuery<AiHotDaily>({
     queryKey: ['aihot', 'daily'],
-    queryFn: () => apiFetch<AiHotDaily | null>('/api/aihot/daily'),
+    queryFn: () => fetchNonNull<AiHotDaily>('/api/aihot/daily'),
     staleTime: 5 * 60_000,
-    retry: 1,
+    retry: retryUnlessNeverFetched,
   })
 }
