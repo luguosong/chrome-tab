@@ -3,18 +3,15 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createWallpaperHandler } from './wallpaper'
 
 // 契约 §8 + 修正白名单③:缓存按天(enddate)失效——变化才重拉、失败沿用旧值。
-// fetch 与时钟注入(不打真网);401 横切由契约测试统一覆盖,此处直挂路由(不经 createApp)。
+// fetchJson 与时钟注入(不打真网);401 横切由契约测试统一覆盖,此处直挂路由(不经 createApp)。
 
 const BING_URL = 'https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=zh-CN'
 // 12:00 北京时间;跨日测试 +24h 保持同时刻,只动日界
 const T0 = Date.parse('2026-08-22T04:00:00Z')
 let clock = T0
 
-function bing(enddate: string, tag: string): Response {
-  return new Response(
-    JSON.stringify({ images: [{ urlbase: `/th?id=OHR.${tag}`, copyright: `${tag} (${enddate})`, enddate }] }),
-    { headers: { 'content-type': 'application/json' } },
-  )
+function bing(enddate: string, tag: string) {
+  return { images: [{ urlbase: `/th?id=OHR.${tag}`, copyright: `${tag} (${enddate})`, enddate }] }
 }
 
 const guilin = {
@@ -23,16 +20,16 @@ const guilin = {
   date: '20260822',
 }
 
-/** fetch 桩:按队列出 Response(耗尽 = 上游 503 失败),记录调用 URL */
+/** fetchJson 桩:按队列出解析好的 body(耗尽 = 上游失败,原语形状即非 2xx 抛),记录调用 URL */
 function makeApp() {
   const calls: string[] = []
-  const queue: Array<() => Response> = []
-  const fetchFn: typeof fetch = async (input) => {
-    calls.push(String(input))
-    return queue.shift()?.() ?? new Response('boom', { status: 503 })
+  const queue: Array<() => unknown> = []
+  const fetchJson = async (url: string): Promise<unknown> => {
+    calls.push(url)
+    return queue.shift()?.() ?? Promise.reject(new Error('GET x → HTTP 503'))
   }
   const app = new Hono()
-    .get('/api/wallpaper', createWallpaperHandler({ fetchFn, now: () => clock }))
+    .get('/api/wallpaper', createWallpaperHandler({ fetchJson, now: () => clock }))
     // 镜像 app.ts 兜底形状(接线统一落在 createApp)
     .onError((_err, c) => c.json({ status: 500, message: '服务器错误' }, 500))
   const get = () => app.request('/api/wallpaper')
@@ -103,7 +100,7 @@ describe('GET /api/wallpaper(修正③:按天失效)', () => {
 
   it('响应不含 images → 500(契约:不含 images 抛)', async () => {
     const { queue, get } = makeApp()
-    queue.push(() => new Response(JSON.stringify({ foo: 1 }), { headers: { 'content-type': 'application/json' } }))
+    queue.push(() => ({ foo: 1 }))
     const res = await get()
     expect(res.status).toBe(500)
     await expect(res.json()).resolves.toEqual({ status: 500, message: '服务器错误' })

@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cachedOrNull } from './common'
 
@@ -85,5 +87,35 @@ describe('cachedOrNull:TTL + 宁旧勿空原语', () => {
     } finally {
       console.warn = origWarn
     }
+  })
+})
+
+/**
+ * 裸 fetch 契约(ADR-0045):上游取数必经原语族——「超时防挂起 + 非 2xx 抛带 status」
+ * 的不变量只在 common.ts 单点成立,前提是没人绕开原语直接触全局 fetch。wallpaper/
+ * siteInfo 曾以 `deps.fetchFn ?? fetch` 注入形状漏网(注入间接层骗过 grep 清点,
+ * 2026-08-31 补收),此断言把「grep 可断言」变成测试把关,防下一个域再漏。
+ */
+describe('裸 fetch 契约:上游取数必经原语族(ADR-0045)', () => {
+  it('backend/src 非测试源码仅 common.ts(原语内部)与 ai/(LLM 族豁免)可触全局 fetch', () => {
+    const srcDir = fileURLToPath(new URL('./', import.meta.url))
+    const offenders: string[] = []
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = dir + name // dir 恒带尾斜杠(srcDir 与递归层皆是)
+        if (statSync(p).isDirectory()) walk(p + '/')
+        else if (name.endsWith('.ts') && !name.endsWith('.test.ts')) {
+          const rel = p.slice(srcDir.length)
+          if (rel === 'common.ts' || rel.startsWith('ai/')) continue
+          const lines = readFileSync(p, 'utf8').split('\n')
+          lines.forEach((line, i) => {
+            if (/\btypeof fetch\b|\?\?\s*fetch\b|(?<![.\w])fetch\s*\(/.test(line))
+              offenders.push(`${rel}:${i + 1}: ${line.trim()}`)
+          })
+        }
+      }
+    }
+    walk(srcDir)
+    expect(offenders).toEqual([])
   })
 })

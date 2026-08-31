@@ -9,3 +9,5 @@
 3. **不收(防重提)**:①`ai/agent` 的 LLM 调用——read 超时(READ_TIMEOUT_MS)与匿名抓取的 10s 语义不同族,且已有 `AgentDeps` 注入 seam;②**接线 A 代化不做**——「service 上提到 index.ts + 条件挂载」对按需取数域是形式主义:三域无 scheduler 消费者(A 代上提的真实动因),恒挂载是**有意契约**(weather 未配置 500 §7、dida 400、aihot 恒可用),`apiHost`/`baseUrl`/`cfg` 本就是注入点(stub 上游直指即完成替换)。「轮询域(service 上提 + 假 fetch 注入)vs 按需域(routes 闭包 + stub 上游)」是各有理的两族,不是先进/落后两代。
 
 **代价与取舍。** 换来:「防挂起」成为新上游域的默认属性(裸 fetch 在 backend/src 仅剩 common.ts 原语内部与 ai/agent 两处,grep 可断言);超时与抛错语义的变化点全 backend 单点。付出:原语族 4 个导出(形态正交、各一行);dida 的错误转换多一层 catch;weather/aihot 的错误文案从域措辞变为原语统一形态(降级路径只记日志不断言文本,无测试波及)。
+
+**补记(2026-08-31):wallpaper/siteInfo 系清点遗漏,补收。** 两域的生产默认路径是 `deps.fetchFn ?? fetch` 全局裸 fetch——注入间接层骗过了立 ADR 时的 grep 清点,上文「仅剩两处」断言当时即为假(wallpaper 无超时,weather 事故同族的挂死面;siteInfo 手写超时但错误不带 status)。补收:wallpaper 换 `fetchJson`(`BING_URL, FETCH_TIMEOUT`;日界缓存与宁旧勿空是域语义,留域),siteInfo 换 `fetchRes` 底形态(要读 `res.url` 重定向落地;自有 UA 顺带统一 `chromeHeaders`,抓页 UA 由 Linux Chrome/126 变 CHROME_UA)。「grep 可断言」升级为 common.test 的契约断言(扫描非测试源码的 `typeof fetch` / `?? fetch` / 裸 `fetch(`,白名单 common.ts 与 ai/),注入形状不再能骗过清点;`?? fetch` 模式自此仅剩 ai/agent 豁免。

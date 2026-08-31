@@ -1,12 +1,13 @@
 import type { Handler } from 'hono'
 import type { AuthEnv } from './auth'
-import { BadRequest, TtlCache } from './common'
+import { BadRequest, chromeHeaders, FETCH_TIMEOUT, fetchRes as prodFetchRes, TtlCache } from './common'
 
 /**
  * 站点信息抓取(见 CONTEXT.md「站点信息」):GET /api/site-info?url=…
  * 新增/编辑「网站链接」表单的自动填充数据源——后端抓目标页 HTML,解析 <title> 与
  * <link rel~icon> 图标候选下发。TTL 缓存仅存成功结果(失败下次重试),不持久化;
  * 表单之外无消费方,图标最终形态仍由前端「派生 favicon + 图标覆盖」决定。
+ * 取数经 fetchRes 底形态(要读 res.url 重定向落地;超时防挂起 + 非 2xx 抛,ADR-0045 补收)。
  */
 
 export interface SiteInfoDto {
@@ -15,13 +16,10 @@ export interface SiteInfoDto {
 }
 
 const TTL_MS = 30 * 60 * 1000
-const FETCH_TIMEOUT_MS = 10_000
 /** 只解析开头一截:title/icon 声明都在 <head>,防超大页面整页解析。
  *  ponytail: 按字节截断,内联脚本/CSS 前置的超长 head 站点可能漏尾部候选;
  *  真实站点撞上再升级为按 </head> 定位或流式截断。 */
 const MAX_HTML = 200_000
-const UA =
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
 
 // ---- 解析(纯函数,Vitest 直测)----
 
@@ -83,12 +81,12 @@ export function parseSiteInfo(html: string, baseUrl: string): SiteInfoDto {
 // ---- handler ----
 
 export interface SiteInfoDeps {
-  /** 依赖注入缝(测试不打真网);缺省即全局 fetch */
-  fetchFn?: typeof fetch
+  /** 依赖注入缝(测试不打真网);缺省即 common 原语 */
+  fetchRes?: (url: string, timeoutMs: number, init?: RequestInit) => Promise<Response>
 }
 
 export function createSiteInfoHandler(deps: SiteInfoDeps = {}): Handler<AuthEnv> {
-  const fetchFn = deps.fetchFn ?? fetch
+  const fetchRes = deps.fetchRes ?? prodFetchRes
   const cache = new TtlCache<SiteInfoDto>()
   return async (c) => {
     const raw = c.req.query('url') ?? ''
@@ -107,12 +105,10 @@ export function createSiteInfoHandler(deps: SiteInfoDeps = {}): Handler<AuthEnv>
     // mimosa-ignore 「站点信息」按已登录用户提交网址抓取是产品既定功能(CONTEXT.md),SSRF 面为已接受风险
     const cached = cache.get(key)
     if (cached) return c.json(cached)
-    const res = await fetchFn(key, {
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      headers: { 'user-agent': UA, accept: 'text/html' },
+    const res = await fetchRes(key, FETCH_TIMEOUT, {
+      ...chromeHeaders({ accept: 'text/html' }),
       redirect: 'follow',
     })
-    if (!res.ok) throw new Error(`站点抓取 HTTP ${res.status}`)
     const html = (await res.text()).slice(0, MAX_HTML)
     // 重定向后以最终落地 URL 为基准解析相对地址(Response 合成时 url 为空,回落入参)
     const value = parseSiteInfo(html, res.url || key)

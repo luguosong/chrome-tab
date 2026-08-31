@@ -5,7 +5,7 @@ import { createSiteInfoHandler, parseSiteInfo } from './siteInfo'
 
 // parseSiteInfo:HTML → {title, icon 候选} 纯函数(新增/编辑表单自动填充的数据源,
 // 见 CONTEXT.md「站点信息」)。handler 直挂路由(不经 createApp,同 wallpaper.test.ts 先例):
-// fetch 注入不打真网;401 横切由契约测试覆盖。
+// fetchRes 注入不打真网;401 横切由契约测试覆盖。
 
 describe('parseSiteInfo', () => {
   const BASE = 'https://example.com/a/b'
@@ -71,15 +71,17 @@ describe('parseSiteInfo', () => {
 describe('GET /api/site-info', () => {
   const PAGE = `<title>百度一下</title><link rel="icon" href="/favicon.ico">`
 
-  /** fetch 桩 + 直挂路由(镜像 app.ts 兜底形状;接线统一落在 createApp) */
+  /** fetchRes 桩 + 直挂路由(镜像 app.ts 兜底形状;接线统一落在 createApp);默认桩抛原语形状错(= 上游非 2xx/超时) */
   function makeApp() {
     const calls: string[] = []
-    let respond: () => Response = () => new Response('boom', { status: 503 })
-    const fetchFn: typeof fetch = async (input) => {
-      calls.push(String(input))
+    let respond: () => Response = () => {
+      throw Object.assign(new Error('GET x → HTTP 503'), { status: 503 })
+    }
+    const fetchRes = async (url: string): Promise<Response> => {
+      calls.push(url)
       return respond()
     }
-    const app = new Hono().get('/api/site-info', createSiteInfoHandler({ fetchFn }))
+    const app = new Hono().get('/api/site-info', createSiteInfoHandler({ fetchRes }))
     // 镜像 app.ts 兜底形状(接线统一落在 createApp)
     app.onError((err, c) => {
       if (err instanceof ConflictError)
