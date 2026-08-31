@@ -308,6 +308,25 @@ code {
   .animate-drop-in {
     animation: drop-in 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
   }
+  /* ── 退场族(对称路径:从哪进就从哪出,2026-08-31 补)───────────────────
+     与上列入场一一镜像,曲线取时间反演;时长统一 0.2s(按钮档)——退场快于
+     入场是 iOS 惯例。消费方:ModalShell / GroupOverlay(pop-out)、ControlDrawer
+     (slide-out-right),遮罩三者共用 fade-out;组件侧延迟真卸载的定时器单点于
+     hooks/useExitClose(200ms 与此同名档,CSS 与 JS 各出现一次、不跨界共享)。
+     已知取舍:类切换重启动画,退场从静止值起步而非入场中途的实际位置——开关
+     间隔小于入场时长(抽屉 0.22s)的 oops 手势会先闪回全开再退场;读 computed
+     style 做起始帧的成本远超该低频场景的感知收益,不修。 */
+  /* 三者皆 forwards:钉住结束态(scale 0.96 / 屏外 / opacity 0),卸载定时器
+     与动画收尾的时序竞态下无回跳一帧 */
+  .animate-pop-out {
+    animation: pop-out 0.2s cubic-bezier(0.64, 0, 0.78, 0.39) forwards;
+  }
+  .animate-slide-out-right {
+    animation: slide-out-right 0.2s ease-in forwards;
+  }
+  .animate-fade-out {
+    animation: fade-out 0.2s ease-in forwards;
+  }
 }
 @keyframes jiggle {
   0%,
@@ -351,6 +370,33 @@ code {
   }
   to {
     transform: translateY(0);
+  }
+}
+/* 退场 keyframes(镜像见上方 @media 块注释) */
+@keyframes pop-out {
+  /* 只动 transform 不动 opacity,同 pop-in 的坑:面板带 backdrop-filter,
+     opacity<1 瞬态切断 backdrop 采样、玻璃闪失;渐隐交给遮罩层 fade-out */
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(0.96);
+  }
+}
+@keyframes slide-out-right {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
   }
 }
 

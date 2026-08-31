@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { registerEscHandler } from '../lib/escStack'
+import { useExitClose } from '../hooks/useExitClose'
 
 const WIDTHS = {
   sm: 'max-w-sm',
@@ -15,6 +16,12 @@ const WIDTHS = {
  * createPortal(document.body) 逃出 .page-panel 的 backdrop-filter 包含块
  * (fixed 后代被钳成锚定 main,TodoIcon 快览卡同款教训)。直接消费:详情 Modal
  * 骨架(ADR-0040,十家详情 Modal 经它)+ 待办详情二级对话框 + 倒计时编辑弹层。
+ *
+ * 退场(对称路径:从哪进就从哪出,2026-08-31):关闭不立即上调 onClose,先播
+ * pop-out + 遮罩 fade-out、EXIT_MS 后真关闭——父组件 state 不动,面板内容冻结
+ * 播完再卸载;消费方零改动。退场窗口封冻三件套:面板 inert(输入无效)、遮罩
+ * pointer-events-none(点击穿页)、Esc 栈提前出栈(Esc 达下层)。已知取舍:
+ * 退场窗口内(~200ms)经入口重开会被完成中的关闭吞掉,下一轮点击即正常。
  *
  * 不进壳的两样:padding 三形态(p-6 ×9 / p-5 / Changelog 拆内部区块)走 className;
  * 标题区异质(副行文本 vs 行内操作按钮)留在各 Modal。
@@ -42,14 +49,31 @@ export default function ModalShell({
   children: ReactNode
 }) {
   // Esc 归属走全局栈:本壳挂载即入栈,卸载出栈,按键只达栈顶。
-  // 栈成员资格只在挂载/卸载时变动——onClose 引用(调用方多为内联箭头,随父渲染
-  // 更新)经 ref 跟随,不触发重排;否则二级详情开着时父组件一次 re-render 就会把
-  // 一级 pop 再 push 到栈顶,Esc 反而先关一级。
-  const onCloseRef = useRef(onClose)
+  // 栈成员资格只在挂载/卸载/closing 时变动——onClose 引用(调用方多为内联箭头,
+  // 随父渲染更新)经 useExitClose 的 ref 跟随 + requestClose 引用稳定,注册不随
+  // 父渲染重排;否则二级详情开着时父组件一次 re-render 就会把一级 pop 再 push
+  // 到栈顶,Esc 反而先关一级。
+
+  // ── 退场接线(协议单点 hooks/useExitClose;封冻语义见其注释)────────────
+  const { closing, requestClose } = useExitClose(onClose)
+  // closing 即提前出栈:退场中 modality 已转移,Esc 应达下层(双 Esc 关两层
+  // 不被退场窗口吞掉)。注销函数幂等(escStack findIndex 失配 no-op),closing
+  // 提前出栈与卸载 cleanup 双调安全。
+  const offEscRef = useRef<(() => void) | null>(null)
   useEffect(() => {
-    onCloseRef.current = onClose
-  })
-  useEffect(() => registerEscHandler(() => onCloseRef.current()), [])
+    const off = registerEscHandler(requestClose)
+    offEscRef.current = off
+    return off
+  }, [requestClose])
+  useEffect(() => {
+    if (closing) offEscRef.current?.()
+  }, [closing])
+  // 退场中封冻面板输入(inert:pointer/keyboard/focus 一并):窗口内的面板动作
+  // (点行开二级对话框、连点成员)执行了也会被随后的卸载拆除,宁可无效勿被拆。
+  const panelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (panelRef.current) panelRef.current.inert = closing
+  }, [closing])
 
   return createPortal(
     <div
@@ -59,19 +83,26 @@ export default function ModalShell({
       aria-modal="true"
       aria-label={ariaLabel}
     >
-      {/* 遮罩:点击关闭(fade-in 入场,族内统一) */}
-      <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
+      {/* 遮罩:点击关闭;入场 fade-in / 退场 fade-out(纯色可动 opacity,渐隐在此)
+          + pointer-events-none(dismiss 已开始,点击穿页到达背后内容) */}
+      <div
+        className={`absolute inset-0 bg-black/50 ${
+          closing ? 'animate-fade-out pointer-events-none' : 'animate-fade-in'
+        }`}
+        onClick={requestClose}
+      />
 
       <div
+        ref={panelRef}
         className={
-          `glass-panel glass-panel-readable relative w-full rounded-3xl animate-pop-in ${WIDTHS[width]} ` +
+          `glass-panel glass-panel-readable relative w-full rounded-3xl ${closing ? 'animate-pop-out' : 'animate-pop-in'} ${WIDTHS[width]} ` +
           (scroll ? 'max-h-[80vh] overflow-y-auto modal-scroll ' : '') +
           className
         }
       >
         <button
           type="button"
-          onClick={onClose}
+          onClick={requestClose}
           aria-label="关闭"
           className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-white/20 text-white/80 hover:bg-white/40 flex items-center justify-center transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
         >

@@ -4,6 +4,7 @@ import { SortableContext, rectSortingStrategy, useSortable } from '@dnd-kit/sort
 import { CSS } from '@dnd-kit/utilities'
 import { useConfig, useDeleteIcon, useUpdateIconData } from '../api/config'
 import { useEditMode } from '../context/EditModeContext'
+import { useExitClose } from '../hooks/useExitClose'
 import { get } from '../lib/iconTypeRegistry'
 import ConfirmButton from './ConfirmButton'
 import { EditForm } from './Icon'
@@ -55,6 +56,15 @@ export default function GroupOverlay({
 
   const panelRef = useRef<HTMLDivElement>(null)
 
+  // ── 退场接线(协议单点 hooks/useExitClose)─────────────────────────────
+  // 退场只挂 Esc 与查看态点子图标两路(交互已完成/意图明确,延迟卸载安全);
+  // 「点外部」保持同步关闭,见下方该 effect 的注释。
+  const { closing, requestClose } = useExitClose(onClose)
+  // 退场中封冻面板输入(inert):连点成员不再重复 window.open 新标签
+  useEffect(() => {
+    if (panelRef.current) panelRef.current.inert = closing
+  }, [closing])
+
   // ── 行内改名(任意模式)──────────────────────────────────────────────────
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState('')
@@ -67,9 +77,13 @@ export default function GroupOverlay({
     renameMut.mutate({ id: group.id, data: { name: next } })
   }
 
-  // ── 点外部关闭(左键)──────────────────────────────────────────────────
+  // ── 点外部关闭(左键)——同步关,不走退场 ────────────────────────────────
   // backdrop 是 pointer-events:none,点击穿透到背后网格;关闭判定在捕获 phase:
   // 先于网格图标的 click 触发关弹层,穿透点击的默认行为(开网站/开组)照常完成。
+  // 退场动画(2026-08-31)刻意不挂这条路:关闭是穿透交互的搭车副作用而非直接
+  // 意图,延迟卸载会让「点 B 组」撞上 A 的退场定时器(B 在同一 fiber 上冻成
+  // 退场终态再被误关),网格拖拽起手也会在拖拽中途被定时器卸载弹层——违反
+  // 「拖拽中途绝不卸载」硬约束。让位即同步,与退场前的行为一致。
   useEffect(() => {
     function onPointerDown(e: PointerEvent) {
       if (e.button !== 0) return // 右键留给编辑模式切换,不关弹层
@@ -94,12 +108,12 @@ export default function GroupOverlay({
           new PointerEvent('pointercancel', { cancelable: true }),
         )
       } else {
-        onClose()
+        requestClose()
       }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [dragging, onClose])
+  }, [dragging, requestClose])
 
   // ── 滚轮翻组内页(吃掉事件,不透传)─────────────────────────────────────
   // React onWheel 是被动监听,preventDefault 无效——挂原生非被动监听。portal 在
@@ -123,13 +137,19 @@ export default function GroupOverlay({
   return createPortal(
     <div className="fixed inset-0 z-40 flex items-center justify-center">
       {/* 暗化背景:常态 pointer-events:none(票 08 硬约束);浓度与其余浮层遮罩统一 /50。
-          入场动画与其余 L1 弹层同语汇(fade-in/pop-in 纯 CSS,不碰 dnd 拖拽量测)。 */}
-      <div className="absolute inset-0 bg-black/50 pointer-events-none animate-fade-in" />
+          入场/退场动画与其余 L1 弹层同语汇(fade-in/pop-in 纯 CSS,不碰 dnd 拖拽量测)。 */}
+      <div
+        className={`absolute inset-0 bg-black/50 pointer-events-none ${
+          closing ? 'animate-fade-out' : 'animate-fade-in'
+        }`}
+      />
       <div
         ref={panelRef}
         role="dialog"
         aria-label={`分组 ${name}`}
-        className="relative glass-panel pointer-events-auto rounded-3xl p-5 w-[min(92vw,380px)] shadow-2xl animate-pop-in"
+        className={`relative glass-panel pointer-events-auto rounded-3xl p-5 w-[min(92vw,380px)] shadow-2xl ${
+          closing ? 'animate-pop-out' : 'animate-pop-in'
+        }`}
       >
         {/* 组名:点开行内改名(Enter/失焦提交,ESC 只取消改名——input 的
             stopPropagation 挡住下方 document keydown,不连带关弹层) */}
@@ -172,7 +192,7 @@ export default function GroupOverlay({
         >
           <div className="grid grid-cols-3 gap-x-4 gap-y-4 py-3 min-h-[132px]">
             {slice.map((m) => (
-              <MemberTile key={m.id} member={m} onClose={onClose} />
+              <MemberTile key={m.id} member={m} onClose={requestClose} />
             ))}
           </div>
         </SortableContext>

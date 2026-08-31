@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { IconTypeId, LayoutSettings } from '../lib/types'
 import { useLayoutDraft } from '../hooks/useLayoutDraft'
+import { useExitClose } from '../hooks/useExitClose'
 import { AddPane } from './AddDrawer'
 import { SettingsPane } from './SettingsDrawer'
 import { AccountPane } from './AccountPane'
@@ -13,6 +14,9 @@ import { AccountPane } from './AccountPane'
  * tab 用原生 hidden 切换:各 pane 保持挂载,新增表单半填内容 / 布局草稿切 tab 不丢,
  * 且 hidden 子树自动移出焦点链。布局草稿由 useLayoutDraft 持有:关闭(Esc/遮罩/×)前
  * flush 落库是松手 commit 之外的兜底,脏门控避免无谓 PUT(协议见 lib/layoutDraft.ts)。
+ *
+ * 退场(对称路径,2026-08-31):close 先 commit(草稿落库数据不等人),播
+ * slide-out-right + 遮罩 fade-out,EXIT_MS 后真 onClose——动画只延迟卸载。
  *
  * 容器与原 AddDrawer 同构:fixed 右侧、滑入、玻璃面板、sticky 顶栏(tab 栏 + 关闭)。
  */
@@ -39,10 +43,19 @@ export default function ControlDrawer({
   // 布局草稿:slider 受控源,apply 乐观写缓存实时预览,commit 松手/关闭落库。
   const { draft, apply, commit } = useLayoutDraft(layout)
 
+  // ── 退场接线(协议单点 hooks/useExitClose)─────────────────────────────
+  // close 每次先 commit(草稿落库数据不等人;重复 close 多调一次,脏门控兜底
+  // 无谓 PUT),requestClose 幂等。退场中面板 inert 封冻:窗口内 slider 的
+  // keyboard 连打不再产生「乐观写缓存、未及 PUT 即被卸载」的丢失写。
+  const { closing, requestClose } = useExitClose(onClose)
   function close() {
     commit()
-    onClose()
+    requestClose()
   }
+  const asideRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (asideRef.current) asideRef.current.inert = closing
+  }, [closing])
 
   // Esc → 落库后关闭
   useEffect(() => {
@@ -78,10 +91,21 @@ export default function ControlDrawer({
       aria-modal="true"
       aria-label="设置"
     >
-      {/* 遮罩:点击关闭;与面板滑入同步淡入 */}
-      <div className="absolute inset-0 bg-black/40 animate-fade-in" onClick={close} />
+      {/* 遮罩:点击关闭;入场 fade-in / 退场 fade-out + pointer-events-none
+          (dismiss 已开始,点击穿页到达背后内容) */}
+      <div
+        className={`absolute inset-0 bg-black/40 ${
+          closing ? 'animate-fade-out pointer-events-none' : 'animate-fade-in'
+        }`}
+        onClick={close}
+      />
 
-      <aside className="glass-panel glass-panel-readable relative h-full w-full max-w-sm animate-slide-in-right overflow-y-auto rounded-l-3xl">
+      <aside
+        ref={asideRef}
+        className={`glass-panel glass-panel-readable relative h-full w-full max-w-sm ${
+          closing ? 'animate-slide-out-right' : 'animate-slide-in-right'
+        } overflow-y-auto rounded-l-3xl`}
+      >
         {/* 顶栏:tab 即标题 + 关闭。半透明底 + 自身 blur,滚动内容从栏下柔透(iOS nav 栏) */}
         <div className="sticky top-0 z-10 flex items-center gap-3 px-5 py-3 border-b border-white/10 bg-white/35 backdrop-blur-md dark:bg-[#101012]/55">
           {/* 分段控件(签名元素):凹轨 + 凸起玻璃滑块,等宽三段,滑块随选中滑动。
