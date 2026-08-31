@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTodo } from '../hooks/useTodo'
+import { useHoverGrace } from '../hooks/useHoverGrace'
 import { ICON_SCALE, tileFont } from '../lib/iconLayout'
 import type { Icon } from '../lib/types'
 import type { TodoTask } from '../lib/todo'
@@ -63,59 +64,23 @@ export default function TodoIconBody({
   const inbox = data?.inbox ?? []
   const [detail, setDetail] = useState<TodoTask | null>(null)
 
-  // 快览显隐:JS hover-intent 而非纯 CSS(同 Clock 范式)——行与卡之间的 8px
-  // 视觉间隙在 DOM 上不属于任何元素,慢速穿越时 :hover 断链即收、卡内链接不可
-  // 达。onMouseLeave 后 250ms 宽限,指针在「行盒∪卡盒」外接矩形内续期等待,
-  // 真正离开才收。卡 fixed 挂 BigTile 外(玻璃 backdrop-filter 会钳 fixed 后代,
-  // 行内 absolute 又会被列表 overflow 裁切)。
-  const [peek, setPeek] = useState<Peek | null>(null)
-  const hideTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const peekRef = useRef<HTMLDivElement>(null)
-  const pointer = useRef({ x: -1, y: -1 })
-  // 首次交互门槛的累计位移(PEEK_MOVE_GATE);首帧只记基准点不累计
-  const traveled = useRef(0)
-  const lastMove = useRef<{ x: number; y: number } | null>(null)
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      pointer.current = { x: e.clientX, y: e.clientY }
-      if (lastMove.current)
-        traveled.current +=
-          Math.abs(e.clientX - lastMove.current.x) + Math.abs(e.clientY - lastMove.current.y)
-      lastMove.current = { x: e.clientX, y: e.clientY }
-    }
-    window.addEventListener('mousemove', onMove)
-    return () => {
-      window.removeEventListener('mousemove', onMove)
-      clearTimeout(hideTimer.current)
-    }
-  }, [])
+  // 快览显隐走「悬浮宽限」手势(CONTEXT.md;lib/hoverGrace 状态机,同 Clock
+  // 范式)——行与卡之间的视觉间隙在 DOM 上不属于任何元素,慢速穿越时 :hover
+  // 断链即收、卡内链接不可达;250ms 宽限 + 「行盒∪卡盒」外接矩形续期判定与
+  // 首次交互门槛(防刷新后静置指针幽灵弹卡)都在状态机单点。Peek 即会话快照
+  // (任务 + 行盒 + 定位几何),随 hovering 一体持有。卡 fixed 挂 BigTile 外
+  // (玻璃 backdrop-filter 会钳 fixed 后代,行内 absolute 又会被列表 overflow 裁切)。
+  const { hovering: peek, floatingRef, enter, leave, stay, close } = useHoverGrace<Peek>(PEEK_MOVE_GATE)
   // 轮询刷新会重建行 DOM(元素卸载不触发 mouseleave),快览可能挂死——数据变即收
   useEffect(() => {
-    setPeek(null)
-  }, [data])
+    close()
+  }, [data, close])
   // 切页即收快览:卡 fixed 于视口,而键盘等非鼠标驱动的切页不触发浏览器 hover 链
   // 重算,行滚出视口后 mouseleave 永不到来,卡就残留在已翻走的页上
   const { active } = useCarousel()
   useEffect(() => {
-    setPeek(null)
-  }, [active])
-
-  const inHoverZone = (rowRect: DOMRect) => {
-    const p = peekRef.current?.getBoundingClientRect()
-    if (!p) return false
-    const { x, y } = pointer.current
-    return (
-      x >= Math.min(rowRect.left, p.left) && x <= Math.max(rowRect.right, p.right) &&
-      y >= Math.min(rowRect.top, p.top) && y <= Math.max(rowRect.bottom, p.bottom)
-    )
-  }
-  const scheduleHide = (rowRect: DOMRect) => {
-    clearTimeout(hideTimer.current)
-    hideTimer.current = setTimeout(function tick() {
-      if (inHoverZone(rowRect)) hideTimer.current = setTimeout(tick, 150)
-      else setPeek(null)
-    }, 250)
-  }
+    close()
+  }, [active, close])
 
   return (
     // 二级详情与快览卡都挂 BigTile 外:glass-soft 的 backdrop-filter 会成为 fixed
@@ -138,31 +103,24 @@ export default function TodoIconBody({
           <TileBody
             cap={null}
             // 全量翻阅(cap={null} 显式声明):速记即入箱即见,30 行窗不适用
-            onScroll={() => {
-              // 滚动即收快览:行移位后 fixed 卡的定位快照过期,收起最干净
-              clearTimeout(hideTimer.current)
-              setPeek(null)
-            }}
+            // 滚动即收快览:行移位后 fixed 卡的定位快照过期,收起最干净
+            onScroll={close}
             rows={inbox.map((t) => (
               // 悬浮行右侧快览详情(hover 卡),点行开二级对话框深读;
               // 编辑模式(overlay)是布局编辑语义,不悬浮不弹(= TileRow 静态臂)
               <TileRow
                 key={t.id}
                 interactive={overlay ? false : { onClick: () => {
-                  clearTimeout(hideTimer.current)
-                  setPeek(null)
+                  close()
                   setDetail(t)
                 } }}
                 onMouseEnter={overlay ? undefined : (e) => {
-                  // 首次交互门槛:刷新后指针没真正动过(累计 <10px)不弹,压幽灵 mouseenter。
-                  // Chromium 派发 mouseenter 早于 mousemove,此处读到的必是「到达行之前」
-                  // 的累计——真实移来早已远超门槛,静置微动恰好被拦,语义自洽
-                  if (traveled.current < PEEK_MOVE_GATE) return
-                  clearTimeout(hideTimer.current)
+                  // 门槛判定在状态机:mouseenter 早于 mousemove 派发,读到的是「到达行
+                  // 之前」的累计位移——真实移来早已过门槛,静置微动恰好被拦(见 lib)
                   const r = e.currentTarget.getBoundingClientRect()
-                  setPeek({ task: t, rowRect: r, ...peekPos(r) })
+                  enter({ task: t, rowRect: r, ...peekPos(r) })
                 }}
-                onMouseLeave={overlay ? undefined : (e) => scheduleHide(e.currentTarget.getBoundingClientRect())}
+                onMouseLeave={overlay ? undefined : (e) => leave(e.currentTarget.getBoundingClientRect())}
                 className="flex items-center gap-2 min-w-0"
               >
                 <span aria-hidden className="shrink-0 w-1 h-1 rounded-full bg-white/25" />
@@ -183,9 +141,9 @@ export default function TodoIconBody({
         !detail &&
         createPortal(
           <div
-            ref={peekRef}
-            onMouseEnter={() => clearTimeout(hideTimer.current)}
-            onMouseLeave={() => scheduleHide(peek.rowRect)}
+            ref={floatingRef}
+            onMouseEnter={stay}
+            onMouseLeave={() => peek && leave(peek.rowRect)}
             style={{ left: peek.left, top: peek.top, maxHeight: peek.maxH, width: PEEK_W }}
             className="fixed z-[60] glass-panel glass-panel-readable rounded-2xl p-4 flex flex-col animate-fade-in"
           >

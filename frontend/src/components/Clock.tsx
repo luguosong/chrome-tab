@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo } from 'react'
 import { getAlmanac } from '../lib/lunar'
 import { describeDays, getCountdowns } from '../lib/countdown'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import useNow from '../hooks/useNow'
+import { useHoverGrace } from '../hooks/useHoverGrace'
 
 /** 生肖轮固定序(0=鼠)与地支序一一对应;本命年 = 农历年回退到该生肖最近年份 */
 const ZODIAC = '鼠牛虎兔龙蛇马羊猴鸡狗猪'.split('')
@@ -39,49 +40,15 @@ const XINGZUO = [
 export default function Clock() {
   const { clockFont, clock24h, importantDates } = useLayoutSettings()
   const now = useNow(10_000) // 分钟级精度足够
-  // 弹层显隐:JS hover-intent 而非 group-hover——时钟与弹层间的 8px 视觉间隙
-  // (mt-2 margin)在 DOM 上不属于本组件任何元素,慢速穿越时 CSS :hover 断链、
-  // 弹层即收,弹层内的可点内容(编辑钮)不可达。onMouseLeave 后 250ms 宽限,
-  // 指针进弹层(absolute 后代算入「根+后代」整体)即取消收起;宽限到期再补
-  // 几何判定——指针仍在「根盒∪弹层盒」外接矩形内(慢速仍在 gap/弹层途中)则
-  // 续期等待,真正离开才收。收起态仍 pointer-events-none,拦截行为与纯 CSS
-  // 版零差异(不引入常驻命中区)。
-  const [panelOpen, setPanelOpen] = useState(false)
-  const hideTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const rootRef = useRef<HTMLDivElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
-  const pointer = useRef({ x: -1, y: -1 })
-  const inHoverZone = () => {
-    const r = rootRef.current?.getBoundingClientRect()
-    const p = panelRef.current?.getBoundingClientRect()
-    if (!r || !p) return false
-    const { x, y } = pointer.current
-    return (
-      x >= Math.min(r.left, p.left) && x <= Math.max(r.right, p.right) &&
-      y >= Math.min(r.top, p.top) && y <= Math.max(r.bottom, p.bottom)
-    )
-  }
-  const enterPanel = () => {
-    clearTimeout(hideTimer.current)
-    setPanelOpen(true)
-  }
-  const leavePanel = () => {
-    clearTimeout(hideTimer.current)
-    hideTimer.current = setTimeout(function tick() {
-      if (inHoverZone()) hideTimer.current = setTimeout(tick, 150)
-      else setPanelOpen(false)
-    }, 250)
-  }
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      pointer.current = { x: e.clientX, y: e.clientY }
-    }
-    window.addEventListener('mousemove', onMove)
-    return () => {
-      window.removeEventListener('mousemove', onMove)
-      clearTimeout(hideTimer.current)
-    }
-  }, [])
+  // 弹层显隐走「悬浮宽限」手势(CONTEXT.md;lib/hoverGrace 状态机,与待办
+  // 快览卡同 seam):JS 判定而非 group-hover——时钟与弹层间的视觉
+  // 间隙(margin)在 DOM 上不属于本组件任何元素,慢速穿越时 CSS :hover 断链、
+  // 弹层即收,弹层内的可点内容(编辑钮)不可达。250ms 宽限 + 「根盒∪弹层盒」
+  // 外接矩形续期判定在状态机单点;收起态仍 pointer-events-none,拦截行为与
+  // 纯 CSS 版零差异(不引入常驻命中区)。
+  const { hovering, floatingRef, enter, leave } = useHoverGrace()
+  // payload 为 undefined:显隐即「是否在宽限会话中」(undefined 进会话、null 退出)
+  const panelOpen = hovering !== null
   const time = now.toLocaleTimeString('zh-CN', {
     hour: '2-digit',
     minute: '2-digit',
@@ -95,10 +62,9 @@ export default function Clock() {
   const countdowns = useMemo(() => getCountdowns(now, importantDates), [dayKey, importantDates]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div
-      ref={rootRef}
       className="relative select-none text-white"
-      onMouseEnter={enterPanel}
-      onMouseLeave={leavePanel}
+      onMouseEnter={() => enter(undefined)}
+      onMouseLeave={(e) => leave(e.currentTarget.getBoundingClientRect())}
     >
       {/* 常显三行:text-shadow 收在内层,不随弹层继承 */}
       <div style={{ textShadow: '0 2px 12px rgba(0,0,0,0.45), 0 0 1px rgba(255,255,255,0.25)' }}>
@@ -123,7 +89,7 @@ export default function Clock() {
           直接压住——2026-08-27 测试报告 #4);hover-intent 的几何判定用「根盒∪弹层盒」
           外接矩形,间隙在内不断链。 */}
       <div
-        ref={panelRef}
+        ref={floatingRef}
         className={`absolute top-full left-0 z-10 mt-8 w-max max-w-[70vw] rounded-2xl glass-panel glass-panel-readable px-3 py-2 text-xs text-white/90 transition duration-200 ${
           panelOpen
             ? 'opacity-100 translate-y-0 pointer-events-auto'
