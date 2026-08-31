@@ -19,7 +19,7 @@ import {
 /**
  * 更新日志译制代理(ADR-0005/0016/0017,语义照搬 Java changelog 模块;多源化见 ADR-0020)。
  * 请求路径纯读内存快照(原子换新,零外呼零 LLM);node-cron 每 6h 预取刷新;
- * 启动先 loadFromDb 从快照表恢复(秒级可服务)再异步预热,失败沿用旧快照(最多旧 6h)。
+ * 启动先 loadFromDb 从快照表恢复(秒级可服务)再异步预热,失败沿用旧快照并重试(见 refreshQuietly)。
  * 译文按版本块原文 SHA-256 主键持久化,一版终身只译一次;增量检测纯算法零 token;
  * 块哈希与源无关——同原文块跨源共享译文,译文表无需源维度;
  * 译制失败记 warn 保持英文、下轮重试;refresh 与 translateVersions 互斥防并发重复译制。
@@ -407,13 +407,22 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
 
 // ---- 定时预取(Java ChangelogScheduler)----
 
-/** 启动两步:先恢复快照(零外呼)再异步预热;此后每 6h 刷新。失败沿用旧快照(最多旧 6h)。
+/** 刷新失败沿用旧快照并 5 分钟后重试,成功即停。动机(2026-08-31 线上):releaseTimes
+ *  不落库、重启恢复即空表,启动预热恰逢网络抖动超时后无重试,空表被钉死到下个 6h
+ *  cron 窗——版本行日期整列消失 ~5h。重试与 cron 并发由 Service exclusive 串行链兜底
+ *  (最坏多一次幂等刷新)。 */
+export function refreshQuietly(service: ChangelogService, retryMs = 5 * 60_000): void {
+  service.refresh().catch((e) => {
+    console.warn(`更新日志(${service.source})定时刷新失败,沿用现有快照:`, e)
+    setTimeout(() => refreshQuietly(service, retryMs), retryMs)
+  })
+}
+
+/** 启动两步:先恢复快照(零外呼)再异步预热;此后每 6h 刷新。失败沿用旧快照并重试(见上)。
  *  逐源各一套(ADR-0020):每源独立恢复/预热/定时,一源失败不涉其它。 */
 export function startChangelogScheduler(services: readonly ChangelogService[]): void {
   for (const service of services) {
-    const refreshQuietly = () =>
-      service.refresh().catch((e) => console.warn(`更新日志(${service.source})定时刷新失败,沿用现有快照:`, e))
-    void service.loadFromDb().then(refreshQuietly)
-    schedule('0 */6 * * *', () => void refreshQuietly())
+    void service.loadFromDb().then(() => refreshQuietly(service))
+    schedule('0 */6 * * *', () => void refreshQuietly(service))
   }
 }

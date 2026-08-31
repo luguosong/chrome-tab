@@ -7,6 +7,7 @@ import { expectError, setupApp } from './testUtils'
 import {
   ChangelogService,
   prodChangelogDeps,
+  refreshQuietly,
   splitBlocks,
   splitSegments,
   synthesizeVersionsMarkdown,
@@ -931,5 +932,40 @@ describe('冷启动兜底失败 → 500', () => {
     const db = openDb(':memory:').db
     const { req, login } = await setupApp(makeService(db, { fetchMarkdown: async () => { throw new Error('GitHub 不可达') } }))
     await expectError(await req('GET', '/api/changelog', { cookie: await login() }), 500, '服务器错误')
+  })
+})
+
+describe('refreshQuietly(刷新失败重试——2026-08-31 线上:启动预热恰逢 mihomo 抖动超时,空 releaseTimes 被钉死到下个 6h cron 窗,版本行日期整列消失)', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('失败 warn 后按 retryMs 重试,成功即停;重试成功后 releaseTimes 补齐(日期列恢复)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    let calls = 0
+    const db = openDb(':memory:').db
+    // 对齐线上时间线:call1 基线刷新发布信息失败(空表,症状起点);call2 抖动期
+    // markdown 拉取超时(06:33 形态,refresh 上抛);call3 网络恢复,发布信息一并拿到
+    const svc = makeService(db, {
+      fetchMarkdown: async () => {
+        calls++
+        if (calls === 2) throw new Error('网络抖动')
+        return RAW
+      },
+      fetchReleaseInfo: async () => (calls < 3 ? null : { latest: '3.0', times: { '3.0': '2026-08-31T00:00:00.000Z' } }),
+    })
+    await svc.refresh()
+    expect((await svc.get()).releaseTimes).toEqual({}) // 基线:发布信息失败 → 空表,前端行级降级不显示日期
+    refreshQuietly(svc, 60_000)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(calls).toBe(2)
+    expect(console.warn).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(calls).toBe(3) // 网络恢复,重试成功
+    expect((await svc.get()).releaseTimes).toEqual({ '3.0': '2026-08-31T00:00:00.000Z' }) // 日期列恢复
+    await vi.advanceTimersByTimeAsync(600_000)
+    expect(calls).toBe(3) // 成功即停,不再排重试
   })
 })
