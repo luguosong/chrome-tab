@@ -316,6 +316,9 @@ const SYSTEM_PROMPT = `你是专业技术译者。把用户给出的 CHANGELOG m
 export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_SOURCE): ChangelogDeps {
   const def = getChangelogSource(source)
   const apiKey = process.env.AIHUBMIX_API_KEY ?? ''
+  // GitHub API 认证(可选):未认证限额 60 req/h 按出口 IP 计,机场共享出口常态被耗光
+  // (2026-08-31 matt 发布日期 403 remaining:0);带 token 提至 5000/h。缺省无头,行为不变。
+  const githubToken = process.env.GITHUB_TOKEN ?? ''
   const models = modelCandidates()
   // 解构到 const:narrowing 才能保进 fetchText 回调(属性访问的收窄不进闭包)
   const rawUrl = def.changelogUrl
@@ -323,7 +326,11 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
     try {
       if (def.githubReleasesApiUrl) {
         // ponytail:只取前 100 个 release;Matt 当前不足 10 个,超过后按 GitHub Link 头分页。
-        const releases = JSON.parse(await fetchText(def.githubReleasesApiUrl, 30_000)) as Array<{
+        const releases = JSON.parse(
+          await fetchText(def.githubReleasesApiUrl, 30_000, {
+            headers: githubToken ? { Authorization: `Bearer ${githubToken}` } : undefined,
+          }),
+        ) as Array<{
           tag_name?: string
           published_at?: string
         }>

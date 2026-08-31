@@ -969,3 +969,37 @@ describe('refreshQuietly(刷新失败重试——2026-08-31 线上:启动预热�
     expect(calls).toBe(3) // 成功即停,不再排重试
   })
 })
+
+describe('fetchReleaseInfo GitHub 认证(GITHUB_TOKEN 可选:未认证限额 60 req/h 按出口 IP 计,机场共享出口常态被别人耗光 → 403 remaining:0,matt 发布日期因此消失;2026-08-31)', () => {
+  const realFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    delete process.env.GITHUB_TOKEN
+  })
+
+  /** mock 单次 GitHub releases 200,返回捕获的请求 headers 与解析结果。 */
+  const mockGithub = async () => {
+    let init: RequestInit | undefined
+    globalThis.fetch = vi.fn(async (_u: unknown, i?: RequestInit) => {
+      init = i
+      return new Response(JSON.stringify([{ tag_name: 'v1.2.3', published_at: '2026-08-01T00:00:00Z' }]), {
+        status: 200,
+      })
+    }) as typeof fetch
+    const info = await prodChangelogDeps('matt-skills').fetchReleaseInfo()
+    return { headers: new Headers(init?.headers), info }
+  }
+
+  it('未配 token:无 Authorization 头,tag 去 v 前缀(行为不变)', async () => {
+    const { headers, info } = await mockGithub()
+    expect(headers.get('authorization')).toBeNull()
+    expect(info).toEqual({ latest: '1.2.3', times: { '1.2.3': '2026-08-01T00:00:00Z' } })
+  })
+
+  it('配了 token:GitHub releases 请求带 Bearer 头(限额 60→5000/h)', async () => {
+    process.env.GITHUB_TOKEN = 'ghp_test'
+    const { headers, info } = await mockGithub()
+    expect(headers.get('authorization')).toBe('Bearer ghp_test')
+    expect(info?.latest).toBe('1.2.3')
+  })
+})

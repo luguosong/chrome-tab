@@ -36,6 +36,10 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD} # 仅空库首启 seed 生效;已有数据全跳过
       AIHUBMIX_API_KEY: ${AIHUBMIX_API_KEY}
+      # 更新日志 GitHub Releases 日期源(matt-skills)认证,可选:未认证限额 60 req/h 按
+      # 出口 IP 计,机场共享出口常态被别人耗光(2026-08-31 matt 日期 403 remaining:0);
+      # 配了提至 5000/h。缺省容器拿空串 = 无 Authorization 头,行为不变
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
       QWEATHER_API_KEY: ${QWEATHER_API_KEY}
       QWEATHER_API_HOST: ${QWEATHER_API_HOST}
       # 滴答清单「待办」(CONTEXT.md):API 口令,同 bing/virxact 先例国内直连
