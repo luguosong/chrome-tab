@@ -63,6 +63,7 @@ const CHANGELOG_SNAPSHOTS: Col[] = [
   ['source', 'TEXT', 1, null, 1],
   ['raw_markdown', 'TEXT', 1, null, 0],
   ['released_at', 'TEXT', 0, null, 0],
+  ['release_times', 'TEXT', 1, "'{}'", 0],
   ['fetched_at', 'TEXT', 1, null, 0],
 ]
 const SESSIONS: Col[] = [
@@ -276,6 +277,28 @@ describe('schema:建表幂等', () => {
     expect(cols(sqlite, 'model_archive').map((c) => c[0]).sort()).toEqual(MODEL_ARCHIVE.map((c) => c[0]).sort())
     const row = sqlite.prepare('SELECT pricing, limits, training_params FROM model_archive').get() as Record<string, unknown>
     expect(row).toEqual({ pricing: null, limits: null, training_params: null })
+  })
+
+  it('增量加列:releaseTimes 落库前的旧快照表 migrate 后补列且数据保留', () => {
+    // 复刻旧库:无 release_times 列的快照行(线上 2026-08-31 库形态)
+    const sqlite = fresh()
+    sqlite.exec('DROP TABLE changelog_snapshots')
+    sqlite.exec(`
+      CREATE TABLE changelog_snapshots (
+          source       TEXT PRIMARY KEY NOT NULL,
+          raw_markdown TEXT NOT NULL,
+          released_at  TEXT,
+          fetched_at   TEXT NOT NULL
+      );
+      INSERT INTO changelog_snapshots (source, raw_markdown, released_at, fetched_at)
+        VALUES ('claude-code', '## 1.0', '2026-08-28T00:00:00Z', '2026-08-30T00:00:00Z');
+    `)
+    migrate(sqlite)
+    expect(cols(sqlite, 'changelog_snapshots').map((c) => c[0]).sort()).toEqual(
+      CHANGELOG_SNAPSHOTS.map((c) => c[0]).sort(),
+    )
+    const row = sqlite.prepare('SELECT released_at, release_times FROM changelog_snapshots').get() as Record<string, unknown>
+    expect(row).toEqual({ released_at: '2026-08-28T00:00:00Z', release_times: '{}' })
   })
 
   it('增量删列:ADR-0033 旧库(含 icon_scale)migrate 后删列且数据保留', () => {

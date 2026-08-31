@@ -198,6 +198,16 @@ export interface Snapshot {
 
 const nowIso = () => new Date().toISOString()
 
+/** 快照表 release_times 列(JSON)解析;损坏/非对象兜底空表,不拦启动与刷新。 */
+const parseTimes = (json: string | null | undefined): Record<string, string> => {
+  try {
+    const v: unknown = JSON.parse(json ?? '{}')
+    return typeof v === 'object' && v !== null ? (v as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+
 export class ChangelogService {
   private memory: Snapshot | null = null
   /** Java synchronized 的 async 对应物:refresh/translateVersions 排到同一条链上串行执行 */
@@ -238,9 +248,14 @@ export class ChangelogService {
       .executeTakeFirst()
     if (!row) return
     const blocks = splitBlocks(row.raw_markdown)
-    // releaseTimes 不落库:恢复镜像时置空表,启动紧跟的 refreshQuietly(见调度器)拉发布信息补齐,
-    // 缺失窗口仅重启后数秒——省一列迁移与快照表读写。
-    this.memory = this.assemble(blocks, await this.translations.load(blocks.blocks.map((b) => b.raw)), row.released_at, {})
+    // releaseTimes 落库(2026-08-31 二次线上消失推翻 81888ea「不动」):恢复即带日期,
+    // 启动预热/重试失败窗口里日期停旧值而非消失(实测两轮重试失败仍 11 分钟空窗)。
+    this.memory = this.assemble(
+      blocks,
+      await this.translations.load(blocks.blocks.map((b) => b.raw)),
+      row.released_at,
+      parseTimes(row.release_times),
+    )
   }
 
   /** 定时/预热刷新:拉原文 → 只译最近 N 版中缺失的块 → 快照落库 → 换内存镜像。拉取失败上抛,由调度方决定降级。 */
@@ -271,18 +286,36 @@ export class ChangelogService {
       await this.translateIfMissing(b, byRaw)
     }
     const info = await this.deps.fetchReleaseInfo()
-    // 空串守卫(npm time 条目可能为空串):releasedAt 语义 = ISO 或显式 null,不透 ''
+    // 发布时间 immutable:merge 落库只增不减——新拉值覆盖同键旧值,新拉缺的版本(GitHub
+    // 只回前 100 release)/发布信息失败(npm 分支吞错 null)保留旧值。否则空表会被当成功
+    // 落库,日期钉死到下个 6h cron 窗(2026-08-31 二次线上消失的另一半洞)。
+    const prev = await this.db
+      .selectFrom('changelog_snapshots')
+      .select(['release_times', 'released_at'])
+      .where('source', '=', this.source)
+      .executeTakeFirst()
+    const releaseTimes = { ...parseTimes(prev?.release_times), ...(info?.times ?? {}) }
+    // 空串守卫(npm time 条目可能为空串):releasedAt 语义 = ISO 或显式 null,不透 '';
+    // 发布信息失败时保留旧值而非 null(同「一旦取到不丢」取向)
     const latestTime = info?.latest ? (info.times[info.latest] ?? '') : ''
-    const releasedAt = latestTime.trim() ? latestTime : null
-    const releaseTimes = info?.times ?? {}
+    const releasedAt = latestTime.trim() ? latestTime : (prev?.released_at ?? null)
     const fetchedAt = nowIso()
     await this.db
       .insertInto('changelog_snapshots')
-      .values({ source: this.source, raw_markdown: raw, released_at: releasedAt, fetched_at: fetchedAt })
+      .values({
+        source: this.source,
+        raw_markdown: raw,
+        released_at: releasedAt,
+        release_times: JSON.stringify(releaseTimes),
+        fetched_at: fetchedAt,
+      })
       .onConflict((oc) =>
-        oc
-          .column('source')
-          .doUpdateSet({ raw_markdown: raw, released_at: releasedAt, fetched_at: fetchedAt }),
+        oc.column('source').doUpdateSet({
+          raw_markdown: raw,
+          released_at: releasedAt,
+          release_times: JSON.stringify(releaseTimes),
+          fetched_at: fetchedAt,
+        }),
       )
       .execute()
     this.memory = this.assemble(blocks, byRaw, releasedAt, releaseTimes)
@@ -514,10 +547,10 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
 
 // ---- 定时预取(Java ChangelogScheduler)----
 
-/** 刷新失败沿用旧快照并 5 分钟后重试,成功即停。动机(2026-08-31 线上):releaseTimes
- *  不落库、重启恢复即空表,启动预热恰逢网络抖动超时后无重试,空表被钉死到下个 6h
- *  cron 窗——版本行日期整列消失 ~5h。重试与 cron 并发由 Service exclusive 串行链兜底
- *  (最坏多一次幂等刷新)。 */
+/** 刷新失败沿用旧快照并 5 分钟后重试,成功即停。动机(2026-08-31 线上):启动预热恰逢
+ *  网络抖动超时后无重试,空 releaseTimes 被钉死到下个 6h cron 窗——版本行日期整列消失
+ *  ~5h(releaseTimes 同日落库后,重试失利的代价降为日期停旧值)。重试与 cron 并发由
+ *  Service exclusive 串行链兜底(最坏多一次幂等刷新)。 */
 export function refreshQuietly(service: ChangelogService, retryMs = 5 * 60_000): void {
   service.refresh().catch((e) => {
     console.warn(`更新日志(${service.source})定时刷新失败,沿用现有快照:`, e)

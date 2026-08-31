@@ -275,9 +275,11 @@ describe('ChangelogService 编排(ADR-0017)', () => {
     expect((await s.get()).markdown).toContain('三') // 沿用旧快照
   })
 
-  it('重启恢复:loadFromDb 从快照表重建镜像,零外呼零 LLM', async () => {
+  it('重启恢复:loadFromDb 从快照表重建镜像(含 releaseTimes),零外呼零 LLM', async () => {
     const db = openDb(':memory:').db
-    await makeService(db).get() // 前一进程:建库
+    await makeService(db, {
+      fetchReleaseInfo: async () => ({ latest: '3.0', times: { '3.0': '2026-08-30T00:00:00.000Z' } }),
+    }).get() // 前一进程:建库(含发布时间)
     expect(
       await db
         .selectFrom('changelog_snapshots')
@@ -295,7 +297,31 @@ describe('ChangelogService 编排(ADR-0017)', () => {
 
     expect((await restarted.get()).markdown).toContain('三')
     expect((await restarted.get()).markdown).toContain('二')
+    expect((await restarted.get()).releaseTimes).toEqual({ '3.0': '2026-08-30T00:00:00.000Z' })
+    expect((await restarted.get()).releasedAt).toBe('2026-08-30T00:00:00.000Z')
     expect(llmCalls).toBe(0)
+  })
+
+  it('releaseTimes 落库只增不减:新拉缺的版本保留旧值,发布信息失败(null)不清日期', async () => {
+    const db = openDb(':memory:').db
+    const s = makeService(db, {
+      fetchReleaseInfo: async () => ({ latest: '3.0', times: { '3.0': '2026-08-01T00:00:00.000Z' } }),
+    })
+    await s.get() // 3.0 日期入库
+
+    // 下轮发布信息失败(npm 分支吞错语义)/新拉只含 2.0:3.0 旧日期都不得丢
+    const s2 = makeService(db, { fetchReleaseInfo: async () => null })
+    await s2.refresh()
+    expect((await s2.get()).releaseTimes).toEqual({ '3.0': '2026-08-01T00:00:00.000Z' })
+
+    const s3 = makeService(db, {
+      fetchReleaseInfo: async () => ({ latest: '2.0', times: { '2.0': '2026-08-30T00:00:00.000Z' } }),
+    })
+    await s3.refresh()
+    expect((await s3.get()).releaseTimes).toEqual({
+      '3.0': '2026-08-01T00:00:00.000Z',
+      '2.0': '2026-08-30T00:00:00.000Z',
+    })
   })
 
   it('按需补译:指定旧版 → 译一块、入库、重拼;重复请求哈希命中零 LLM', async () => {
