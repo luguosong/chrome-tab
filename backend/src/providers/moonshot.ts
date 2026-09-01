@@ -85,6 +85,6 @@ export const MOONSHOT_DEF: ProviderDef<KimiArticle> = {
   parse: parseKimiArticles,
   matchEntry(a) {
     const hit = matchKimiEvent(a)
-    return { hits: hit !== null ? [hit] : [], clue: null }
+    return { hits: hit !== null ? [hit] : [], clues: [] }
   },
 }

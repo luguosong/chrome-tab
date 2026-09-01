@@ -84,15 +84,17 @@ export const ANTHROPIC_DEF: ProviderDef<AnthropicNote> = {
   parse: parseAnthropicReleases,
   matchEntry(n) {
     const hit = matchAnthropicEvent(n)
-    if (hit !== null) return { hits: [hit], clue: null }
+    if (hit !== null) return { hits: [hit], clues: [] }
     return {
       hits: [],
-      clue: {
-        occurredOn: n.date,
-        title: anthropicNoteTitle(n.text),
-        sourceUrl: n.links[0] ?? ANTHROPIC_RELEASES_URL,
-        modelKey: n.links[0] ?? `${n.date}|${n.text.slice(0, 80)}`,
-      },
+      clues: [
+        {
+          occurredOn: n.date,
+          title: anthropicNoteTitle(n.text),
+          sourceUrl: n.links[0] ?? ANTHROPIC_RELEASES_URL,
+          modelKey: n.links[0] ?? `${n.date}|${n.text.slice(0, 80)}`,
+        },
+      ],
     }
   },
 }

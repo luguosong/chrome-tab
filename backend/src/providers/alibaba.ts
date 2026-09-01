@@ -1,5 +1,5 @@
 import { QWEN_BASELINE, QWEN_RELEASES_URL } from '../qwenBaseline'
-import { type MatchedHit, type ProviderDef } from './def'
+import { type MatchedHit, type ProviderDef, residualIdClues } from './def'
 
 // ---- 阿里通义:百炼「模型上下架与更新」(研究 §3:主发布源 SSR 纯表格。解析器
 //  原随 qwenBaseline 走(并行接入防撞车约定),ADR-0038 起归一为厂家 provider 文件)----
@@ -108,7 +108,10 @@ export function matchQwenEvents(rows: BailianRow[]): Array<MatchedHit> {
 
 /**
  * 通义 provider(表为滚动窗口,行翻走即失证——线索须当轮可见,2026-08-27 千问漏检
- * 教训);未认领行以模型 ID 串为线索键,title 为「ID 串:说明前缀」合成形态。
+ * 教训)。未认领 ID(全未认领行与部分认领行的残余半边同构,含百炼托管第三方)
+ * 每个 ID 一条线索,键 = 裸 ID(单 ID 行与旧整条键同形,多 ID 行不再拼串——拼串键
+ * 与裸键并存会让基线收录部分成员后过渡期双行同现);title 为「ID:说明前缀」
+ * 合成形态;`-latest` 引用别名不落残余(不另算模型)。
  */
 export const ALIBABA_DEF: ProviderDef<BailianRow> = {
   id: 'alibaba',
@@ -116,16 +119,13 @@ export const ALIBABA_DEF: ProviderDef<BailianRow> = {
   urls: [QWEN_RELEASES_URL],
   parse: parseBailianReleases,
   matchEntry(r) {
-    const matched = matchQwenEvents([r])
-    if (matched.length > 0) return { hits: matched, clue: null }
     return {
-      hits: [],
-      clue: {
+      hits: matchQwenEvents([r]),
+      clues: residualIdClues(r.modelIds, resolveQwenModelId, {
         occurredOn: r.date,
-        title: `${r.modelIds.join(' ')}:${r.description.slice(0, 60)}`,
+        titleOf: () => r.description.slice(0, 60),
         sourceUrl: QWEN_RELEASES_URL,
-        modelKey: r.modelIds.join(' '),
-      },
+      }),
     }
   },
 }

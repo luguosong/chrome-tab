@@ -74,10 +74,10 @@ export const DEEPSEEK_DEF: ProviderDef<DeepSeekSection> = {
   parse: parseDeepSeekUpdates,
   matchEntry(s) {
     const matched = matchDeepSeekEvent(s)
-    if (matched.length > 0) return { hits: matched, clue: null }
+    if (matched.length > 0) return { hits: matched, clues: [] }
     return {
       hits: [],
-      clue: { occurredOn: s.date, title: s.title, sourceUrl: s.anchorUrl, modelKey: s.anchorUrl },
+      clues: [{ occurredOn: s.date, title: s.title, sourceUrl: s.anchorUrl, modelKey: s.anchorUrl }],
     }
   },
 }

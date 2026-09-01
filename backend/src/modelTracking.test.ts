@@ -17,13 +17,13 @@ import {
   parseAnthropicReleases,
 } from './providers/anthropic'
 import { KIMI_BLOG_URL, KIMI_NEWS_URL, matchKimiEvent, parseKimiArticles } from './providers/moonshot'
-import { matchOpenAIEvents, OPENAI_CHANGELOG_URL, parseOpenAIChangelog, resolveOpenAIModelId } from './providers/openai'
+import { matchOpenAIEvents, OPENAI_CHANGELOG_URL, OPENAI_DEF, parseOpenAIChangelog, resolveOpenAIModelId, type OpenAIChangelogEntry } from './providers/openai'
 import { matchXaiEvent, parseXaiReleaseNotes, XAI_RELEASES_URL } from './providers/xai'
 import { matchZhipuEvent, normalizeZhipuDate, parseZhipuReleases, ZHIPU_RELEASES_URL } from './providers/zhipu'
 import { DEEPSEEK_BASELINE, DEEPSEEK_UPDATES_URL } from './deepseekBaseline'
 import { matchDeepSeekEvent, parseDeepSeekUpdates } from './providers/deepseek'
 import { QWEN_BASELINE, QWEN_RELEASES_URL } from './qwenBaseline'
-import { matchQwenEvents, parseBailianReleases, resolveQwenModelId } from './providers/alibaba'
+import { ALIBABA_DEF, matchQwenEvents, parseBailianReleases, resolveQwenModelId } from './providers/alibaba'
 
 /**
  * 模型追踪自动检查(issues/01:单例/占格、持久化、陈旧降级 + 鉴权;issues/02:八类
@@ -229,9 +229,9 @@ const QWEN_HTML = `<table>
 <tr><td>文本生成</td><td>2020-01-01</td><td><p><code>qwen3.8-max</code></p></td><td>hydration 拷贝表,不应被解析</td></tr>
 </table>`
 
-function makeDeps(md: string | Record<string, string>): ModelTrackingDeps {
-  const pages: Record<string, string> =
-    typeof md === 'string'
+function makeDeps(md: string | Record<string, string>, overrides: Record<string, string> = {}): ModelTrackingDeps {
+  const pages: Record<string, string> = {
+    ...((typeof md === 'string'
       ? {
           [ZHIPU_RELEASES_URL]: md,
           [ANTHROPIC_RELEASES_URL]: ANTHROPIC_MD,
@@ -242,7 +242,9 @@ function makeDeps(md: string | Record<string, string>): ModelTrackingDeps {
           [DEEPSEEK_UPDATES_URL]: DEEPSEEK_HTML,
           [QWEN_RELEASES_URL]: QWEN_HTML,
         }
-      : md
+      : md) as Record<string, string>),
+    ...overrides,
+  }
   return {
     fetchText: async (url) => {
       const page = pages[url]
@@ -622,6 +624,23 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('残余 ID 线索:部分认领条目(命中+基线外混排)的残余半边落线索库,不再静默', async () => {
+    const partialMd = `## August, 2026
+
+### Sat 30
+
+Update: Model: gpt-5.6-sol and Model: gpt-6.2
+Dual launch announcement.
+`
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, makeDeps(ZHIPU_MD, { [OPENAI_CHANGELOG_URL]: partialMd }))
+    await svc.pollProvider('openai')
+    const clues = (await svc.archive()).pendingClues.filter((c) => c.provider === 'openai')
+    expect(clues).toHaveLength(1)
+    expect(clues[0]!.title).toMatch(/^gpt-6\.2:/)
+    expect(clues[0]!.date).toBe('2026-08-30')
   })
 
   it('Anthropic 信源失败只标记该厂家陈旧:智谱档案与源状态不受影响', async () => {
@@ -1243,6 +1262,30 @@ describe('模型追踪:OpenAI changelog 解析(纯函数,issues/03)', () => {
       sourceUrl: 'https://developers.openai.com/api/docs/changelog#jul-9',
     })
   })
+
+  it('部分认领条目:残余 ID 逐个落待核验线索(键=裸 ID,重复去重);全认领/平台条目无线索;全未认领保持整条线索', () => {
+    const entry: OpenAIChangelogEntry = {
+      date: '2026-08-30',
+      typeLine: 'Update: Model: gpt-5.6-sol and Model: gpt-6.2',
+      models: ['gpt-5.6-sol', 'gpt-6.2', 'gpt-6.2'],
+      firstLine: 'Dual launch.',
+    }
+    const partial = OPENAI_DEF.matchEntry(entry)
+    expect(partial.hits.map((h) => h.officialId)).toEqual(['gpt-5.6-sol'])
+    expect(partial.clues).toHaveLength(1)
+    expect(partial.clues[0]).toMatchObject({
+      modelKey: 'gpt-6.2',
+      occurredOn: '2026-08-30',
+      sourceUrl: 'https://developers.openai.com/api/docs/changelog#aug-30',
+    })
+    expect(partial.clues[0]!.title).toMatch(/^gpt-6\.2:/)
+    expect(OPENAI_DEF.matchEntry({ ...entry, models: ['gpt-5.6-sol'] }).clues).toEqual([])
+    const whole = OPENAI_DEF.matchEntry({ ...entry, models: ['gpt-6.2'] })
+    expect(whole.hits).toEqual([])
+    expect(whole.clues).toHaveLength(1)
+    expect(whole.clues[0]!.modelKey).toBe('gpt-6.2') // 全未认领同裸键:同一模型永不双行
+    expect(OPENAI_DEF.matchEntry({ ...entry, models: [] }).clues).toEqual([])
+  })
 })
 
 describe('模型追踪:OpenAI 基线自身(issues/03)', () => {
@@ -1560,6 +1603,21 @@ describe('模型追踪:百炼上下架表解析(纯函数;issues/09)', () => {
       },
     })
     expect(hits.filter((h) => h.officialId === 'qwen-plus')).toHaveLength(0)
+  })
+
+  it('部分认领行:格内残余 ID 落线索(键=裸 ID);全未认领保持整条线索(键=ID 串)', () => {
+    const partial = ALIBABA_DEF.matchEntry({
+      date: '2026-08-30',
+      modelIds: ['qwen3.8-max', 'qwen3.9-preview', 'qwen3.9-preview'],
+      description: '新一代旗舰与高性价比档',
+    })
+    expect(partial.hits.map((h) => h.officialId)).toEqual(['qwen3.8-max'])
+    expect(partial.clues.map((c) => c.modelKey)).toEqual(['qwen3.9-preview'])
+    expect(partial.clues[0]!.title).toMatch(/^qwen3\.9-preview:/)
+    const whole = ALIBABA_DEF.matchEntry({ date: '2026-08-30', modelIds: ['kimi-k3'], description: '百炼托管第三方' })
+    expect(whole.hits).toEqual([])
+    expect(whole.clues).toHaveLength(1)
+    expect(whole.clues[0]!.modelKey).toBe('kimi-k3')
   })
 })
 

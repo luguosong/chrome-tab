@@ -10,7 +10,7 @@ import { KIMI_BASELINE } from './kimiBaseline'
 import { OPENAI_BASELINE } from './openaiBaseline'
 import { DEEPSEEK_BASELINE } from './deepseekBaseline'
 import { QWEN_BASELINE } from './qwenBaseline'
-import { AA_LLM_URL, AA_MEDIA_ENDPOINTS, AA_MODEL_MAP, aaModelUrl, aaRowsFromLlms, aaRowsFromMedia, beijingToday } from './aaEvaluations'
+import { AA_LLM_URL, AA_MEDIA_ENDPOINTS, AA_MODEL_MAP, aaModelUrl, aaRowsFromLlms, aaRowsFromMedia, aaUnmappedClues, beijingToday } from './aaEvaluations'
 
 /**
  * 评测接入自动检查(issues/08,CONTEXT.md「评测结果」):解析透传、slug 精确映射
@@ -128,6 +128,49 @@ describe('评测:解析与映射(纯函数)', () => {
     expect(beijingToday(new Date('2026-08-24T10:00:00Z'))).toBe('2026-08-24')
   })
 
+  it('同名未映射线索:creator 归跟踪厂家 × 基线同名(圆点归一) × 未映射三条件齐才落;键 aa: 前缀', () => {
+    const json = JSON.stringify({
+      status: 200,
+      data: [
+        { slug: 'glm-5-turbo', name: 'GLM-5-Turbo', model_creator: { slug: 'zai' }, evaluations: {} },
+        { slug: 'gpt-6-2', name: 'GPT-6.2', model_creator: { slug: 'openai' }, evaluations: {} },
+        { slug: 'gemini-3', name: 'Gemini 3', model_creator: { slug: 'google' }, evaluations: {} },
+        { slug: 'glm-4-7', name: 'GLM-4.7', model_creator: { slug: 'zai' }, evaluations: {} },
+        { slug: 'glm-9-9', name: 'GLM-9.9', model_creator: { slug: 'zai' }, evaluations: {} },
+        { slug: 'gpt-6-2-xhigh', name: 'GPT-6.2 (xhigh)', model_creator: { slug: 'openai' }, evaluations: {} },
+        { slug: 'nope', name: '无 creator 条目', evaluations: {} },
+        { slug: 'claude-x', name: 'Claude X', model_creator: { slug: 'zai' }, evaluations: {} },
+      ],
+    })
+    const baselines = [
+      { provider: 'zhipu' as const, officialId: 'glm-5.7', matchAliases: ['glm-5-turbo'] },
+      { provider: 'openai' as const, officialId: 'gpt-6.2', matchAliases: ['gpt-6.2'] },
+      // 同名基线行是 anthropic 的,但条目 creator 判 zhipu → 交叉校验不过,不落
+      { provider: 'anthropic' as const, officialId: 'claude-x', matchAliases: [] },
+    ]
+    const clues = aaUnmappedClues(json, baselines, '2026-09-01')
+    expect(clues).toEqual([
+      {
+        provider: 'zhipu',
+        clue: {
+          occurredOn: '2026-09-01',
+          title: 'AA 已收录未映射:GLM-5-Turbo',
+          sourceUrl: aaModelUrl('glm-5-turbo'),
+          modelKey: 'aa:glm-5-turbo',
+        },
+      },
+      {
+        provider: 'openai',
+        clue: {
+          occurredOn: '2026-09-01',
+          title: 'AA 已收录未映射:GPT-6.2',
+          sourceUrl: aaModelUrl('gpt-6-2'),
+          modelKey: 'aa:gpt-6-2',
+        },
+      },
+    ])
+  })
+
   it('映射表形状:值唯一(防同模型双 slug 撞评测唯一键),且每项命中对应厂家基线行', () => {
     const targets = Object.values(AA_MODEL_MAP).map((m) => `${m.provider}|${m.officialId}`)
     expect(new Set(targets).size).toBe(targets.length)
@@ -144,6 +187,38 @@ describe('评测:解析与映射(纯函数)', () => {
       const hit = baselines[m.provider].some((b) => b.officialId === m.officialId)
       expect(hit, `${slug} → ${m.provider}/${m.officialId} 不在基线`).toBe(true)
     }
+  })
+
+  it('基线归一键无跨行冲突(同名未映射线索的 known 表是 last-wins Map,两行归一撞键会静默错归属;同行大小写变体无害)', () => {
+    const norm = (s: string) => s.toLowerCase().replaceAll('.', '-')
+    const seen = new Map<string, string>()
+    for (const b of [...ZHIPU_BASELINE, ...OPENAI_BASELINE, ...ANTHROPIC_BASELINE, ...XAI_BASELINE, ...KIMI_BASELINE, ...DEEPSEEK_BASELINE, ...QWEN_BASELINE]) {
+      for (const id of [b.officialId, ...b.matchAliases]) {
+        const key = `${b.provider}|${norm(id)}`
+        const prev = seen.get(key)
+        expect(prev === undefined || prev === b.officialId, `归一键 ${key}(${b.officialId} 与 ${prev})跨行重复`).toBe(true)
+        seen.set(key, b.officialId)
+      }
+    }
+  })
+
+  it('同名未映射的线上存量盘点(2026-09-01 实测 25 条):全部命中真基线行、无一来自变体/别家误配', () => {
+    // 守卫方向:同名口径的 known 集来自真基线——断言真基线能被 aaSlugNorm 归一命中
+    // 线上 25 条中的代表 slug(防归一函数被改动后口径静默失效)
+    const baselines: Array<{ provider: 'zhipu' | 'openai' | 'anthropic' | 'xai' | 'moonshot' | 'deepseek' | 'alibaba'; officialId: string; matchAliases: readonly string[] }> = [
+      ...ZHIPU_BASELINE, ...OPENAI_BASELINE, ...ANTHROPIC_BASELINE, ...XAI_BASELINE,
+      ...KIMI_BASELINE, ...DEEPSEEK_BASELINE, ...QWEN_BASELINE,
+    ]
+    const json = JSON.stringify({
+      status: 200,
+      data: [
+        { slug: 'glm-5-turbo', name: 'GLM-5-Turbo', model_creator: { slug: 'zai' }, evaluations: {} },
+        { slug: 'gpt-5-5-pro', name: 'GPT-5.5 Pro', model_creator: { slug: 'openai' }, evaluations: {} },
+        { slug: 'deepseek-v3-2-speciale', name: 'DeepSeek V3.2 Speciale', model_creator: { slug: 'deepseek' }, evaluations: {} },
+        { slug: 'grok-code-fast-1', name: 'Grok Code Fast 1', model_creator: { slug: 'xai' }, evaluations: {} },
+      ],
+    })
+    expect(aaUnmappedClues(json, baselines, '2026-09-01')).toHaveLength(4)
   })
 })
 
@@ -165,6 +240,30 @@ describe('评测:轮询与快照(服务集成,零真网)', () => {
     const kinds = (m: { events: ModelEvent[] }) => m.events.filter((e) => e.kind === 'evaluated')
     expect(kinds(glm47)).toHaveLength(0)
     expect(kinds(a.models.find((m) => m.officialId === 'gpt-image-2')!)).toHaveLength(0)
+  })
+
+  it('未映射线索:同名未映射条目随轮询落厂家线索库(aa: 键),映射补上后自愈滚出', async () => {
+    const pages = fullPages()
+    pages[AA_LLM_URL] = JSON.stringify({
+      status: 200,
+      data: [
+        ...JSON.parse(AA_LLM_JSON).data,
+        { id: 'u9', name: 'GLM-5-Turbo', slug: 'glm-5-turbo', model_creator: { id: 'c1', name: 'Z AI', slug: 'zai' }, evaluations: {} },
+      ],
+    })
+    const { db } = openDb(':memory:')
+    const svc = await makeService(db, aaDeps(pages))
+    await svc.pollEvaluations()
+    const clueOf = async () => (await svc.archive()).pendingClues.find((c) => c.provider === 'zhipu')
+    expect((await clueOf())?.title).toBe('AA 已收录未映射:GLM-5-Turbo')
+    // 映射补上(线上是改 AA_MODEL_MAP,此处直接从页面消失同路径):条目不再产出,
+    // last_seen 停更 8 天 → 滚出读侧
+    await db
+      .updateTable('model_pending_clues')
+      .set({ last_seen_at: new Date(Date.now() - 8 * 86400_000).toISOString() })
+      .where('model_key', '=', 'aa:glm-5-turbo')
+      .execute()
+    expect(await clueOf()).toBeUndefined()
   })
 
   it('运行期 AA 新收录:仅新模型产 evaluated 动态(occurred_on=发现日),老模型不产', async () => {

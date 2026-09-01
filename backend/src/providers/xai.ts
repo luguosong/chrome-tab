@@ -91,15 +91,17 @@ export const XAI_DEF: ProviderDef<XaiReleaseEntry> = {
   parse: parseXaiReleaseNotes,
   matchEntry(e) {
     const matched = matchXaiEvent(e)
-    if (matched.length > 0) return { hits: matched, clue: null }
+    if (matched.length > 0) return { hits: matched, clues: [] }
     return {
       hits: [],
-      clue: {
-        occurredOn: `${e.yearMonth}-01`,
-        title: e.title,
-        sourceUrl: e.linkUrl ?? XAI_RELEASES_URL,
-        modelKey: e.linkUrl ?? e.title,
-      },
+      clues: [
+        {
+          occurredOn: `${e.yearMonth}-01`,
+          title: e.title,
+          sourceUrl: e.linkUrl ?? XAI_RELEASES_URL,
+          modelKey: e.linkUrl ?? e.title,
+        },
+      ],
     }
   },
 }

@@ -79,15 +79,17 @@ export const ZHIPU_DEF: ProviderDef<ZhipuUpdate> = {
   parse: parseZhipuReleases,
   matchEntry(u) {
     const hit = matchZhipuEvent(u)
-    if (hit !== null) return { hits: [hit], clue: null }
+    if (hit !== null) return { hits: [hit], clues: [] }
     return {
       hits: [],
-      clue: {
-        occurredOn: u.date,
-        title: u.description,
-        sourceUrl: u.docUrl ?? ZHIPU_RELEASES_URL,
-        modelKey: u.docUrl ?? `${u.date}|${u.description}`,
-      },
+      clues: [
+        {
+          occurredOn: u.date,
+          title: u.description,
+          sourceUrl: u.docUrl ?? ZHIPU_RELEASES_URL,
+          modelKey: u.docUrl ?? `${u.date}|${u.description}`,
+        },
+      ],
     }
   },
 }

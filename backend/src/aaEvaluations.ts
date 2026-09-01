@@ -1,5 +1,6 @@
 import type { ModelProviderId } from 'chrome-tab-shared'
 import { asRec, str, type Rec } from './common'
+import type { PendingClue } from './providers/def'
 
 /**
  * Artificial Analysis 评测接入(issues/08,CONTEXT.md「评测结果」;研究 evaluations.md):
@@ -175,6 +176,8 @@ export const AA_MODEL_MAP: Record<string, { provider: ModelProviderId; officialI
 export interface AaEntry {
   slug: string
   name: string
+  /** model_creator.slug(上游官方归属;媒体端点无此字段 → null,LLM 端点 2026-09-01 实测)。 */
+  creator: string | null
   /** llm 端点:benchmark key → 分数(只留有限数值;媒体端点为空对象,elo 单列)。 */
   evaluations: Record<string, number>
   /** 媒体端点的 Elo;无/非数值 → null。 */
@@ -199,6 +202,7 @@ export function parseAaEntries(json: string): AaEntry[] {
     out.push({
       slug,
       name: str(e, 'name') ?? slug,
+      creator: str(asRec(e?.model_creator) ?? {}, 'slug'),
       evaluations,
       elo: typeof elo === 'number' && Number.isFinite(elo) ? elo : null,
     })
@@ -243,6 +247,77 @@ function matchEntries(entries: AaEntry[], scoresOf: (e: AaEntry) => Array<{ benc
     }
   }
   return rows
+}
+
+// ---- 未映射线索(「AA 已收录、基线有同名行、映射缺」的可见形态)----
+
+/**
+ * AA model_creator.slug → 跟踪厂家(代码即配置;2026-09-01 线上 LLM 端点实测核验
+ * ——智谱在 AA 是 "Z AI"/zai、月暗是 "Kimi"/kimi)。creator slug 会漂移(旧抓取口径
+ * 曾为 'zhipu'),未知值防御跳过:归属由同名基线行决定,creator 只作交叉校验,漏检
+ * 后果安全;媒体端点无 creator 字段,单条件同名照跑。
+ */
+const AA_CREATOR_MAP: Partial<Record<string, ModelProviderId>> = {
+  zai: 'zhipu',
+  openai: 'openai',
+  anthropic: 'anthropic',
+  xai: 'xai',
+  kimi: 'moonshot',
+  alibaba: 'alibaba',
+  deepseek: 'deepseek',
+}
+
+/** 同名归一:小写 + 圆点作连字符(AA slug 形态,如 glm-4-7 ↔ 基线 glm-4.7)。已知
+ * 上限:AA 个别 slug 省略圆点(如 gpt-35-turbo ↔ gpt-3.5-turbo)归一后不相等——该
+ * 形态漏检(无线索,后果安全),由人工映射表兜底,不为此扩归一(形态集合开放,
+ * 每扩一种就多一类误撞面)。 */
+const aaSlugNorm = (s: string): string => s.toLowerCase().replaceAll('.', '-')
+
+/** aaUnmappedClues 的基线入参(officialId + matchAliases 都参与同名判定)。 */
+export interface AaBaselineRef {
+  provider: ModelProviderId
+  officialId: string
+  matchAliases: readonly string[]
+}
+
+/**
+ * 端点响应 → 「同名未映射」待核验线索:AA 条目 slug 归一后与**同厂家基线行**
+ * (officialId/matchAliases)精确相等、但不在 AA_MODEL_MAP → 线索(键 `aa:<slug>`,
+ * 与厂家残余 ID 裸键不撞)。归属来自基线行;条目带 creator 且与行厂家不一致 → 跳过
+ * (防跨家撞名)。变体/快照/基线外新模型与基线行不同名,天然不落——口径窄而零猜测,
+ * 量级 = 真·映射缺口(2026-09-01 线上实测 23 条存量,人工补映射后自愈);AA 收录了
+ * 基线完全没有的新模型不在此信号内(由厂家信源的残余 ID 线索覆盖)。
+ */
+export function aaUnmappedClues(
+  json: string,
+  baselines: readonly AaBaselineRef[],
+  today: string,
+): Array<{ provider: ModelProviderId; clue: PendingClue }> {
+  const known = new Map(
+    baselines.flatMap((b) =>
+      [b.officialId, ...b.matchAliases].map((id) => [aaSlugNorm(id), b.provider] as const),
+    ),
+  )
+  const out: Array<{ provider: ModelProviderId; clue: PendingClue }> = []
+  for (const e of parseAaEntries(json)) {
+    if (AA_MODEL_MAP[e.slug] !== undefined) continue
+    const provider = known.get(aaSlugNorm(e.slug))
+    if (provider === undefined) continue
+    // creator 已知且指向**别家**才拦(防跨家撞名);未知值放行——同名本身即归属证据,
+    // 未知值跳过会让 creator slug 漂移(如旧口径 'zhipu')静默失能整个信号
+    const creatorProvider = e.creator !== null ? AA_CREATOR_MAP[e.creator] : undefined
+    if (creatorProvider !== undefined && creatorProvider !== provider) continue
+    out.push({
+      provider,
+      clue: {
+        occurredOn: today,
+        title: `AA 已收录未映射:${e.name}`,
+        sourceUrl: aaModelUrl(e.slug),
+        modelKey: `aa:${e.slug}`,
+      },
+    })
+  }
+  return out
 }
 
 /** 快照日期(YYYY-MM-DD,北京时间)——与前端 24h 红点的北京时间锚点同口径。 */

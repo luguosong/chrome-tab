@@ -1,5 +1,5 @@
 import { OPENAI_BASELINE, OPENAI_CHANGELOG_PAGE_URL, openaiChangelogAnchor } from '../openaiBaseline'
-import { MONTHS, type MatchedHit, type ProviderDef } from './def'
+import { MONTHS, type MatchedHit, type ProviderDef, residualIdClues } from './def'
 
 // ---- OpenAI API changelog(研究 §3:主发布源。与别家不同,条目类型行自带
 //  `Model: id` 结构化字段,归属无需双条件猜测——精确 ID 匹配 + 最长前缀快照归族)----
@@ -126,8 +126,11 @@ export function matchOpenAIEvents(
 }
 
 /**
- * OpenAI provider:`Model:` 字段精确/前缀匹配。线索只落**全部模型 ID 未被认领**的
- * 条目;无 `Model:` 字段的平台/SDK 条目非模型线索,不落。
+ * OpenAI provider:`Model:` 字段精确/前缀匹配。无 `Model:` 字段的平台/SDK 条目非
+ * 模型线索,不落;其余条目(全未认领与部分认领同构)每个未被认领的 ID 一条线索
+ * (键 = 裸 ID,`-latest` 移动别名不算——CONTEXT:latest 只是引用方式,不另算模型)。
+ * 全未认领不再用「日期+ID 串」整条键:整条键与裸键并存会让同一模型在基线收录
+ * 部分成员后的过渡期(旧整条行 7 天滚出前)双行同现。
  */
 export const OPENAI_DEF: ProviderDef<OpenAIChangelogEntry> = {
   id: 'openai',
@@ -136,17 +139,15 @@ export const OPENAI_DEF: ProviderDef<OpenAIChangelogEntry> = {
   parse: parseOpenAIChangelog,
   matchEntry(e) {
     // 无 `Model:` 字段的平台/SDK 条目非模型线索,不落
-    if (e.models.length === 0) return { hits: [], clue: null }
-    const hits = matchOpenAIEvents([e])
-    if (hits.length > 0) return { hits, clue: null }
+    if (e.models.length === 0) return { hits: [], clues: [] }
+    const title = openaiEntryTitle(e.firstLine !== '' ? e.firstLine : e.typeLine)
     return {
-      hits: [],
-      clue: {
+      hits: matchOpenAIEvents([e]),
+      clues: residualIdClues(e.models, resolveOpenAIModelId, {
         occurredOn: e.date,
-        title: openaiEntryTitle(e.firstLine !== '' ? e.firstLine : e.typeLine),
+        titleOf: () => title,
         sourceUrl: openaiChangelogAnchor(e.date),
-        modelKey: `${e.date}|${e.models.join('+')}`,
-      },
+      }),
     }
   },
 }

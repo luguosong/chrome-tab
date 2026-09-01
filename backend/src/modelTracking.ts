@@ -38,6 +38,7 @@ import {
   AA_MEDIA_ENDPOINTS,
   aaRowsFromLlms,
   aaRowsFromMedia,
+  aaUnmappedClues,
   beijingToday,
   type AaEvalRow,
 } from './aaEvaluations'
@@ -348,7 +349,7 @@ export class ModelTrackingService {
           for (const e of entries) {
             const r = def.matchEntry(e)
             hits.push(...r.hits)
-            if (r.clue !== null) clues.push(r.clue)
+            clues.push(...r.clues)
           }
           return { hits, clues }
         })
@@ -473,15 +474,25 @@ export class ModelTrackingService {
     if (this.aaApiKey === '') return
     try {
       const headers = { 'x-api-key': this.aaApiKey }
-      const rows: AaEvalRow[] = [
-        ...aaRowsFromLlms(await this.deps.fetchText(AA_LLM_URL, 30_000, { headers })),
-      ]
+      const rows: AaEvalRow[] = []
+      const llmJson = await this.deps.fetchText(AA_LLM_URL, 30_000, { headers })
+      rows.push(...aaRowsFromLlms(llmJson))
       for (const ep of AA_MEDIA_ENDPOINTS) {
-        rows.push(
-          ...aaRowsFromMedia(await this.deps.fetchText(ep.url, 30_000, { headers }), ep.benchmark),
-        )
+        rows.push(...aaRowsFromMedia(await this.deps.fetchText(ep.url, 30_000, { headers }), ep.benchmark))
       }
       await this.replaceEvaluationSnapshot(rows)
+      // 未映射线索只在 LLM 主表收集:媒体端点无 model_creator(交叉校验缺席)且 slug
+      // 带厂商前缀+下划线形态(openai-gpt_image_1-5),与基线 id 归一永不相等——收集
+      // 形同死代码还引裸同名误配风险。按厂家分组落库(键 aa: 前缀与厂家残余 ID 裸键
+      // 不撞;occurredOn 恒当日,30 天窗天然放行;映射补上即不再产出、7 天滚出自愈);
+      // 各家独立 catch——线索是观测面,一家落库失败只记日志,不炸评测轮(快照已写,
+      // 炸了会把 eval 标陈旧且吞掉其余家的线索)
+      const aaClues = aaUnmappedClues(llmJson, ALL_BASELINES, beijingToday())
+      for (const { provider, clue } of aaClues) {
+        await this.ingestClues(provider, [clue]).catch((e) => {
+          console.warn(`模型追踪(${PROVIDERS[provider].label})AA 线索落库失败:`, e)
+        })
+      }
       await this.markEvalStatus(true)
     } catch (e) {
       await this.markEvalStatus(false).catch(() => {})

@@ -21,12 +21,13 @@ export interface PendingClue {
 
 /**
  * 单条目分派结果:命中 → 事件(家族式条目「Grok 4.20 and Grok 4.20 Multi-agent
- * are live」可多条);未命中 → 待核验线索(null = 不落线索,如月暗文章流、无
- * `Model:` 字段的平台条目)。
+ * are live」可多条);未认领信号 → 待核验线索(可多条:整条未认领一条,或部分认领
+ * 条目每个残余 ID 一条;空数组 = 不落线索,如月暗文章流、无 `Model:` 字段的平台
+ * 条目)。
  */
 export interface MatchEntryResult {
   hits: MatchedHit[]
-  clue: PendingClue | null
+  clues: PendingClue[]
 }
 
 /**
@@ -63,6 +64,28 @@ export function slugIn(slug: string, docUrl: string): boolean {
   const re = new RegExp(`${slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.-])`)
   return re.test(docUrl)
 }
+
+/**
+ * 结构化 ID 列表的残余线索(ADR-0051):resolve 不认领且非 `-latest` 引用别名的
+ * ID,逐个一条裸键线索(全未认领与部分认领同构——同一模型永不双行)。OpenAI 与
+ * 通义共用(单一实现防两处漂移;排除规则演进只改这里)。
+ */
+export function residualIdClues(
+  ids: readonly string[],
+  resolveId: (id: string) => string | null,
+  base: { occurredOn: string; titleOf: (id: string) => string; sourceUrl: string },
+): PendingClue[] {
+  const residual = [...new Set(ids.filter((id) => resolveId(id) === null && !isReferenceAlias(id)))]
+  return residual.map((id) => ({
+    occurredOn: base.occurredOn,
+    title: `${id}:${base.titleOf(id)}`,
+    sourceUrl: base.sourceUrl,
+    modelKey: id,
+  }))
+}
+
+/** residualIdClues 的排除谓词:`-latest` 引用别名不另算模型(CONTEXT)。 */
+export const isReferenceAlias = (id: string): boolean => id.endsWith('-latest')
 
 /** 英文月份名 → 两位数(Anthropic/xAI/OpenAI 三家日期归一共用)。 */
 export const MONTHS: Record<string, string> = {
