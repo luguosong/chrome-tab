@@ -41,10 +41,38 @@ export interface ProviderDef<E> {
   label: string
   /** 信源 URL(月之暗面为资讯+Blog 两页,其余单页)。 */
   urls: string[]
-  /** 信源原文 → 条目数组;零条目由 runPoll 统一判「上游改版」。 */
-  parse: (md: string) => E[]
+  /** 信源原文 → 条目+意外跳过;零条目由 runPoll 统一判「上游改版」,skipped 非空
+   *  由 runPoll 统一 warn(CONTEXT「意外跳过」,ADR-0052)。 */
+  parse: (md: string) => ParseResult<E>
   /** 单条目分派(见 MatchEntryResult)。 */
   matchEntry(e: E): MatchEntryResult
+}
+
+/**
+ * parse 的返回:条目 + **意外跳过**片段(ADR-0052)。skipped 只计实抓口径之外的
+ * 形态(畸形日期/错列/剥空标题),页面正常构成(**结构排除**:表头、非条目行、
+ * 同 URL 重复卡)不计——空数组是全网常态基线,非空即上游漂移信号。
+ */
+export interface ParseResult<E> {
+  entries: E[]
+  /** 意外跳过片段(原始原文,clipFragment 截断;排障对回上游原页)。 */
+  skipped: string[]
+}
+
+/** 意外跳过片段:截 80 字符,按码点切(Array.from 防代理对拦腰截断出孤立代理项)。
+ *  片段内容各家取「排障关键可见」的形态:跳过点在块/行开头用原始原文,窗口开头是
+ *  噪音标签的(通义表格行/智谱属性块)用已提取字段合成,关键字段前置(防截尾丢失)。 */
+export const clipFragment = (raw: string): string => {
+  const cps = Array.from(raw)
+  return cps.length > 80 ? `${cps.slice(0, 80).join('')}…` : raw
+}
+
+/** 'YYYY-MM-DD' 是实日期(回滚校验,`2026-13-45`/`2026-02-30` 拒收)——月暗卡日期
+ *  与 DeepSeek 段日期共用(单一实现防漂移;各 normalize*Date 是归一+校验复合体,
+ *  形态不同不合并)。 */
+export const isRealIsoDate = (s: string): boolean => {
+  const d = new Date(`${s}T00:00:00Z`)
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s
 }
 
 // ---- 匹配底座(多家共享的词边界/slug/月份判定;单一实现防两处漂移)----

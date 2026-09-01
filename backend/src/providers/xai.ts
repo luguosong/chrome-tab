@@ -1,5 +1,5 @@
 import { XAI_BASELINE } from '../xaiBaseline'
-import { aliasIn, MONTHS, type MatchedHit, type ProviderDef } from './def'
+import { aliasIn, clipFragment, MONTHS, type MatchedHit, type ParseResult, type ProviderDef } from './def'
 
 // ---- xAI 发布流(研究 §3:主发布源;`## 月份` 标题仅月份粒度,条目 `### ` 自带标题)----
 
@@ -16,11 +16,21 @@ export interface XaiReleaseEntry {
 /**
  * xAI 发布流 Markdown → 条目数组。`## <Month>[ <YYYY>]` 月份标题分段、段内 `### ` 条目
  * 逐个提取标题与正文首个链接。当年月份标题**不带年份**(2026-08-25 实抓口径),首个带
- * 年份标题之前按 currentYear(生产传当年,测试传固定值保持确定性)、其后依显式年份。
- * 非月份 `##` 段下的条目跳过;月份段之前的散条目跳过。
+ * 年份标题之前按 currentYear(生产传当年,测试传固定值保持确定性)、其后依显式年份;
+ * **无年份月份大于 currentMonth 时归上一年**(评审修正:元旦窗口里上一年未补年份的
+ * 旧段会错记新年份,产未来日期事件且去重键永不同、双行不愈——12 月底挂次年 1 月
+ * 无年份标题的边界仍错,那种场景上游显式带年份的可能性高,ponytail 接受)。
+ * 非月份 `##` 段下的条目跳过;月份段之前的散条目跳过(均结构排除);**带四位年份但
+ * 月份词不识的标题**(如 `## Sept 2026` 缩写漂移)落意外跳过——年份后缀是无猜的
+ * 「这是月份标题」结构证据,整段丢弃须可观察(评审修正,ADR-0052)。
  */
-export function parseXaiReleaseNotes(md: string, currentYear: number = new Date().getFullYear()): XaiReleaseEntry[] {
+export function parseXaiReleaseNotes(
+  md: string,
+  currentYear: number = new Date().getFullYear(),
+  currentMonth: number = new Date().getUTCMonth() + 1,
+): ParseResult<XaiReleaseEntry> {
   const out: XaiReleaseEntry[] = []
+  const skipped: string[] = []
   let year: number | null = null
   let yearMonth: string | null = null
   let title: string | null = null
@@ -43,11 +53,12 @@ export function parseXaiReleaseNotes(md: string, currentYear: number = new Date(
       flush()
       const mo = MONTHS[month[1]!]
       if (mo === undefined) {
+        if (month[2] !== undefined) skipped.push(clipFragment(line.trim())) // 意外跳过:带年份但月份词不识
         yearMonth = null
         continue
       }
       if (month[2] !== undefined) year = Number(month[2])
-      yearMonth = `${year ?? currentYear}-${mo}`
+      yearMonth = `${year ?? (Number(mo) > currentMonth ? currentYear - 1 : currentYear)}-${mo}`
       continue
     }
     if (line.startsWith('### ')) {
@@ -58,7 +69,7 @@ export function parseXaiReleaseNotes(md: string, currentYear: number = new Date(
     if (title !== null) body.push(line)
   }
   flush()
-  return out
+  return { entries: out, skipped }
 }
 
 /**

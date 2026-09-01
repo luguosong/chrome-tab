@@ -342,7 +342,16 @@ export class ModelTrackingService {
     for (const url of def.urls) {
       try {
         await this.pollOne(def.id, url, (md) => {
-          const entries = def.parse(md)
+          const { entries, skipped } = def.parse(md)
+          // 意外跳过先于判改版 warn:全灭场景的 skipped 片段就是「上游变成了什么」的排障线索。
+          // 日志只打前 5 条片段:一个畸形月标题可让其后百余条类型行全部落 skipped,
+          // 全量打会冲刷日志通道(评审修正);数组本身保持全量供测试断言。
+          if (skipped.length > 0) {
+            console.warn(
+              `模型追踪(${def.label})意外跳过 ${skipped.length} 条:`,
+              skipped.length > 5 ? [...skipped.slice(0, 5), `…另 ${skipped.length - 5} 条`] : skipped,
+            )
+          }
           if (entries.length === 0) return null
           const hits: MatchedHit[] = []
           const clues: PendingClue[] = []

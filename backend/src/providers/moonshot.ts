@@ -1,6 +1,6 @@
 import type { ModelEvent } from 'chrome-tab-shared'
 import { KIMI_BASELINE } from '../kimiBaseline'
-import { aliasIn, type ProviderDef } from './def'
+import { aliasIn, clipFragment, isRealIsoDate, type ParseResult, type ProviderDef } from './def'
 
 // ---- 月之暗面资讯/Blog(研究 §3:商业模型用资讯、研究/开放权重用 Blog,两页
 //  均无文档化 RSS——按文章 URL 去重,研究 §6.6;页面为同构 Next.js 卡片列表)----
@@ -23,8 +23,9 @@ export interface KimiArticle {
  * 文章)。无日期卡跳过;同 URL 卡(头图卡与列表卡重复)只留首个;锚点缺失
  * (上游改版)自然产零卡 → runPoll 上游改版口径。
  */
-export function parseKimiArticles(html: string): KimiArticle[] {
+export function parseKimiArticles(html: string): ParseResult<KimiArticle> {
   const out: KimiArticle[] = []
+  const skipped: string[] = []
   const seen = new Set<string>()
   const anchors = [
     ...html.matchAll(/<a href="([^"]+)" aria-label="([^"]+)" class="absolute inset-0[^"]*"/g),
@@ -34,15 +35,21 @@ export function parseKimiArticles(html: string): KimiArticle[] {
     const end = anchors[i + 1]?.index
     const cardWindow = html.slice(anchors[i]!.index! + anchors[i]![0].length, end)
     const titlePos = cardWindow.indexOf('card-title')
-    if (titlePos < 0) continue
+    if (titlePos < 0) continue // 结构排除:非文章卡的整卡锚点
     const date = /20\d{2}-\d{2}-\d{2}/.exec(cardWindow.slice(titlePos))?.[0]
-    if (date === undefined) continue
+    if (date === undefined) continue // 结构排除:无日期卡(实抓已知构成,宣传卡)
+    if (!isRealIsoDate(date)) {
+      // 片段用已提取字段(日期前置防长标题截尾)而非原始窗口:卡片窗口前 80 字符是
+      // 头图标签,原始截断看不到排障关键(ADR-0052)
+      skipped.push(clipFragment(`${date} ${label}`)) // 意外跳过:日期文本回滚校验失败
+      continue
+    }
     const url = href!.startsWith('/') ? `https://www.kimi.com${href}` : href!
-    if (seen.has(url)) continue
+    if (seen.has(url)) continue // 结构排除:同 URL 卡(头图卡与列表卡重复)
     seen.add(url)
     out.push({ url, title: label!, date })
   }
-  return out
+  return { entries: out, skipped }
 }
 
 /**

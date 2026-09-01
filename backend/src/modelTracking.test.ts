@@ -290,7 +290,7 @@ describe('模型追踪:智谱发布页解析(纯函数)', () => {
   })
 
   it('提取 Update 块:label/description/块内首个链接;相对路径归一为绝对', () => {
-    const updates = parseZhipuReleases(ZHIPU_MD)
+    const updates = parseZhipuReleases(ZHIPU_MD).entries
     expect(updates).toHaveLength(5)
     expect(updates[0]).toEqual({
       date: '2026-08-19',
@@ -300,17 +300,31 @@ describe('模型追踪:智谱发布页解析(纯函数)', () => {
     expect(updates[1]!.docUrl).toBe('https://docs.bigmodel.cn/cn/guide/models/text/glm-5.2')
   })
 
-  it('畸形/无日期块跳过,空文返回空数组', () => {
-    expect(parseZhipuReleases('')).toEqual([])
-    expect(
-      parseZhipuReleases('<Update label="bad" description="x"></Update>'),
-    ).toEqual([])
+  it('畸形/无日期块跳过,空文返回空数组;畸形块落意外跳过(ADR-0052)', () => {
+    expect(parseZhipuReleases('')).toEqual({ entries: [], skipped: [] })
+    const r = parseZhipuReleases('<Update label="bad" description="x"></Update>')
+    expect(r.entries).toEqual([])
+    expect(r.skipped).toHaveLength(1)
+    expect(r.skipped[0]).toContain('bad') // 片段为「label description」合成,畸形值前置可见
+  })
+
+  it('缺属性/改名块对账(评审修正):双 lookahead 匹配不到的块不再整体不可见', () => {
+    const md = [
+      '<Update label="2026-09-01" description="正常块"></Update>',
+      '<Update label="2026-09-02">无 description 属性</Update>',
+      '<Update label="2026-09-03" summary="description 改名"></Update>',
+    ].join('\n')
+    const r = parseZhipuReleases(md)
+    expect(r.entries).toHaveLength(1)
+    expect(r.skipped).toHaveLength(2) // 后两块:属性缺失与改名,开标签片段可辨
+    expect(r.skipped[0]).toContain('label="2026-09-02"')
+    expect(r.skipped[1]).toContain('summary=')
   })
 
   it('label/description 属性次序无关(上游调序不静默清零)', () => {
     const [u] = parseZhipuReleases(
       '<Update description="GLM-5.3 新一代旗舰模型上线" label="2026-8-19">\n[**GLM-5.3**](/cn/guide/models/text/glm-5.3)\n</Update>',
-    )
+    ).entries
     expect(u).toEqual({
       date: '2026-08-19',
       description: 'GLM-5.3 新一代旗舰模型上线',
@@ -319,7 +333,7 @@ describe('模型追踪:智谱发布页解析(纯函数)', () => {
   })
 
   it('基线双条件匹配:GLM-5.3/GLM-5.2 块产事件;基线外型号(GLM-9.9)与非模型块跳过', () => {
-    const updates = parseZhipuReleases(ZHIPU_MD)
+    const updates = parseZhipuReleases(ZHIPU_MD).entries
     expect(matchZhipuEvent(updates[0]!)).toEqual({
       officialId: 'glm-5.3',
       event: {
@@ -340,7 +354,7 @@ describe('模型追踪:智谱发布页解析(纯函数)', () => {
     // 基线缺行时整块静默跳过,即用户症状「新模型没检测到」。fixture 为发布页原文。
     const [u] = parseZhipuReleases(
       '<Update label="2026-08-26" description="GLM-5.3-Flash 原生多模态模型上线">\n  👀 [**GLM-5.3-Flash**](/cn/guide/models/vlm/glm-5.3-flash)\n</Update>',
-    )
+    ).entries
     expect(matchZhipuEvent(u!)).toEqual({
       officialId: 'glm-5.3-flash',
       event: {
@@ -356,25 +370,25 @@ describe('模型追踪:智谱发布页解析(纯函数)', () => {
     // 实测坑:GLM-Image 块误链 glm-4.7 文档页——描述与链接双条件缺一不可
     const [u] = parseZhipuReleases(
       '<Update label="2026-01-14" description="GLM-Image 图像生成模型上线">\n[**GLM-Image**](/cn/guide/models/text/glm-4.7)\n</Update>',
-    )
+    ).entries
     expect(matchZhipuEvent(u!)).toBeNull()
   })
 
   it('厂家归属:平台托管的第三方模型(Vidu)不进基线、其发布块不产智谱动态', () => {
     // 研究研究 §5:智谱目录的 Vidu 只是平台接入,不是智谱自研——基线不含、块不匹配
     expect(ZHIPU_BASELINE.some((b) => b.officialId.includes('vidu'))).toBe(false)
-    const updates = parseZhipuReleases(ZHIPU_MD)
+    const updates = parseZhipuReleases(ZHIPU_MD).entries
     expect(matchZhipuEvent(updates[4]!)).toBeNull()
   })
 
   it('alias/slug 词边界:「GLM-4.7」不认领「GLM-4.7-Flash」的块,「…/glm-4」不认领「…/glm-4-long」', () => {
     const [flash] = parseZhipuReleases(
       '<Update label="2026-01-19" description="GLM-4.7-Flash 免费模型上线">\n[**GLM-4.7-Flash**](/cn/guide/models/free/glm-4.7-flash)\n</Update>',
-    )
+    ).entries
     expect(matchZhipuEvent(flash!)!.officialId).toBe('glm-4.7-flash') // 归 Flash 自己,非 glm-4.7
     const [long] = parseZhipuReleases(
       '<Update label="2026-01-01" description="GLM-4-Long 长文本模型上线">\n[**GLM-4-Long**](/cn/guide/models/text/glm-4-long)\n</Update>',
-    )
+    ).entries
     expect(matchZhipuEvent(long!)!.officialId).toBe('glm-4-long') // 非 glm-4-flash(其 slug 为 /text/glm-4 前缀)
   })
 })
@@ -629,7 +643,7 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
   it('残余 ID 线索:部分认领条目(命中+基线外混排)的残余半边落线索库,不再静默', async () => {
     const partialMd = `## August, 2026
 
-### Sat 30
+### Aug 30
 
 Update: Model: gpt-5.6-sol and Model: gpt-6.2
 Dual launch announcement.
@@ -641,6 +655,30 @@ Dual launch announcement.
     expect(clues).toHaveLength(1)
     expect(clues[0]!.title).toMatch(/^gpt-6\.2:/)
     expect(clues[0]!.date).toBe('2026-08-30')
+  })
+
+  it('意外跳过 runPoll warn 单点:畸形块可观察,规整轮该家零 warn(ADR-0052)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const zhipuWarns = () => warn.mock.calls.filter((c) => String(c[0]).includes('智谱'))
+    try {
+      const { db } = openDb(':memory:')
+      const svc = await makeService(db, makeDeps(ZHIPU_MD))
+      await svc.pollProvider('zhipu')
+      expect(zhipuWarns()).toHaveLength(0) // 规整 fixture:智谱 skipped 空,不说话
+
+      // 显式 await pollProvider(makeService 的 init 内轮询不被等待,靠 archive 微任务
+      // 预算排干是时序耦合——评审修正;直接 new 复用已建表,也省一次全量 init)
+      const drifting = new ModelTrackingService(
+        db,
+        makeDeps(`${ZHIPU_MD}<Update label="bad" description="畸形块">x</Update>`),
+      )
+      await drifting.pollProvider('zhipu')
+      expect(zhipuWarns()).toHaveLength(1)
+      expect(zhipuWarns()[0]![0]).toContain('(智谱)意外跳过 1 条')
+      expect(zhipuWarns()[0]![1]).toEqual([expect.stringContaining('bad')])
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('Anthropic 信源失败只标记该厂家陈旧:智谱档案与源状态不受影响', async () => {
@@ -702,7 +740,7 @@ describe('模型追踪:Anthropic release notes 解析(纯函数)', () => {
   })
 
   it('提取日期段条目:段名归一为日期、条目原文与链接按出现序', () => {
-    const notes = parseAnthropicReleases(ANTHROPIC_MD)
+    const notes = parseAnthropicReleases(ANTHROPIC_MD).entries
     expect(notes).toHaveLength(6)
     expect(notes[0]).toMatchObject({ date: '2026-08-20' })
     expect(notes[0]!.links).toEqual(['https://platform.claude.com/docs/en/cli-sdks-libraries/sdks/python'])
@@ -710,13 +748,15 @@ describe('模型追踪:Anthropic release notes 解析(纯函数)', () => {
     expect(notes[5]).toMatchObject({ date: '2024-10-03' })
   })
 
-  it('畸形日期段跳过,空文返回空数组', () => {
-    expect(parseAnthropicReleases('')).toEqual([])
-    expect(parseAnthropicReleases('### Someday 1, 2026\n* [x](https://a.b/c)')).toEqual([])
+  it('畸形日期段跳过,空文返回空数组;畸形段落意外跳过,非 bullet 行不计(ADR-0052)', () => {
+    expect(parseAnthropicReleases('')).toEqual({ entries: [], skipped: [] })
+    const r = parseAnthropicReleases('### Someday 1, 2026\nintro 行不是 bullet\n* [x](https://a.b/c)')
+    expect(r.entries).toEqual([])
+    expect(r.skipped).toEqual(['### Someday 1, 2026'])
   })
 
   it('双条件归属:Opus 5/Fable 5 发布条目产事件;SDK、fast mode、弃用公告条目跳过', () => {
-    const notes = parseAnthropicReleases(ANTHROPIC_MD)
+    const notes = parseAnthropicReleases(ANTHROPIC_MD).entries
     const opus5 = matchAnthropicEvent(notes[1]!)!
     expect(opus5.officialId).toBe('claude-opus-5')
     expect(opus5.event).toMatchObject({
@@ -732,7 +772,7 @@ describe('模型追踪:Anthropic release notes 解析(纯函数)', () => {
   })
 
   it('基线外型号不认领:仅限受邀项目(Project Glasswing)的 Mythos 条目不产动态', () => {
-    const notes = parseAnthropicReleases(ANTHROPIC_MD)
+    const notes = parseAnthropicReleases(ANTHROPIC_MD).entries
     // Fable 5 与 Mythos 5 同条目:基线只认领 Fable 5,Mythos 无档案行
     expect(matchAnthropicEvent(notes[3]!)!.officialId).toBe('claude-fable-5')
     expect(ANTHROPIC_BASELINE.some((b) => b.officialId.includes('mythos'))).toBe(false)
@@ -741,12 +781,12 @@ describe('模型追踪:Anthropic release notes 解析(纯函数)', () => {
   it('词边界:「Claude Opus 4」不认领「Claude Opus 4.8」的条目,「claude-haiku-4-5」不认领 dated 快照链接', () => {
     const [note] = parseAnthropicReleases(
       "### July 1, 2026\n\n* Something new for Claude Opus 4.8. See [docs](https://platform.claude.com/docs/en/models/opus-4-8/overview).\n",
-    )
+    ).entries
     // 文本提 4.8、链接也是 4.8:应归 claude-opus-4-8,而非基线里的 claude-opus-4(词边界)
     expect(matchAnthropicEvent(note!)!.officialId).toBe('claude-opus-4-8')
     const [snapshot] = parseAnthropicReleases(
       "### July 2, 2026\n\n* Update for Claude Haiku 4.5. See [snapshot](https://platform.claude.com/docs/en/models/haiku-4-5-20251001/overview).\n",
-    )
+    ).entries
     // 家族 slug 尾边界不认领日期快照链接(dated URL 不自动归属,防误领)
     expect(matchAnthropicEvent(snapshot!)).toBeNull()
   })
@@ -828,7 +868,7 @@ describe('模型追踪:Anthropic 基线自身(issues/04)', () => {
 
 describe('模型追踪:xAI 发布流解析(纯函数,issues/05)', () => {
   it('月份/年份推断:当年标题不带年份按 currentYear,显式年份标题自锚;条目标题与正文首链(相对路径归一)提取', () => {
-    const entries = parseXaiReleaseNotes(XAI_MD, 2026)
+    const entries = parseXaiReleaseNotes(XAI_MD, 2026, 8).entries
     expect(entries.map((e) => e.yearMonth)).toEqual([
       '2026-08', '2026-08',
       '2026-07', '2026-07',
@@ -842,14 +882,26 @@ describe('模型追踪:xAI 发布流解析(纯函数,issues/05)', () => {
     })
   })
 
-  it('非月份 ## 段下的条目与月份段之前的散条目跳过;空文返回空数组', () => {
-    expect(parseXaiReleaseNotes('', 2026)).toEqual([])
-    expect(parseXaiReleaseNotes('## Notamonth\n\n### Stray entry\n\nbody', 2026)).toEqual([])
-    expect(parseXaiReleaseNotes('### Before any month\n\nbody', 2026)).toEqual([])
+  it('非月份 ## 段与月份段前散条目为结构排除:条目不产且不落意外跳过(ADR-0052)', () => {
+    expect(parseXaiReleaseNotes('', 2026, 8)).toEqual({ entries: [], skipped: [] })
+    expect(parseXaiReleaseNotes('## Notamonth\n\n### Stray entry\n\nbody', 2026, 8)).toEqual({ entries: [], skipped: [] })
+    expect(parseXaiReleaseNotes('### Before any month\n\nbody', 2026, 8)).toEqual({ entries: [], skipped: [] })
+  })
+
+  it('带年份但月份词不识的标题落意外跳过(评审修正):缩写漂移整段蒸发须可观察', () => {
+    const r = parseXaiReleaseNotes('## Sept 2026\n\n### Grok 4.6\n\nbody', 2026, 8)
+    expect(r).toEqual({ entries: [], skipped: ['## Sept 2026'] })
+  })
+
+  it('无年份月份标题跨年归年(评审修正):元旦窗口旧段不再错记新年份产未来日期', () => {
+    const md = '## August\n\n### Grok 4.6\n\nbody'
+    // 2027 年 1 月看 2026 年的 August(8 > 1)→ 归 2026;当年内(8 月看 August)→ 当年
+    expect(parseXaiReleaseNotes(md, 2027, 1).entries[0]!.yearMonth).toBe('2026-08')
+    expect(parseXaiReleaseNotes(md, 2026, 8).entries[0]!.yearMonth).toBe('2026-08')
   })
 
   it('标题归属:型号条目命中并锚定当月 1 日;产品条目(Grok Bot)与历史能力公告不产事件', () => {
-    const entries = parseXaiReleaseNotes(XAI_MD, 2026)
+    const entries = parseXaiReleaseNotes(XAI_MD, 2026, 8).entries
     const byTitle = (t: string) => entries.find((e) => e.title === t)!
     expect(matchXaiEvent(byTitle('Grok 4.6'))).toEqual([
       {
@@ -867,14 +919,14 @@ describe('模型追踪:xAI 发布流解析(纯函数,issues/05)', () => {
   })
 
   it('家族合并条目多命中:「Grok 4.20 and Grok 4.20 Multi-agent are live」同时命中 reasoning 与 multi-agent 两行', () => {
-    const entries = parseXaiReleaseNotes(XAI_MD, 2026)
+    const entries = parseXaiReleaseNotes(XAI_MD, 2026, 8).entries
     const family = matchXaiEvent(entries.find((e) => e.yearMonth === '2026-03')!)
     expect(family.map((h) => h.officialId).sort()).toEqual(['grok-4.20-0309-reasoning', 'grok-4.20-multi-agent-0309'])
     expect(family[0]!.event.occurredOn).toBe('2026-03-01') // 月份粒度锚定当月 1 日
   })
 
   it('标题词边界:「grok-imagine-video-1.5 modalities」只命中 1.5 行,不误认 grok-imagine-video', () => {
-    const entries = parseXaiReleaseNotes(XAI_MD, 2026)
+    const entries = parseXaiReleaseNotes(XAI_MD, 2026, 8).entries
     const v15 = entries.find((e) => e.title === 'grok-imagine-video-1.5 modalities')!
     expect(matchXaiEvent(v15).map((h) => h.officialId)).toEqual(['grok-imagine-video-1.5'])
   })
@@ -999,60 +1051,54 @@ const card = (href: string, title: string, date: string | null, imgDate = '2026-
   </div>
 </div>`
 
-const KIMI_NEWS_HTML = `<!-- Kimi 资讯(2026-08-25 实抓节选)-->
-${card('/news/kimi-ambassador-program', 'Kimi 全球大使计划现已开启', '2026-07-28')}
-${card('/news/kimi-k3-open-source', 'Kimi K3 开放日:模型权重、技术报告和关键 Infra 技术同步开放', '2026-07-27')}
-${card('/news/kimi-k3', 'Kimi K3:智能的新前沿', '2026-07-17')}
-${card('/news/kimi-work-update', 'Kimi Work 上新:目标模式、插件中心和 6 月限时福利', '2026-06-18')}
-`
+const KIMI_NEWS_HTML = `<!-- 月暗资讯页(2026-09-01 实抓快照节选:完整卡片区 5 卡)
+<a href="/news/kimi-k3-legal" aria-label="法律行业为什么都在用 Kimi K3？" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="法律行业为什么都在用 Kimi K3？" src="https://kimi-img.kimi.ai/pub/slides/kimi-fs/weaver/assets/83a06ca82c71420dda53c4523545f83a.jpg" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">法律行业为什么都在用 Kimi K3？</h4><p class="card-desc text-base leading-6 font-normal text-(--Labels-Secondary) m-0!">看 Kimi 如何接入日常法律工作：从合同审批、法律研究与尽职调查，到会议和邮件信息梳理。</p><div class="resources-explore-meta-row mt-auto flex items-center justify-between gap-3 text-base leading-6 font-normal text-(--Labels-Secondary)"><span>2026-08-28</span></div></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)    "><a href="/news/kimi-ambassador-program" aria-label="Kimi 全球大使计划现已开启" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Kimi 全球大使计划现已开启" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-08-12/1d9u1d61l51jas5coqtp0?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Kimi 全球大使计划现已开启</h4><p class="card-desc text-base leading-6 font-normal text-(--Labels-Secondary) m-0!">Kimi 面向全球招募在真实场景中深度使用 Kimi、并愿意将经验与洞察分享给更多人的先行者。</p><div class="resources-explore-meta-row mt-auto flex items-center justify-between gap-3 text-base leading-6 font-normal text-(--Labels-Secondary)"><span>2026-07-28</span></div></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)    "><a href="/news/kimi-k3-open-source" aria-label="Kimi K3 开放日：模型权重、技术报告和关键 Infra 技术同步开放" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Kimi K3 开放日：模型权重、技术报告和关键 Infra 技术同步开放" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-08-11/1d9tj65aav1fc646mprfg?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Kimi K3 开放日：模型权重、技术报告和关键 Infra 技术同步开放</h4><p class="card-desc text-base leading-6 font-normal text-(--Labels-Secondary) m-0!">Kimi K3 模型权重与技术报告正式公开，同步开源 MoonEP、FlashKDA、AgentEnv 三项关键 Infra 技术。</p><div class="resources-explore-meta-row mt-auto flex items-center justify-between gap-3 text-base leading-6 font-normal text-(--Labels-Secondary)"><span>2026-07-27</span></div></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)    "><a href="/news/kimi-k3" aria-label="Kimi K3：智能的新前沿" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Kimi K3：智能的新前沿" src="https://kimi-file.moonshot.cn/prod-chat-kimi/kfs/4/2/2026-08-11/1d9tj65aav1fc646mpreg?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Kimi K3：智能的新前沿</h4><p class="card-desc text-base leading-6 font-normal text-(--Labels-Secondary) m-0!">Kimi K3 正式发布：2.8 万亿参数、原生视觉理解、100 万 token 上下文，全球首个开源的 3 万亿级别模型。</p><div class="resources-explore-meta-row mt-auto flex items-center justify-between gap-3 text-base leading-6 font-normal text-(--Labels-Secondary)"><span>2026-07-17</span></div></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)    "><a href="/news/kimi-work-update" aria-label="Kimi Work 上新：目标模式、插件中心和 6 月限时福利" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Kimi Work 上新：目标模式、插件中心和 6 月限时福利" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-08-12/1d9u1d176rtp4tq8kjvpg?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Kimi Work 上新：目标模式、插件中心和 6 月限时福利</h4><p class="card-desc text-base leading-6 font-normal text-(--Labels-Secondary) m-0!">Kimi Work（Beta 版）新增可连续工作 24 小时的「目标模式」与「插件中心」，6 月限时 5 折福利进行中。</p><div class="resources-explore-meta-row mt-auto flex items-center justify-between gap-3 text-base leading-6 font-normal text-(--Labels-Secondary)"><span>2026-06-18</span></div></div></div></div></section></div><div class="mt-10 flex flex-col items-center gap-3 text-sm leading-5 text-(--Labels-Tertiary)"></div></div></div></section></div></div></div></section><!--$--><!--/$--></main><footer id="site-footer" class="bg-[#121212]" data-show-log-id="_R_fb9fivb_"><div class="mx-auto w-full max-w-360 px-6 tablet:px-12 desktop:px-20 pt-[48px] desktop:pt-[104px] pb-[16px]"><div class="flex flex-col gap-24 desktop:flex-row desktop:items-stretch desktop:gap-[96px]"><div class="flex w-full grow flex-col items-start desktop:min-h-full"><a target="_blank" rel="noopener noreferrer" aria-label="KIMI" href="/"><svg xmlns="http://`
 
-const KIMI_BLOG_HTML = `<!-- Kimi Blog 索引(2026-08-25 实抓节选;首卡为头图卡,与列表卡同 URL 重复)-->
-${card('/en/blog/kimi-k3', 'Kimi K3', '2026-07-16')}
-${card('/en/blog/kimi-k3', 'Kimi K3', '2026-07-16')}
-${card('/en/blog/perception-bench', 'PerceptionBench', '2026-07-16')}
-${card('/en/blog/kimi-k2-6', 'Kimi K2.6', '2026-04-20')}
-${card('/en/blog/kimi-k2-5', 'Kimi K2.5', '2026-01-27')}
-${card('/en/blog/kimi-k2-thinking', 'Kimi K2 Thinking', '2025-11-06')}
-${card('https://huggingface.co/MoonshotAI/Kimi-K2-Instruct-0905', 'Kimi-K2-Instruct-0905', '2025-09-05')}
-${card('/en/blog/kimi-k2', 'Kimi K2', '2025-07-11')}
-${card('https://github.com/MoonshotAI/Kimi-Audio', 'Kimi-Audio', '2025-04-26')}
-${card('https://github.com/MoonshotAI/Kimi-VL', 'Kimi-VL', '2025-04-10')}
-${card('/en/blog/kimi-k4-teaser', 'Kimi K4 预告', null)}
-`
+const KIMI_BLOG_HTML = `<!-- 月暗 Blog 页(2026-09-01 实抓快照节选:完整卡片区 20 卡,首对同 URL 头图/列表重复卡)
+<a href="/en/blog/kimi-k3" aria-label="Kimi K3" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media m-0 overflow-hidden bg-(--Bg-Tertiary) flex-none rounded-lg aspect-video desktop:w-[calc(2*(100%-32px)/3+16px)] h-auto"><img alt="Kimi K3" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-07-31/1d9m7dtaav1fc646ddl70?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="card-body m-0 flex flex-col self-stretch w-[min(384px,35%)] p-4 gap-2.5 justify-end"><h4 class="card-title m-0! text-(--Labels-Primary) text-[28px] leading-[30px] font-medium">Kimi K3</h4><p class="card-date font-normal text-(--Labels-Secondary) m-0 text-lg leading-[26px] -mt-1">2026-07-16</p></div></div></div><div class="cards-list grid grid-cols-1 p-0 gap-6 cards-list-has-hero  tablet:grid-cols-2 desktop:grid-cols-3"><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="/en/blog/kimi-k3" aria-label="Kimi K3" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Kimi K3" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-07-31/1d9m7dtaav1fc646ddl70?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Kimi K3</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2026-07-16</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="/en/blog/perception-bench" aria-label="PerceptionBench" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="PerceptionBench" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-07-17/d9cs7m9l51jas5bslg30?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">PerceptionBench</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2026-07-16</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="/en/blog/kimi-k2-6" aria-label="Kimi K2.6" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Kimi K2.6" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-04-15/1d7fl3bt3v89kkehrijg0?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Kimi K2.6</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2026-04-20</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="/en/blog/agent-swarm" aria-label="Agent Swarm" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Agent Swarm" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-04-15/1d7fl30iav1fc6410uj80?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Agent Swarm</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2026-02-09</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="/en/blog/worldvqa" aria-label="WorldVQA" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="WorldVQA" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-02-13/1d67h0pf6rtp4tqfle6gg?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">WorldVQA</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2026-02-03</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="/en/blog/kimi-k2-5" aria-label="Kimi K2.5" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Kimi K2.5" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-02-13/1d67h0mv6rtp4tqfle5vg?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Kimi K2.5</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2026-01-27</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="/en/blog/kimi-vendor-verifier" aria-label="Kimi Vendor Verifier" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Kimi Vendor Verifier" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-02-13/1d67h0k2av1fc645nt0h0?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Kimi Vendor Verifier</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2026-01-22</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="/en/blog/kimi-k2-thinking" aria-label="Kimi K2 Thinking" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Kimi K2 Thinking" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-02-13/1d67h0hiav1fc645nt04g?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Kimi K2 Thinking</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2025-11-06</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="https://huggingface.co/moonshotai/Kimi-K2-Instruct-0905" aria-label="Kimi-K2-Instruct-0905" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Kimi-K2-Instruct-0905" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-03-25/1d71tdsudcmosb3tpmud0?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Kimi-K2-Instruct-0905</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2025-09-05</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="/en/blog/kimi-k2" aria-label="Kimi K2" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Kimi K2" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-02-13/1d67h0e6dcmosb3rlfcsg?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Kimi K2</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2025-07-11</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="https://moonshotai.github.io/Kimi-Researcher/" aria-label="Kimi-Researcher" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Kimi-Researcher" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-03-25/1d71te5aav1fc647s9g90?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Kimi-Researcher</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2025-06-20</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="https://github.com/MoonshotAI/Kimi-Dev" aria-label="Kimi-Dev" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Kimi-Dev" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-03-25/1d71tea6dcmosb3tpn0e0?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Kimi-Dev</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2025-06-17</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="https://github.com/MoonshotAI/Kimi-Audio" aria-label="Kimi-Audio" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Kimi-Audio" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-03-25/1d71teed3v89kkegmsvo0?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Kimi-Audio</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2025-04-26</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="https://github.com/MoonshotAI/Kimina-Prover-Preview" aria-label="Kimina-Prover Preview" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Kimina-Prover Preview" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-03-25/1d71tein6rtp4tq9po6h0?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Kimina-Prover Preview</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2025-04-15</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="https://github.com/MoonshotAI/Kimi-VL" aria-label="Kimi-VL" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Kimi-VL" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-03-25/1d71tdlmdcmosb3tpmsig?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Kimi-VL</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2025-04-10</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="https://github.com/MoonshotAI/Moonlight" aria-label="Muon is Scalable for LLM Training" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Muon is Scalable for LLM Training" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-03-25/1d71teo1l51jas5dtnj8g?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Muon is Scalable for LLM Training</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2025-02-23</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="https://github.com/MoonshotAI/MoBA" aria-label="MoBA: Mixture of Block Attention for Long-Context LLMs" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="MoBA: Mixture of Block Attention for Long-Context LLMs" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-03-25/1d71tet1l51jas5dtnjr0?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">MoBA: Mixture of Block Attention for Long-Context LLMs</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2025-02-18</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="https://github.com/MoonshotAI/Kimi-k1.5" aria-label="Kimi K1.5: Scaling Reinforcement Learning with LLMs" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Kimi K1.5: Scaling Reinforcement Learning with LLMs" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-03-25/1d71tf1qav1fc647s9li0?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Kimi K1.5: Scaling Reinforcement Learning with LLMs</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2025-01-20</p></div></div><div class="menu-card group relative flex flex-col overflow-hidden min-h-0 no-underline text-(--Labels-Primary) transition-colors duration-200 ease-out px-2 pt-2 pb-5 rounded-xl border-[0.5px] border-(--Separators-S1) bg-transparent hover:bg-(--Fills-F1)   tablet:first:hidden "><a href="https://github.com/kvcache-ai/Mooncake/" aria-label="Mooncake: A KVCache-centric Disaggregated Architecture for LLM Serving" class="absolute inset-0 z-[1] rounded-xl"></a><div class="card-media w-full overflow-hidden bg-(--Bg-Tertiary) rounded-lg aspect-video"><img alt="Mooncake: A KVCache-centric Disaggregated Architecture for LLM Serving" src="https://kimi-file.kimi.ai/prod-chat-kimi/kfs/4/2/2026-03-25/1d71tf7vf2ena622715pg?x-tos-process=image%2Fauto-orient%2C1%2Fstrip%2Fignore-error%2C1" loading="lazy" class="block object-cover w-full h-full"/></div><div class="flex flex-col card-body gap-2.5 px-4"><h4 class="card-title text-xl font-semibold leading-[26px] text-(--Labels-Primary) m-0!">Mooncake: A KVCache-centric Disaggregated Architecture for LLM Serving</h4><p class="card-date text-base leading-6 font-normal text-(--Labels-Secondary) -mt-1 m-0">2024-06-26</p></div></div></div></section></div></div></div></section></div></div></section><!--$--><!--/$--></main><footer id="site-footer" class="bg-[#121212]" data-show-log-id="_R_fb9fivb_"><div class="mx-auto w-full max-w-360 px-6 tablet:px-12 desktop:px-20 pt-[48px] desktop:pt-[104px] pb-[16px]"><div class="flex flex-col gap-24 desktop:flex-row desktop:items-stretch desktop:gap-[96px]"><div class="flex w-full grow flex-col items-start desktop:min-h-full"><a target="_blank" rel="noopener noreferrer" aria-label="KIMI" href="/"><svg xmlns="http://www.w3.org/2000/svg" width="96" height="32" viewBox="0 0 96 32" fill="currentColor" aria-hidden="true" focusable="false" class="h-[32px] w-auto [&amp;_path]:fill-white"><path d="M35.768 31.329c0 .37.3.671.67.671h4.305c.371 0 .672-.3.672-.671V.67c0-.`
 
 describe('模型追踪:月之暗面资讯/Blog 解析(纯函数,issues/06)', () => {
   it('卡片提取:aria-label 标题 + card-title 之后的日期;相对链接归一到 www.kimi.com', () => {
-    const news = parseKimiArticles(KIMI_NEWS_HTML)
-    expect(news).toHaveLength(4)
-    expect(news[2]).toEqual({
+    const news = parseKimiArticles(KIMI_NEWS_HTML).entries
+    expect(news).toHaveLength(5)
+    expect(news.at(-2)).toEqual({
       url: 'https://www.kimi.com/news/kimi-k3',
-      title: 'Kimi K3:智能的新前沿',
+      title: 'Kimi K3：智能的新前沿',
       date: '2026-07-17',
     })
-    const blog = parseKimiArticles(KIMI_BLOG_HTML)
-    // 头图卡与列表卡同 URL 去重;无日期卡(K4 预告)跳过
-    expect(blog).toHaveLength(9)
+    const blog = parseKimiArticles(KIMI_BLOG_HTML).entries
+    // 头图卡与列表卡同 URL 去重(20 卡 → 19)
+    expect(blog).toHaveLength(19)
     expect(blog.filter((a) => a.url === 'https://www.kimi.com/en/blog/kimi-k3')).toHaveLength(1)
-    expect(blog.some((a) => a.title.includes('K4'))).toBe(false)
     // 外链(研究卡片直链 GitHub/HF)保持绝对 URL 原样
-    expect(blog.at(-1)!.url).toBe('https://github.com/MoonshotAI/Kimi-VL')
+    expect(blog.at(-1)!.url).toBe('https://github.com/kvcache-ai/Mooncake/')
   })
 
   it('日期取 card-title 之后的首个 ISO 日期:头图 URL 里的上传日期(2026-08-11)不误作发布日', () => {
-    const news = parseKimiArticles(KIMI_NEWS_HTML)
+    const news = parseKimiArticles(KIMI_NEWS_HTML).entries
     // 07-27 文章配 08-11 头图(实抓口径)——若取窗口内首个日期会错记 2026-08-11
     expect(news.find((a) => a.url.endsWith('kimi-k3-open-source'))!.date).toBe('2026-07-27')
   })
 
   it('上游改版:无卡片锚点 → 空数组(pollOne 零条目口径)', () => {
-    expect(parseKimiArticles('<html>上游改版了</html>')).toEqual([])
+    expect(parseKimiArticles('<html>上游改版了</html>')).toEqual({ entries: [], skipped: [] })
+  })
+
+  it('无日期卡为结构排除不计;card-title 后日期回滚失败落意外跳过(ADR-0052)', () => {
+    // 结构排除:card-title 后无日期文本(实抓已知构成,宣传卡)
+    expect(parseKimiArticles(card('/x', '无日期宣传卡', null))).toEqual({ entries: [], skipped: [] })
+    // 意外跳过:日期文本形态合格但非实日
+    const r = parseKimiArticles(card('/x', '标题', '2026-13-45'))
+    expect(r.entries).toEqual([])
+    expect(r.skipped).toHaveLength(1)
+    expect(r.skipped[0]).toContain('2026-13-45')
   })
 
   it('标题归属:非模型文章(大使计划/Work 上新/PerceptionBench/Kimi-VL)不产事件', () => {
-    const news = parseKimiArticles(KIMI_NEWS_HTML)
+    const news = parseKimiArticles(KIMI_NEWS_HTML).entries
     expect(matchKimiEvent(news.find((a) => a.title.includes('大使计划'))!)).toBeNull()
     expect(matchKimiEvent(news.find((a) => a.title.includes('Work 上新'))!)).toBeNull()
-    const blog = parseKimiArticles(KIMI_BLOG_HTML)
+    const blog = parseKimiArticles(KIMI_BLOG_HTML).entries
     expect(matchKimiEvent(blog.find((a) => a.title === 'PerceptionBench')!)).toBeNull()
     expect(matchKimiEvent(blog.find((a) => a.title === 'Kimi-VL')!)).toBeNull()
     // 「Kimi K3 开放日」是 K3 的权重开放公告——归属 K3 本身(基线 weights_available 占同键)
@@ -1146,6 +1192,19 @@ describe('模型追踪:月之暗面档案服务(轮询/去重/陈旧,issues/06)'
     },
   })
 
+  it('全网常态基线:各家实抓口径 fixture 意外跳过全空(ADR-0052 不变量,评审补钉)', () => {
+    // fixture 日后随实抓刷新合入落在 skipped 的新形态时,此处翻红可归因——否则生产
+    // 每 6h 恒定 warn 正是 ADR 决策二点名的「常态噪音磨掉告警通道信誉」。
+    // OpenAI 例外不列:OPENAI_MD 特意混入 Non-date Heading 畸形段,skipped 恒 1(另有断言)。
+    expect(parseZhipuReleases(ZHIPU_MD).skipped).toEqual([])
+    expect(parseAnthropicReleases(ANTHROPIC_MD).skipped).toEqual([])
+    expect(parseXaiReleaseNotes(XAI_MD, 2026, 8).skipped).toEqual([])
+    expect(parseKimiArticles(KIMI_NEWS_HTML).skipped).toEqual([])
+    expect(parseKimiArticles(KIMI_BLOG_HTML).skipped).toEqual([])
+    expect(parseDeepSeekUpdates(DEEPSEEK_HTML).skipped).toEqual([])
+    expect(parseBailianReleases(QWEN_HTML).skipped).toEqual([])
+  })
+
   it('月暗轮询:基线已核验的公告不产重复动态;基线未覆盖的新文章(技术博客)自动入库 updated', async () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, kimiDeps())
@@ -1156,6 +1215,10 @@ describe('模型追踪:月之暗面档案服务(轮询/去重/陈旧,issues/06)'
     expect(k3!.events.map((e) => [e.kind, e.occurredOn]).sort()).toEqual([
       ['api_available', '2026-07-17'],
       ['updated', '2026-07-16'],
+      ['updated', '2026-08-28'], // 资讯页 08-28 法律行业卡(实抓快照),基线未占键自动入库。
+      // ⚠ 该卡是营销文《法律行业为什么都在用 Kimi K3?》,标题含「Kimi K3」即被 alias
+      // 归属为模型动态——营销文误归属是既有标题口径的灰色地带,鉴别特征(「行业」「为什么」)
+      // 属启发式猜测不立法,待归属规则票处理(评审记档,ADR-0052 附记)
       ['weights_available', '2026-07-27'],
     ])
     // 博客上的 K2.5/K2.6/K2-Thinking/K2/0905/Kimi-Audio 卡片全部被基线事件占键:
@@ -1164,7 +1227,9 @@ describe('模型追踪:月之暗面档案服务(轮询/去重/陈旧,issues/06)'
       ['kimi-k2.5', 1],
       ['kimi-k2.6', 1],
       ['kimi-k2-thinking', 2],
-      ['kimi-k2', 3],
+      // 4 ≠ 基线 3:上游 HF 用户名大小写漂移(moonshotai/MoonshotAI)致 0905 卡占键失效,
+      // 同公告双行——实抓快照暴露的真实线上现状,键归一(候选 3)根治,ADR-0052 记档
+      ['kimi-k2', 4],
       ['kimi-audio', 1],
     ] as const) {
       expect((await byId(svc, id))!.events).toHaveLength(n)
@@ -1214,7 +1279,7 @@ describe('模型追踪:月之暗面档案服务(轮询/去重/陈旧,issues/06)'
 
 describe('模型追踪:OpenAI changelog 解析(纯函数,issues/03)', () => {
   it('提取条目:月/日两级标题合成日期,类型行 Model: 字段逐段提取,正文首行为标题', () => {
-    const entries = parseOpenAIChangelog(OPENAI_MD)
+    const entries = parseOpenAIChangelog(OPENAI_MD).entries
     // 5 个类型行,但 Non-date Heading 后的条目无日期上下文 → 4 条
     expect(entries).toHaveLength(4)
     expect(entries[0]).toMatchObject({
@@ -1229,10 +1294,27 @@ describe('模型追踪:OpenAI changelog 解析(纯函数,issues/03)', () => {
     })
   })
 
-  it('空文返回空数组;非日期 ### 标题保守清空日期上下文(后续条目跳过)', () => {
-    expect(parseOpenAIChangelog('')).toEqual([])
-    const entries = parseOpenAIChangelog(OPENAI_MD)
-    expect(entries.at(-1)).toMatchObject({ date: '2026-07-06' }) // Non-date Heading 后的 gpt-image-2 条目未成为第 5 条
+  it('空文返回空数组;非日期 ### 标题保守清空日期上下文(后续条目跳过)且类型行落意外跳过(ADR-0052)', () => {
+    expect(parseOpenAIChangelog('')).toEqual({ entries: [], skipped: [] })
+    const r = parseOpenAIChangelog(OPENAI_MD)
+    expect(r.entries.at(-1)).toMatchObject({ date: '2026-07-06' }) // Non-date Heading 后的 gpt-image-2 条目未成为第 5 条
+    expect(r.skipped).toHaveLength(1) // 那条 gpt-image-2 类型行遇空日期上下文 → 意外跳过
+    expect(r.skipped[0]).toMatch(/^Update\b.*gpt-image-2/)
+  })
+
+  it('日标题月份词表 + 按月回滚(评审修正):同形非月份词与不存在日期清空上下文,不沿用旧月份错记', () => {
+    const md = [
+      '## September, 2026', '', '### Sep 30', '',
+      'Update: Model: gpt-real', '正文一', '', '### Foo 5', '',
+      'Update: Model: gpt-ghost', '', '### Sep 31', '',
+      'Update: Model: gpt-void', '',
+    ].join('\n')
+    const r = parseOpenAIChangelog(md)
+    expect(r.entries.map((e) => [e.date, e.models[0]])).toEqual([['2026-09-30', 'gpt-real']])
+    expect(r.skipped).toEqual([
+      expect.stringContaining('gpt-ghost'), // ### Foo 5:非月份词 → 上下文清空 → 类型行意外跳过
+      expect.stringContaining('gpt-void'), // ### Sep 31:9 月无 31 日 → 回滚失败同理
+    ])
   })
 
   it('归属解析:精确 alias 优先(gpt-5.2-codex 不被 gpt-5.2 认领),日期快照最长前缀归族', () => {
@@ -1247,7 +1329,7 @@ describe('模型追踪:OpenAI changelog 解析(纯函数,issues/03)', () => {
   })
 
   it('条目 → 事件:一表多模型各产一条、同键同锚点;无模型条目与基线外别名条目不产事件', () => {
-    const events = matchOpenAIEvents(parseOpenAIChangelog(OPENAI_MD))
+    const events = matchOpenAIEvents(parseOpenAIChangelog(OPENAI_MD).entries)
     expect(events.map((e) => e.officialId)).toEqual([
       'gpt-5.6-sol',
       'gpt-5.6-sol',
@@ -1403,7 +1485,7 @@ describe('模型追踪:OpenAI 档案服务(轮询/历史去重/厂家隔离,issu
 
 describe('模型追踪:DeepSeek Change Log 解析(纯函数;issues/07)', () => {
   it('提取日期段 h3 小节:日期/标题/锚点;页首非日期 h2 段(含其内 h3)整体跳过;实体还原', () => {
-    const sections = parseDeepSeekUpdates(DEEPSEEK_HTML)
+    const sections = parseDeepSeekUpdates(DEEPSEEK_HTML).entries
     expect(sections).toHaveLength(8)
     expect(sections[0]).toEqual({
       date: '2026-08-21',
@@ -1416,13 +1498,28 @@ describe('模型追踪:DeepSeek Change Log 解析(纯函数;issues/07)', () => {
     expect(merged.anchorUrl).toBe('https://api-docs.deepseek.com/updates/#deepseek-coder--deepseek-chat-upgraded-to-deepseek-v25-model')
   })
 
-  it('畸形日期段跳过,空文返回空数组', () => {
-    expect(parseDeepSeekUpdates('')).toEqual([])
-    expect(parseDeepSeekUpdates('<h2 id="x">Date: 2026-13-01</h2><h3 id="a">T</h3>')).toEqual([])
+  it('畸形日期段跳过,空文返回空数组;回滚失败与剥空标题落意外跳过,非日期段不计(ADR-0052)', () => {
+    expect(parseDeepSeekUpdates('')).toEqual({ entries: [], skipped: [] })
+    expect(parseDeepSeekUpdates('<h2>侧栏段</h2><h3>x</h3>')).toEqual({ entries: [], skipped: [] }) // 结构排除:无 Date: 前缀
+    const r = parseDeepSeekUpdates('<h2 id="x">Date: 2026-13-01</h2><h3 id="a">T</h3>')
+    expect(r.entries).toEqual([])
+    expect(r.skipped).toHaveLength(1)
+    expect(r.skipped[0]).toContain('Date: 2026-13-01')
+    const empty = parseDeepSeekUpdates('<h2>Date: 2026-01-01</h2><h3 id="a"><span/></h3>')
+    expect(empty.entries).toEqual([])
+    expect(empty.skipped).toHaveLength(1) // 意外跳过:h3 有 id 但标题剥完为空
+  })
+
+  it('未补零日期归一接受(评审修正):智谱/百炼同源漂移不再整段无声蒸发', () => {
+    const r = parseDeepSeekUpdates('<h2>Date: 2026-9-1</h2><h3 id="a">V4 发布</h3>')
+    expect(r.entries).toEqual([
+      { date: '2026-09-01', title: 'V4 发布', anchorUrl: expect.stringContaining('#a') },
+    ])
+    expect(r.skipped).toEqual([])
   })
 
   it('标题词边界归属:模型名小节归其行;家族段/别名标题段/非模型段跳过(正文提及不作证据)', () => {
-    const sections = parseDeepSeekUpdates(DEEPSEEK_HTML)
+    const sections = parseDeepSeekUpdates(DEEPSEEK_HTML).entries
     const byAnchor = (a: string) => sections.find((s) => s.anchorUrl.endsWith(a))!
     expect(matchDeepSeekEvent(byAnchor('deepseek-v4-pro-update'))).toEqual([
       {
@@ -1557,7 +1654,7 @@ describe('模型追踪:DeepSeek 基线与服务(issues/07)', () => {
 
 describe('模型追踪:百炼上下架表解析(纯函数;issues/09)', () => {
   it('只取首表:表头 th 行跳过、不补零日期归一、多 ID 切分、间距 span 剥除;hydration 拷贝表不解析', () => {
-    const rows = parseBailianReleases(QWEN_HTML)
+    const rows = parseBailianReleases(QWEN_HTML).entries
     expect(rows).toHaveLength(6)
     expect(rows[0]).toMatchObject({ date: '2026-08-24', modelIds: ['vidu/vidu-image-pro_reference2image'] })
     expect(rows[2]).toEqual({
@@ -1566,8 +1663,25 @@ describe('模型追踪:百炼上下架表解析(纯函数;issues/09)', () => {
       description: 'Qwen3.8-Max 是 2.4 万亿参数 MoE 旗舰模型编程与办公能力全面跃升',
     })
     expect(rows[3]!.modelIds).toEqual(['qwen3.7-flash', 'qwen3.7-flash-2026-07-15'])
-    expect(parseBailianReleases('')).toEqual([])
-    expect(parseBailianReleases('<html>无表格</html>')).toEqual([])
+    expect(parseBailianReleases('')).toEqual({ entries: [], skipped: [] })
+    expect(parseBailianReleases('<html>无表格</html>')).toEqual({ entries: [], skipped: [] })
+  })
+
+  it('表头行为结构排除;错列/日期校验失败/空模型格落意外跳过(ADR-0052)', () => {
+    // 结构排除:表头 <th> 行无 <td>,不计
+    expect(parseBailianReleases('<table><tr><th>时间</th><th>模型ID</th></tr></table>')).toEqual({ entries: [], skipped: [] })
+    // 意外跳过:有 <td> 但列数异常
+    const few = parseBailianReleases('<table><tr><td>x</td><td>2026-01-01</td></tr></table>')
+    expect(few.entries).toEqual([])
+    expect(few.skipped).toHaveLength(1)
+    // 意外跳过:日期列回滚失败
+    const badDate = parseBailianReleases('<table><tr><td>文本</td><td>2026-13-01</td><td>qwen-x</td><td>说明</td></tr></table>')
+    expect(badDate.entries).toEqual([])
+    expect(badDate.skipped).toHaveLength(1)
+    // 意外跳过:模型 ID 格剥完为空
+    const noIds = parseBailianReleases('<table><tr><td>文本</td><td>2026-01-01</td><td> </td><td>说明</td></tr></table>')
+    expect(noIds.entries).toEqual([])
+    expect(noIds.skipped).toHaveLength(1)
   })
 
   it('模型 ID 归属:精确优先、快照前缀归家族、别名与第三方托管天然不认领', () => {
@@ -1582,7 +1696,7 @@ describe('模型追踪:百炼上下架表解析(纯函数;issues/09)', () => {
   })
 
   it('表格行 → 事件:同格多 ID 命中同模型只产一条;第三方/别名行零事件;信源统一主发布源页', () => {
-    const hits = matchQwenEvents(parseBailianReleases(QWEN_HTML))
+    const hits = matchQwenEvents(parseBailianReleases(QWEN_HTML).entries)
     expect(hits).toHaveLength(3)
     expect(hits).toContainEqual({
       officialId: 'wan3.0-video-prime',

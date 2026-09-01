@@ -1,5 +1,5 @@
 import { DEEPSEEK_BASELINE, DEEPSEEK_UPDATES_URL } from '../deepseekBaseline'
-import { aliasIn, type MatchedHit, type ProviderDef } from './def'
+import { aliasIn, clipFragment, isRealIsoDate, type MatchedHit, type ParseResult, type ProviderDef } from './def'
 
 // ---- DeepSeek API Change Log(研究 §3:主发布源 HTML 无 RSS。解析器与匹配器随
 //  厂家 provider 文件走——issues/07 期间「随基线文件走」是并行接入防撞车的临时
@@ -21,14 +21,19 @@ export interface DeepSeekSection {
  * 还原 HTML 实体——实测 2024-09-05 节标题含 `&amp;`)。非日期 h2 段(页首/侧栏)与
  * 无 id 的 h3 跳过。
  */
-export function parseDeepSeekUpdates(html: string): DeepSeekSection[] {
+export function parseDeepSeekUpdates(html: string): ParseResult<DeepSeekSection> {
   const out: DeepSeekSection[] = []
+  const skipped: string[] = []
   for (const part of html.split(/<h2[^>]*>/).slice(1)) {
-    const m = /^Date: (\d{4})-(\d{2})-(\d{2})/.exec(part)
-    if (!m) continue
+    // 未补零日期归一接受(智谱/百炼上游实测产未补零形态,同源漂移不该在此蒸发——评审修正)
+    const m = /^Date: (\d{4})-(\d{1,2})-(\d{1,2})/.exec(part)
+    if (!m) continue // 结构排除:非日期 h2 段(页首/侧栏)
     const [, y, mo, d] = m
-    const date = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)))
-    if (date.getUTCMonth() !== Number(mo) - 1 || date.getUTCDate() !== Number(d)) continue
+    const date = `${y}-${mo!.padStart(2, '0')}-${d!.padStart(2, '0')}`
+    if (!isRealIsoDate(date)) {
+      skipped.push(clipFragment(part.trim())) // 意外跳过:Date: 日期回滚校验失败
+      continue
+    }
     for (const h3 of part.matchAll(/<h3[^>]*\bid="([^"]+)"[^>]*>([\s\S]*?)<\/h3>/g)) {
       const title = h3[2]!
         .replace(/<[^>]+>/g, '')
@@ -38,11 +43,14 @@ export function parseDeepSeekUpdates(html: string): DeepSeekSection[] {
         .replace(/&gt;/g, '>')
         .replace(/&quot;/g, '"')
         .trim()
-      if (title === '') continue
-      out.push({ date: `${y}-${mo}-${d}`, title, anchorUrl: `${DEEPSEEK_UPDATES_URL}#${h3[1]}` })
+      if (title === '') {
+        skipped.push(clipFragment(h3[0]!)) // 意外跳过:h3 有 id 但标题剥完为空
+        continue
+      }
+      out.push({ date, title, anchorUrl: `${DEEPSEEK_UPDATES_URL}#${h3[1]}` })
     }
   }
-  return out
+  return { entries: out, skipped }
 }
 
 /**

@@ -1,6 +1,6 @@
 import type { ModelEvent } from 'chrome-tab-shared'
 import { ZHIPU_BASELINE } from '../zhipuBaseline'
-import { aliasIn, slugIn, type ProviderDef } from './def'
+import { aliasIn, clipFragment, type ParseResult, type ProviderDef, slugIn } from './def'
 
 // ---- 智谱新品发布页(研究 §3:主发布源;发布页 Markdown 的 `<Update>` 块)----
 
@@ -26,12 +26,19 @@ export function normalizeZhipuDate(raw: string): string | null {
 
 /** 智谱新品发布 Markdown → 更新块数组。结构化 `<Update>` 块逐个提取 label/description/块内首个链接;
  *  双 lookahead 锚定两属性、**次序无关**(上游调整属性序不致静默清零);畸形块跳过。 */
-export function parseZhipuReleases(md: string): ZhipuUpdate[] {
+export function parseZhipuReleases(md: string): ParseResult<ZhipuUpdate> {
   const out: ZhipuUpdate[] = []
+  const skipped: string[] = []
   const blockRe = /<Update\b(?=[^>]*label="([^"]*)")(?=[^>]*description="([^"]*)")[^>]*>([\s\S]*?)<\/Update>/g
-  for (const m of md.matchAll(blockRe)) {
+  const blocks = [...md.matchAll(blockRe)]
+  for (const m of blocks) {
     const date = normalizeZhipuDate(m[1]!)
-    if (!date) continue
+    if (!date) {
+      // 片段用已提取字段(label 前置):畸形 label 正是排障要看的内容,原始块截断会被
+      // 前置长 description 推出 80 字符窗口(属性调序是双 lookahead 声称防御的动作)
+      skipped.push(clipFragment(`${m[1]} ${m[2]}`)) // 意外跳过:块结构匹配但日期 label 畸形
+      continue
+    }
     // 块内首个 markdown 链接([**名称**](路径));相对路径(/cn/…)归一到 docs.bigmodel.cn
     const link = /\[[^\]]*\]\(([^)\s]+)\)/.exec(m[3]!)?.[1]
     const docUrl = link
@@ -41,7 +48,14 @@ export function parseZhipuReleases(md: string): ZhipuUpdate[] {
       : null
     out.push({ date, description: m[2]!, docUrl })
   }
-  return out
+  // 对账(评审修正):blockRe 双 lookahead 要求 label+description 同时在场——缺一或
+  // 改名的块 matchAll 不到,其余块照常产出故零条目通道也不触发,发布内容整体不可见。
+  // 成功匹配块的开标签起点 = blockRe match index,不在其中的 <Update 开标签即不可见块。
+  const visible = new Set(blocks.map((m) => m.index))
+  for (const tag of md.matchAll(/<Update\b[^>]*>/g)) {
+    if (!visible.has(tag.index)) skipped.push(clipFragment(tag[0])) // 意外跳过:属性缺失或改名
+  }
+  return { entries: out, skipped }
 }
 
 /**

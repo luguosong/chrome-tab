@@ -1,6 +1,6 @@
 import type { ModelEvent } from 'chrome-tab-shared'
 import { ANTHROPIC_BASELINE } from '../anthropicBaseline'
-import { aliasIn, slugIn, MONTHS, type ProviderDef } from './def'
+import { aliasIn, clipFragment, MONTHS, type ParseResult, type ProviderDef, slugIn } from './def'
 
 // ---- Anthropic release notes(研究 §3:主发布源;页面混有 SDK/平台功能条目,
 //  须按明确模型名/ID 过滤——与智谱同用双条件归属)----
@@ -30,12 +30,16 @@ export function normalizeAnthropicDate(raw: string): string | null {
 
 /** Anthropic release notes Markdown → 条目数组。按 `### 日期标题` 分段(段名即信源日期),
  *  段内行首 `* ` 逐条提取文本与 `[label](url)` 链接;畸形日期段与空段跳过。 */
-export function parseAnthropicReleases(md: string): AnthropicNote[] {
+export function parseAnthropicReleases(md: string): ParseResult<AnthropicNote> {
   const out: AnthropicNote[] = []
+  const skipped: string[] = []
   const headings = [...md.matchAll(/^### (.+)$/gm)]
   for (let i = 0; i < headings.length; i++) {
     const date = normalizeAnthropicDate(headings[i]![1]!)
-    if (date === null) continue
+    if (date === null) {
+      skipped.push(clipFragment(headings[i]![0]!)) // 意外跳过:### 段标题非日期形态
+      continue
+    }
     const body = md.slice(headings[i]!.index! + headings[i]![0].length, headings[i + 1]?.index)
     for (const line of body.split('\n')) {
       if (!line.startsWith('* ')) continue
@@ -44,7 +48,7 @@ export function parseAnthropicReleases(md: string): AnthropicNote[] {
       out.push({ date, text, links })
     }
   }
-  return out
+  return { entries: out, skipped }
 }
 
 /** 条目标题:首个英文句子的截断形态(release notes 条目无短标题,首句即最接近的概述)。 */

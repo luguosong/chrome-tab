@@ -1,5 +1,5 @@
 import { QWEN_BASELINE, QWEN_RELEASES_URL } from '../qwenBaseline'
-import { type MatchedHit, type ProviderDef, residualIdClues } from './def'
+import { clipFragment, type MatchedHit, type ParseResult, type ProviderDef, residualIdClues } from './def'
 
 // ---- 阿里通义:百炼「模型上下架与更新」(研究 §3:主发布源 SSR 纯表格。解析器
 //  原随 qwenBaseline 走(并行接入防撞车约定),ADR-0038 起归一为厂家 provider 文件)----
@@ -43,20 +43,34 @@ function normalizeBailianDate(raw: string): string | null {
  * 表 × 2 拷贝 SSR+hydration,首表即全量北京区)。表头行为 `<th>` 无 `<td>` 自然跳过;
  * 列序固定 模型类型|时间|模型ID|功能说明,时间列过不了日期校验的行(结构变化)跳过。
  */
-export function parseBailianReleases(html: string): BailianRow[] {
+export function parseBailianReleases(html: string): ParseResult<BailianRow> {
   const table = /<table[^>]*>([\s\S]*?)<\/table>/.exec(html)?.[1]
-  if (table === undefined) return []
+  if (table === undefined) return { entries: [], skipped: [] }
   const out: BailianRow[] = []
+  const skipped: string[] = []
   for (const tr of table.split(/<tr[^>]*>/).slice(1)) {
     const cells = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => cellText(m[1]!))
-    if (cells.length < 4) continue
+    if (cells.length === 0) continue // 结构排除:表头 <th> 行(无 <td>)
+    // 片段用归一 cells 拼接而非原始 tr:live 页首格含 help-letter-space span,原始 80
+    // 字符截断会吃掉日期与模型 ID 格(评审修正)——归一文本四列全可见
+    const frag = clipFragment(cells.join(' | '))
+    if (cells.length < 4) {
+      skipped.push(frag) // 意外跳过:数据行列数异常(表头为 0 格,此处必为错列)
+      continue
+    }
     const date = normalizeBailianDate(cells[1]!)
-    if (date === null) continue
+    if (date === null) {
+      skipped.push(frag) // 意外跳过:时间列日期校验失败
+      continue
+    }
     const modelIds = cells[2]!.split(' ').filter(Boolean)
-    if (modelIds.length === 0) continue
+    if (modelIds.length === 0) {
+      skipped.push(frag) // 意外跳过:模型 ID 格为空
+      continue
+    }
     out.push({ date, modelIds, description: cells[3]! })
   }
-  return out
+  return { entries: out, skipped }
 }
 
 /**

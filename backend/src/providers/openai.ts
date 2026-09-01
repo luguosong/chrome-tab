@@ -1,5 +1,5 @@
 import { OPENAI_BASELINE, OPENAI_CHANGELOG_PAGE_URL, openaiChangelogAnchor } from '../openaiBaseline'
-import { MONTHS, type MatchedHit, type ProviderDef, residualIdClues } from './def'
+import { clipFragment, isRealIsoDate, MONTHS, type MatchedHit, type ParseResult, type ProviderDef, residualIdClues } from './def'
 
 // ---- OpenAI API changelog(研究 §3:主发布源。与别家不同,条目类型行自带
 //  `Model: id` 结构化字段,归属无需双条件猜测——精确 ID 匹配 + 最长前缀快照归族)----
@@ -22,8 +22,15 @@ export interface OpenAIChangelogEntry {
 /** changelog Markdown → 条目数组。月标题定年月、日标题定日;类型行(Feature/Update/…
  *  开头)起一条,正文首行为标题;无日期上下文或畸形日期下的条目跳过;不认识的
  *  `##`/`###` 标题保守清空日期上下文(实测 156 个日标题全部规整,此分支为防线)。 */
-export function parseOpenAIChangelog(md: string): OpenAIChangelogEntry[] {
+/** 日标题月份缩写词表(全名前三字母;实抓口径 `### Aug 21`,fixture 同证——日标题
+ *  是「月缩写 日」形态,与上层 `## August, 2026` 同月):`### Foo 5` 这类同形非月份
+ *  词不再被当日标题(评审修正:原只查 1–31 范围,任意三字母词+数字都沿用旧月份静默
+ *  错记日期)。 */
+const MONTH_ABBREVS = new Set(Object.keys(MONTHS).map((n) => n.slice(0, 3)))
+
+export function parseOpenAIChangelog(md: string): ParseResult<OpenAIChangelogEntry> {
   const out: OpenAIChangelogEntry[] = []
+  const skipped: string[] = []
   let year: string | null = null
   let month: string | null = null
   let day: string | null = null
@@ -44,8 +51,13 @@ export function parseOpenAIChangelog(md: string): OpenAIChangelogEntry[] {
     if (line.startsWith('### ')) {
       flush()
       const dayHeading = /^### ([A-Z][a-z]{2}) (\d{1,2})\s*$/.exec(line)
-      const d = dayHeading !== null ? Number(dayHeading[2]) : NaN
-      day = month !== null && d >= 1 && d <= 31 ? String(d).padStart(2, '0') : null
+      // 词表校验 + 按月回滚(isRealIsoDate 覆盖 1–31 范围):`### Foo 5` 与 `### Sep 31`(9 月
+      // 无 31 日)都清空日期上下文——其下类型行落意外跳过,不再沿用旧月份静默错记日期
+      const d = dayHeading !== null ? String(Number(dayHeading[2])).padStart(2, '0') : ''
+      day =
+        dayHeading !== null && MONTH_ABBREVS.has(dayHeading[1]!) && year !== null && month !== null
+          ? (isRealIsoDate(`${year}-${month}-${d}`) ? d : null)
+          : null
       continue
     }
     if (/^(Feature|Update|Announcement|Fix|Deprecation|Breaking change)\b/.test(line)) {
@@ -57,13 +69,15 @@ export function parseOpenAIChangelog(md: string): OpenAIChangelogEntry[] {
           models: [...line.matchAll(/Model: ([a-zA-Z0-9._-]+)/g)].map((m) => m[1]!),
           firstLine: '',
         }
+      } else {
+        skipped.push(clipFragment(line.trim())) // 意外跳过:类型行遇空日期上下文
       }
       continue
     }
     if (entry !== null && entry.firstLine === '' && line.trim() !== '') entry.firstLine = line.trim()
   }
   flush()
-  return out
+  return { entries: out, skipped }
 }
 
 /**
