@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
-import { ICON_SCALE, faviconPx, ghostWidth3Cols, labelBlockPx, LABEL_LINE_HEIGHT, tileFont, type TileFontTier } from '../lib/iconLayout'
+import { ICON_SCALE, faviconPx, LABEL_LINE_HEIGHT, tileFont, type TileFontTier } from '../lib/iconLayout'
 
 /**
  * 「上块下字」外壳(ADR-0016 注记 b/c/d 的结构,e 起收拢为本深 module):
@@ -46,7 +46,6 @@ function TileFrame({
   favPx,
   padPx = 0,
   bare = false,
-  fill = false,
   overlay,
   className = '',
   children,
@@ -55,56 +54,36 @@ function TileFrame({
   padPx?: number
   /** 裸块(ADR-0015 注记 2026-08-23c,即回归 ADR-0013):省略玻璃材质,几何骨架照旧。 */
   bare?: boolean
-  /** 跨格撑满块(天气 3×1):aspect-square/bound 钳制让位于画格几何(同 BigTile 思路,
-   *  但仍是「上块下字」外壳——名称行/字号档照旧);无 hover 缩放(块已撑满画格)。 */
-  fill?: boolean
   overlay: boolean
   className?: string
   children: ReactNode
 }) {
   const bound = favPx + padPx * 2
-  const { labelVisible, labelSize } = useLayoutSettings()
   return (
     <div
       className={
         // flex 居中:块内主体在块内居中;nav favicon 与分组预览是 w-full/h-full
         // 撑满式,不受影响。Tile 固定追加块内纵排 + inline-size 容器(字号 cqw 钳制)。
         // bare 时不挂 glass-soft:hover 提亮随之消失,反馈只剩下方 hover 缩放(0013 语言)。
-        // 圆角:单格 22% 近似 squircle(正方形上 x/y 半径相等);fill 跨格块是宽扁形,
-        // 百分比圆角会椭圆化(角与直边衔接处曲率突变,观感「有棱角」),改固定圆角,
-        // 与 BigTile(3×2 跨格先例)rounded-3xl 同口径。
-        (bare ? '' : 'glass-soft ' + (fill ? 'rounded-3xl ' : 'rounded-[22%] ')) +
+        // 圆角:22% 近似 squircle(正方形上 x/y 半径相等)。
+        (bare ? '' : 'glass-soft rounded-[22%] ') +
         'flex items-center justify-center ' +
         (!overlay
-          ? fill
-            ? // fill:撑满画格(宽随 span 格数,高 = 行高 − 名称行),不缩放
-              'flex-1 min-h-0 w-full '
-            : 'flex-1 min-h-0 aspect-square transition-transform hover:scale-105 active:scale-95 '
+          ? 'flex-1 min-h-0 aspect-square transition-transform hover:scale-105 active:scale-95 '
           : '') +
         className
       }
       style={
         overlay
-          ? fill
-            ? // fill 幽灵在画格外,按 3×1 近似估形(宽口径同 BigTile;高含名称行)。
-              // ponytail: 列数写死 3——出现其他 fill 跨度再参数化。
-              {
-                width: ghostWidth3Cols(favPx),
-                height: favPx + labelBlockPx(labelVisible, labelSize),
-                padding: padPx,
-              }
-            : { width: bound, height: bound, padding: padPx }
-          : fill
-            ? // fill:撑满画格,无钳制(画格几何即块几何)
-              { padding: padPx }
-            : {
-                // maxWidth 取 min(推导值, 画格宽):行高改由图标几何推导(iconCellGeometry)
-                // 后轨道宽是防重叠的硬上限——极端窄轨(如 gridWidth 最小 + 大间距)时块
-                // 宁可收缩也不侵入相邻画格;min() 是兜底,常规由几何层先钳。
-                maxWidth: `min(${bound}px, 100%)`,
-                maxHeight: bound,
-                padding: padPx,
-              }
+          ? { width: bound, height: bound, padding: padPx }
+          : {
+              // maxWidth 取 min(推导值, 画格宽):行高改由图标几何推导(iconCellGeometry)
+              // 后轨道宽是防重叠的硬上限——极端窄轨(如 gridWidth 最小 + 大间距)时块
+              // 宁可收缩也不侵入相邻画格;min() 是兜底,常规由几何层先钳。
+              maxWidth: `min(${bound}px, 100%)`,
+              maxHeight: bound,
+              padding: padPx,
+            }
       }
     >
       {children}
@@ -148,7 +127,6 @@ export default function Tile({
   overlay = false,
   padPx = 0,
   bare = false,
-  fill = false,
   labelColor,
   children,
 }: {
@@ -158,8 +136,6 @@ export default function Tile({
   padPx?: number
   /** 裸块:不渲染玻璃底板(仅 nav,ADR-0015 注记 2026-08-23c);几何/名称行照常。 */
   bare?: boolean
-  /** 跨格撑满块(天气 3×1):块撑满画格,名称行照旧外置;与 bare 正交。 */
-  fill?: boolean
   /** 名称行颜色覆盖(默认随「布局设置」;见 IconLabel colorOverride)。 */
   labelColor?: string
   children: ReactNode
@@ -170,7 +146,6 @@ export default function Tile({
         favPx={faviconPx(ICON_SCALE)}
         padPx={padPx}
         bare={bare}
-        fill={fill}
         overlay={overlay}
         className="flex-col gap-[4%] [container-type:inline-size]"
       >

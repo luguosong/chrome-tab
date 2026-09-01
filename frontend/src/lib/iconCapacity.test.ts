@@ -46,14 +46,14 @@ describe('cellsUsed — 顶层图标格数求和', () => {
     expect(cellsUsed([{ parentId: null, type: 'aihot' as const }])).toBe(6)
   })
 
-  it('混合:2 个 1 格 + weather 3 格 + aihot 6 格 = 11 格', () => {
+  it('混合:3 个 1 格(weather 收回 1×1)+ aihot 6 格 = 9 格', () => {
     const icons = [
       { parentId: null, type: 'nav' as const },
       { parentId: null, type: 'stock' as const },
       { parentId: null, type: 'weather' as const },
       { parentId: null, type: 'aihot' as const },
     ]
-    expect(cellsUsed(icons)).toBe(11)
+    expect(cellsUsed(icons)).toBe(9)
   })
 })
 

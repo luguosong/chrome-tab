@@ -142,26 +142,34 @@ export function readWeatherLocation(data: Record<string, unknown> | null): Weath
 
 /**
  * 小时条目显示时刻:ISO 串直取 HH:mm,不做时区换算——fxTime 即城市当地时间
- * (网格 3×1 小时序列与详情 Modal 共用的唯一口径)。
+ * (详情 Modal 24h 序列的口径)。
  */
 export const hourHM = (fxTime: string): string => fxTime?.slice(11, 16)
 
+/** CAP 严重性权重(和风 severity 取值):等级排序用,未知值给最低——宁显示不漏。 */
+const SEVERITY_RANK: Record<string, number> = { Minor: 1, Moderate: 2, Severe: 3, Extreme: 4 }
+
+/** 预警缺 color 时的等级标准色(和风文档口径);与 Modal AlertBody 兜底红同源。 */
+const SEVERITY_COLOR: Record<string, string> = {
+  Minor: 'rgb(0,153,255)',
+  Moderate: 'rgb(255,170,0)',
+  Severe: 'rgb(255,102,0)',
+  Extreme: 'rgb(255,0,0)',
+}
+
 /**
- * 天气 3×1 图标的小时序列窗口(见 CONTEXT.md「天气」):丢弃 fxTime 早于当前整点的
- * 条目(后端 hourly 缓存 30min,过整点后首位可能滞留上一小时),取前 4 条(当前
- * 小时 + 3 个未来)——过滤后首位即当前小时,「现在」标记天然居首。比较按绝对时刻
- * (fxTime 带城市时区偏移,与浏览器 now 对齐)。空/非法 fxTime 跳过;hourly 缺失
- * 或全被过滤 → 空窗(调用方降级实况摘要)。
+ * 1×1 天气图标右上角的预警角标(见 CONTEXT.md「天气」):取 severity 最高的一条
+ * (多条预警并存时按最高等级示警),color = 预警等级色(color 字段直用,缺失按
+ * severity 查标准色,全空兜底红);title = headline(悬停看预警名,全文归详情
+ * Modal)。无预警返回 null。纯函数,Vitest 直测。
  */
-export function hourlyWindow(hourly: WeatherHour[] | undefined, now: Date): WeatherHour[] {
-  if (!hourly?.length) return []
-  const floor = new Date(now)
-  floor.setMinutes(0, 0, 0)
-  const floorMs = floor.getTime()
-  return hourly
-    .filter((h) => {
-      const t = Date.parse(h.fxTime)
-      return !Number.isNaN(t) && t >= floorMs
-    })
-    .slice(0, 4)
+export function alertBadge(alerts: WeatherAlert[]): { color: string; title: string } | null {
+  if (!alerts.length) return null
+  const top = alerts.reduce((a, b) =>
+    (SEVERITY_RANK[b.severity ?? ''] ?? 1) > (SEVERITY_RANK[a.severity ?? ''] ?? 1) ? b : a,
+  )
+  const color = top.color
+    ? `rgb(${top.color.red},${top.color.green},${top.color.blue})`
+    : SEVERITY_COLOR[top.severity ?? ''] ?? 'rgb(255,80,80)'
+  return { color, title: top.headline || top.eventType || '灾害预警' }
 }

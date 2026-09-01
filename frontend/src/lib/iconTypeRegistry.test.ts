@@ -91,18 +91,17 @@ describe('AI 热点类型 aihot(单例,CONTEXT.md「AI 热点」)', () => {
     expect(get('aihot')?.singleton).toBe(true)
   })
 
-  it('声明跨格 size(ADR-0021):aihot/changelog/todo 3×2,weather 3×1(首个非 3×2),其余不声明', () => {
+  it('声明跨格 size(ADR-0021):aihot/changelog/todo 3×2,其余不声明(weather 曾 3×1,2026-09-01 收回 1×1)', () => {
     expect(get('aihot')?.size).toEqual({ w: 3, h: 2 })
     expect(get('changelog')?.size).toEqual({ w: 3, h: 2 })
     expect(get('todo')?.size).toEqual({ w: 3, h: 2 })
-    expect(get('weather')?.size).toEqual({ w: 3, h: 1 })
-    for (const t of ['nav', 'stock', 'group'] as const) {
+    for (const t of ['nav', 'stock', 'weather', 'group'] as const) {
       expect(get(t)?.size).toBeUndefined()
     }
   })
 
-  it('iconCells:weather 3×1 占 3 格', () => {
-    expect(iconCells('weather')).toBe(3)
+  it('iconCells:未声明 size 的类型占 1 格(weather 收回 1×1 后)', () => {
+    expect(iconCells('weather')).toBe(1)
   })
 
   it('单例:不存在时允许,已存在时拒绝(跨页全局判断)', () => {

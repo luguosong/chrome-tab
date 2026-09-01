@@ -85,15 +85,14 @@ const REGISTRY: Record<IconTypeId, IconTypeDefinition> = {
   },
 
   /** 天气:扩展类型,非单例,data={location:{name,adm1,adm2,lat,lon}}。取数走后端代理(ADR-0009),详情=Modal(点块打开)。
-   *  网格 3×1 跨格(首个非 3×2 跨格尺寸):块内小时序列(当前小时居首高亮 + 3 个未来
-   *  小时,见 WeatherIconBody);无滚动主体,不入 BigTile「更多」标头范式。多实例 →
-   *  取数在 IconDataContext 集中批量。 */
+   *  1×1 普通占格(曾 3×1 跨格,2026-09-01 收回单格):块内实况摘要(状况图标 +
+   *  温度),存在灾害预警时右上角等级色警示点(见 WeatherIconBody);无滚动主体,
+   *  不入 BigTile「更多」标头范式。多实例 → 取数在 IconDataContext 集中批量。 */
   weather: {
     id: 'weather',
     label: '天气',
     kind: 'extension',
     singleton: false,
-    size: { w: 3, h: 1 },
     editor: [{ name: 'location', label: '城市', placeholder: '搜索城市' }],
   },
 
