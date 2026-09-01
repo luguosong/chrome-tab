@@ -38,7 +38,9 @@ function IconLabel({ colorOverride, children }: { colorOverride?: string; childr
  * 块边 = min(推导值, 画格可用高度)——maxWidth/maxHeight 双上限 + aspect-square 与
  * favicon 时代的收缩机制同款(同档位画格等高,收缩全体一致);overlay 幽灵无画格约束
  * (shrink-wrap),固定推导值。hover/active 缩放作用于**整块**,提亮由 .glass-soft
- * 自身规则承担(ADR-0012)。
+ * 自身规则承担(ADR-0012)。hover 幅度 105(2026-09-01 动效审计,ADR-0013 注记):
+ * 110 的立法语境是 nav 裸 favicon(缩放为唯一反馈),Tile 收拢后延伸到玻璃块与
+ * 提亮叠成双反馈,高频 hover 面降半档;hover→active 突跳随之 15%→10%。
  */
 function TileFrame({
   favPx,
@@ -77,7 +79,7 @@ function TileFrame({
           ? fill
             ? // fill:撑满画格(宽随 span 格数,高 = 行高 − 名称行),不缩放
               'flex-1 min-h-0 w-full '
-            : 'flex-1 min-h-0 aspect-square transition-transform hover:scale-110 active:scale-95 '
+            : 'flex-1 min-h-0 aspect-square transition-transform hover:scale-105 active:scale-95 '
           : '') +
         className
       }

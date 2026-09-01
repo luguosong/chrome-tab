@@ -8,3 +8,7 @@ nav(网站链接)图标不再包 soft 档玻璃 squircle 底板,favicon 直接�
 
 - **保留底板(ADR-0012 原案)**:glass-on-glass 层级统一,但观感偏重;L0 页板雾化已兜底可读性,再叠一层理由不足。
 - **hover 反馈用提亮/光晕**:提亮(brightness)对位图 favicon 效果因图而异,光晕装饰性与全局克制风格不符;缩放反馈区域精准(不动名称文字)且 transform 不触发重排。
+
+## 注记(2026-09-01):hover 幅度 110 → 105
+
+`hover:scale-110` 的立法语境是 nav 裸 favicon——缩放是**唯一** hover 反馈通道,10% 有理由。Tile 深 module 收拢(ADR-0016 注记 e)后这行类名延伸到所有非裸玻璃块:玻璃块已有 `.glass-soft:hover` 提亮(ADR-0012),叠成双反馈,且 10% 幅度对图标网格这一全应用最高频 hover 面(光标扫过网格沿途逐块放大-还原)未经独立评估。动效审计(emil-design-eng 标尺)裁:**存在性保留**(缩放仍是图标层 hover 语言,dwell `scale-[1.15]` 阶梯不变),幅度降半档至 `hover:scale-105`;hover→active 突跳随之 15% → 10%。nav 裸 favicon 同幅下调保持全类型一致,而非 nav 单独留 110 造成同面双档。

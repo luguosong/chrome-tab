@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTodo } from '../hooks/useTodo'
 import { useHoverGrace } from '../hooks/useHoverGrace'
+import { EXIT_MS } from '../hooks/useExitClose'
 import { ICON_SCALE, tileFont } from '../lib/iconLayout'
 import type { Icon } from '../lib/types'
 import type { TodoTask } from '../lib/todo'
@@ -71,6 +72,21 @@ export default function TodoIconBody({
   // (任务 + 行盒 + 定位几何),随 hovering 一体持有。卡 fixed 挂 BigTile 外
   // (玻璃 backdrop-filter 会钳 fixed 后代,行内 absolute 又会被列表 overflow 裁切)。
   const { hovering: peek, floatingRef, enter, leave, stay, close } = useHoverGrace<Peek>(PEEK_MOVE_GATE)
+  // 退场快照(对称路径,2026-09-01 动效审计):peek 清空沿全在状态机内部(宽限到期/
+  // 滚动/轮询/切页),没有可拦的回调,故在渲染层保留旧快照 EXIT_MS 播 pop-out 再卸载
+  // ——useExitClose 协议的快照变体。宽限期内逐行横移是 peek 直接换引用,不触发退场、
+  // 动画类恒定不重播(可中断);reduce 下不播退场类,快照只会让卡静止挂 200ms,跳过
+  const [exiting, setExiting] = useState<Peek | null>(null)
+  const prevPeekRef = useRef<Peek | null>(null)
+  useEffect(() => {
+    const prev = prevPeekRef.current
+    prevPeekRef.current = peek
+    if (peek || !prev) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    setExiting(prev)
+    const t = window.setTimeout(() => setExiting(null), EXIT_MS)
+    return () => window.clearTimeout(t)
+  }, [peek])
   // 轮询刷新会重建行 DOM(元素卸载不触发 mouseleave),快览可能挂死——数据变即收
   useEffect(() => {
     close()
@@ -81,6 +97,9 @@ export default function TodoIconBody({
   useEffect(() => {
     close()
   }, [active, close])
+
+  // 渲染位:活卡 or 退场快照(局部量让 JSX 内的 TS 非空收窄成立)
+  const peekShown = peek ?? exiting
 
   return (
     // 二级详情与快览卡都挂 BigTile 外:glass-soft 的 backdrop-filter 会成为 fixed
@@ -135,19 +154,29 @@ export default function TodoIconBody({
       </BigTile>
       {/* 快览卡:详情面板第三形态(同 TodoDetailPanel),非模态、Esc/焦点不接管;
           键盘与触屏走点行弹二级对话框的等价路径。createPortal 出网格项——
-          Tile 的 hover:scale-110 是 transform 祖先,会钳 fixed 后代的定位
-          (快览要求指针停在行上,scale 恒在,不像二级对话框有遮罩接管后自愈) */}
-      {peek &&
+          Tile 的 hover:scale-105 是 transform 祖先,会钳 fixed 后代的定位
+          (快览要求指针停在行上,scale 恒在,不像二级对话框有遮罩接管后自愈)。
+          入场 pop-in(玻璃面板 scale-only 范式,fade 会切 blur 采样闪失)+ 退场快照
+          pop-out,同 ModalShell 语汇 */}
+      {peekShown &&
         !detail &&
         createPortal(
           <div
             ref={floatingRef}
             onMouseEnter={stay}
             onMouseLeave={() => peek && leave(peek.rowRect)}
-            style={{ left: peek.left, top: peek.top, maxHeight: peek.maxH, width: PEEK_W }}
-            className="fixed z-[60] glass-panel glass-panel-readable rounded-2xl p-4 flex flex-col animate-fade-in"
+            style={{
+              left: peekShown.left,
+              top: peekShown.top,
+              maxHeight: peekShown.maxH,
+              width: PEEK_W,
+            }}
+            className={
+              'fixed z-[60] glass-panel glass-panel-readable rounded-2xl p-4 flex flex-col ' +
+              (peek ? 'animate-pop-in' : 'animate-pop-out')
+            }
           >
-            <TodoDetailPanel task={peek.task} />
+            <TodoDetailPanel task={peekShown.task} />
           </div>,
           document.body,
         )}

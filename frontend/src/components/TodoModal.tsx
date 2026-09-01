@@ -136,7 +136,7 @@ export default function TodoModal({ onClose }: { onClose: () => void }) {
         width={selected ? '3xl' : 'lg'}
         scroll={false}
         className={
-          'p-6 max-h-[80vh] modal-scroll transition-[max-width] duration-300 ' +
+          'p-6 max-h-[80vh] modal-scroll transition-[max-width] duration-300 motion-reduce:transition-none ' +
           // 分栏时加宽一档、整体滚动让位给左右列各自滚动;列表态纵向滚动
           (selected ? 'overflow-hidden flex flex-col' : 'overflow-y-auto')
         }
@@ -229,7 +229,7 @@ function TodoRow({
       onClick={onOpen}
       className={
         'group rounded-xl px-3 py-2.5 transition flex items-center gap-3 cursor-pointer ' +
-        (selected ? 'bg-white/15' : 'hover:bg-white/10')
+        (selected ? 'bg-white/15' : 'hover:bg-white/10 active:bg-white/20')
       }
     >
       <button

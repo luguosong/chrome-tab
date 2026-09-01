@@ -225,7 +225,7 @@ function Chip({
         'shrink-0 rounded-full border px-2.5 py-0.5 text-meta transition inline-flex items-center gap-1 ' +
         (active
           ? 'border-white/25 bg-white/15 text-white/90'
-          : 'border-white/15 text-white/60 hover:border-white/30 hover:text-white/85')
+          : 'border-white/15 text-white/60 hover:border-white/30 hover:text-white/85 active:border-white/40')
       }
     >
       {color && (

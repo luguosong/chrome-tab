@@ -67,7 +67,7 @@ export default function AiHotModal({ icon, onClose }: { icon: Icon; onClose: () 
           {topics.map((t) => (
             <li
               key={t.rank}
-              className="rounded-xl px-3 py-2.5 hover:bg-white/10 transition flex gap-3"
+              className="rounded-xl px-3 py-2.5 hover:bg-white/10 active:bg-white/20 transition flex gap-3"
             >
               <span className="font-mono text-accent text-sm w-5 shrink-0 text-right self-start mt-0.5">
                 {t.rank}
@@ -133,7 +133,7 @@ function ModelPicksPanel() {
     >
       <ul className="space-y-1">
         {picks.map((p) => (
-          <li key={p.id} className="rounded-xl px-3 py-2.5 hover:bg-white/10 transition">
+          <li key={p.id} className="rounded-xl px-3 py-2.5 hover:bg-white/10 active:bg-white/20 transition">
             {p.aihotUrl ? (
               <a
                 href={p.aihotUrl}
@@ -205,7 +205,7 @@ function DailyPanel() {
             <div className="text-xs text-accent/80 mt-3 first:mt-0 mb-1">{s.label}</div>
             <ul className="space-y-1">
               {s.items.map((it, ii) => (
-                <li key={ii} className="rounded-xl px-3 py-2.5 hover:bg-white/10 transition">
+                <li key={ii} className="rounded-xl px-3 py-2.5 hover:bg-white/10 active:bg-white/20 transition">
                   {it.aihotUrl ? (
                     <a
                       href={it.aihotUrl}

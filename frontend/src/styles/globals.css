@@ -180,6 +180,14 @@ code {
   .glass-segment-thumb {
     transition: none !important;
   }
+  /* Tailwind 位移工具族(.transition-transform):Tile hover 缩放 / 设置开关旋钮
+     位移 / 分段滑块 / Clock 弹层上浮——reduce 下瞬切到位,状态本身(提亮 /
+     checked / 显隐)不动。自定义 animate-* 族已被上方 no-preference 媒体块
+     覆盖,这里补的是工具类侧的对称缺口(2026-09-01 动效审计:全库 motion-reduce
+     仅 TrendingModal 呼吸点一处) */
+  .transition-transform {
+    transition: none !important;
+  }
 }
 
 /* 走马灯横向滚动条隐藏 */
@@ -308,6 +316,12 @@ code {
   .animate-drop-in {
     animation: drop-in 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
   }
+  /* Modal 主体态切换(tab 换视图 / loading→content / 重试回路):新态淡入 + 2px
+     散焦起点柔化换血(非玻璃面板内层,opacity 合法——玻璃底禁 opacity 只及
+     backdrop-filter 元素自身,见 pop-in 注释)。旧态瞬消新态淡入,不叠双曝 */
+  .animate-pane-in {
+    animation: pane-in 0.15s ease-out;
+  }
   /* ── 退场族(对称路径:从哪进就从哪出,2026-08-31 补)───────────────────
      与上列入场一一镜像,曲线取时间反演;时长统一 0.2s(按钮档)——退场快于
      入场是 iOS 惯例。消费方:ModalShell / GroupOverlay(pop-out)、ControlDrawer
@@ -326,6 +340,16 @@ code {
   }
   .animate-fade-out {
     animation: fade-out 0.2s ease-in forwards;
+  }
+}
+@keyframes pane-in {
+  from {
+    opacity: 0;
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
   }
 }
 @keyframes jiggle {

@@ -190,7 +190,10 @@ export default function GroupOverlay({
           items={slice.map((m) => m.id)}
           strategy={rectSortingStrategy}
         >
-          <div className="grid grid-cols-3 gap-x-4 gap-y-4 py-3 min-h-[132px]">
+          {/* key={cur}:翻页(滚轮/页点)重挂切片播 pane-in 淡入——主走马灯翻页有
+              560ms 弹簧,组内切片同语义不至瞬移(轻淡入,不复制弹簧);sortable
+              items 恒为当页 9 枚,重挂注册无净增删 */}
+          <div key={cur} className="grid grid-cols-3 gap-x-4 gap-y-4 py-3 min-h-[132px] animate-pane-in">
             {slice.map((m) => (
               <MemberTile key={m.id} member={m} onClose={requestClose} />
             ))}

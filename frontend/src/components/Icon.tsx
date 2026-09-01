@@ -131,8 +131,10 @@ export default function Icon({
         // 画格透明居中:玻璃块在图标层(Tile,全类型同款),文字在块外画格上
         // (iOS 主屏式:块=图标本体,文字=壁纸层)。不能加 overflow-hidden:编辑角标在卡外。
         // focus-visible 焦点环挂在 interactive 分支:一处覆盖 nav <a> 与 modal 可点块全类型
-        // (键盘可达性;Tile 的 hover:scale-110 active:scale-95 在块层,此处不重复)。
-        'relative flex flex-col items-center justify-center transition ' +
+        // (键盘可达性;Tile 的 hover:scale-105 active:scale-95 在块层,此处不重复)。
+        // motion-reduce:transition-none——dwell scale-[1.15] 是位移,reduce 下瞬切
+        // (状态保留);裸 transition 的 opacity 等通道此处无消费,一并瞬切无副作用。
+        'relative flex flex-col items-center justify-center transition motion-reduce:transition-none ' +
         (interactive
           ? 'cursor-pointer focus-visible:outline-2 focus-visible:outline-white/60 focus-visible:outline-offset-2'
           : 'cursor-default') +
@@ -145,9 +147,10 @@ export default function Icon({
     >
       <Body icon={icon} overlay={overlay} onOpenDetail={openDetail} />
 
-      {/* 分组解散失败提示(容量 409「先移出部分图标」等):组图标上方小气泡,短暂显示 */}
+      {/* 分组解散失败提示(容量 409「先移出部分图标」等):组图标上方小气泡,短暂显示;
+          pop-in 入场同错误药丸先例(PageTabs/DashboardPage,glass-panel 走 scale-only 路线) */}
       {icon.type === 'group' && dissolve.isError && (
-        <span className="absolute -top-9 left-1/2 -translate-x-1/2 z-40 glass-panel rounded-full px-3 py-1 text-xs text-white/90 whitespace-nowrap shadow-lg pointer-events-none">
+        <span className="absolute -top-9 left-1/2 -translate-x-1/2 z-40 glass-panel rounded-full px-3 py-1 text-xs text-white/90 whitespace-nowrap shadow-lg pointer-events-none animate-pop-in">
           {dissolve.error instanceof ApiError ? dissolve.error.message : '解散失败'}
         </span>
       )}

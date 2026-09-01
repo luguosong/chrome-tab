@@ -90,7 +90,10 @@ export default function Clock() {
           外接矩形,间隙在内不断链。 */}
       <div
         ref={floatingRef}
-        className={`absolute top-full left-0 z-10 mt-8 w-max max-w-[70vw] rounded-2xl glass-panel glass-panel-readable px-3 py-2 text-xs text-white/90 transition duration-200 ${
+        /* 过渡只挂 transform 通道:opacity 硬切显隐——玻璃底禁 opacity 动画(pop-in
+           注释同名坑:opacity<1 瞬态切断 blur 采样、玻璃显影期间糊面闪失),4px 上浮
+           照常过渡;reduce 下 .transition-transform 全族瞬切(globals.css) */
+        className={`absolute top-full left-0 z-10 mt-8 w-max max-w-[70vw] rounded-2xl glass-panel glass-panel-readable px-3 py-2 text-xs text-white/90 transition-transform duration-200 ${
           panelOpen
             ? 'opacity-100 translate-y-0 pointer-events-auto'
             : 'opacity-0 translate-y-1 pointer-events-none'

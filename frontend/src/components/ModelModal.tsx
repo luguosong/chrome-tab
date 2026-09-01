@@ -107,7 +107,7 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
                   'shrink-0 rounded-full border px-2.5 py-0.5 text-meta transition ' +
                   (active
                     ? 'border-white/25 bg-white/15 text-white/90'
-                    : 'border-white/15 text-white/60 hover:border-white/30 hover:text-white/85')
+                    : 'border-white/15 text-white/60 hover:border-white/30 hover:text-white/85 active:border-white/40')
                 }
               >
                 <span
@@ -227,7 +227,7 @@ function ModelList({
               type="button"
               aria-expanded={open}
               onClick={() => onToggle(m.id)}
-              className="w-full text-left rounded-xl px-3 py-2.5 hover:bg-white/10 transition"
+              className="w-full text-left rounded-xl px-3 py-2.5 hover:bg-white/10 active:bg-white/20 transition"
             >
               <span className="flex items-baseline justify-between gap-3 min-w-0">
                 <span className="flex min-w-0 items-center gap-1.5">
@@ -523,7 +523,7 @@ function LeaderboardPanel({
             hit: model.evaluations.find((e) => e.benchmark === b),
           }))
           return (
-            <li key={model.id} className="rounded-xl px-3 py-2 hover:bg-white/10 transition">
+            <li key={model.id} className="rounded-xl px-3 py-2.5 hover:bg-white/10 active:bg-white/20 transition">
               <div className="flex items-baseline gap-2 min-w-0">
                 <span className="w-6 shrink-0 text-right font-mono text-accent text-sm">{rank}</span>
                 <span

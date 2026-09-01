@@ -133,7 +133,11 @@ export default function DetailModal<T extends string>({
                 title="刷新"
                 className="w-6 h-6 rounded-full bg-white/20 text-white/80 hover:bg-white/40 focus-visible:outline-2 focus-visible:outline-white/60 flex items-center justify-center text-sm disabled:opacity-50"
               >
-                <span className={busy ? 'animate-spin inline-block' : 'inline-block'}>↻</span>
+                <span
+                  className={busy ? 'animate-spin inline-block motion-reduce:animate-none' : 'inline-block'}
+                >
+                  ↻
+                </span>
               </button>
             )}
           </div>
@@ -170,10 +174,16 @@ export default function DetailModal<T extends string>({
         </div>
       )}
 
+      {/* 主体态切换(tab 换视图 / loading→content / 重试回路)pane-in 淡入:key 变化
+          重挂触发。只包 pane 态分支——pane=null 域的主体布局由域自持(待办分栏的
+          flex 链等),外包层会断 flex 协议,维持现状。玻璃底在 ModalShell,此处
+          opacity 合法 */}
       {pane != null ? (
-        <QueryPane state={pane} onRetry={onRetry ?? refresh} retryBusy={busy}>
-          {children}
-        </QueryPane>
+        <div key={`${String(active)}:${pane.kind}`} className="animate-pane-in">
+          <QueryPane state={pane} onRetry={onRetry ?? refresh} retryBusy={busy}>
+            {children}
+          </QueryPane>
+        </div>
       ) : (
         children
       )}
