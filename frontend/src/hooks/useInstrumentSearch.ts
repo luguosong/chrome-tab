@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { parseSmartbox, type InstrumentCandidate } from '../lib/instrumentSearch'
+import { normalizeQuery, parseSmartbox, type InstrumentCandidate } from '../lib/instrumentSearch'
 import { loadVarScript } from '../lib/scriptLoader'
 
 /**
@@ -20,7 +20,7 @@ export function useInstrumentSearch(q: string) {
   const seqRef = useRef(0)
 
   useEffect(() => {
-    const query = q.trim()
+    const query = normalizeQuery(q.trim())
     if (!query) {
       seqRef.current++ // 使 in-flight 结果过期
       setCandidates([])
