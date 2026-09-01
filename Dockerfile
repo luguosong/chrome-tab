@@ -14,8 +14,14 @@ COPY frontend/package.json ./frontend/
 COPY shared/package.json ./shared/
 COPY backend/package.json ./backend/
 # 只装 frontend(+shared)依赖:backend 的 better-sqlite3 是原生模块且 musl 无预编译,
-# caddy 镜像用不到它,全量 install 会在无编译工具的本阶段失败(票 02)
-RUN pnpm --filter chrome-tab-frontend... install --frozen-lockfile
+# caddy 镜像用不到它,全量 install 会在无编译工具的本阶段失败(票 02)。
+# npmmirror:corepack 下 pnpm 与包安装全走国内镜像——registry.npmjs.org 在构建网络内
+# 被 SNI 掐(TLS 握手前 ECONNRESET,bridge/host 栈皆断,2026-09-01);npmmirror 是 npmjs
+# 全量镜像,tarball 同源,frozen-lockfile 的 integrity 校验不受影响。install 侧用
+# --registry 旗标:NPM_CONFIG_REGISTRY 环境变量对 pnpm 11 不生效(实测 590 请求仍打
+# npmjs),CLI 旗标才是 pnpm 确定吃到的路径。
+RUN COREPACK_NPM_REGISTRY=https://registry.npmmirror.com \
+    pnpm --filter chrome-tab-frontend... install --frozen-lockfile --registry=https://registry.npmmirror.com
 COPY frontend/ ./frontend/
 COPY shared/ ./shared/
 RUN pnpm --filter chrome-tab-frontend run build
