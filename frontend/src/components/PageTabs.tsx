@@ -174,7 +174,8 @@ export default function PageTabs() {
               title={editing ? `${p.name} · 双击重命名 · 拖拽排序` : p.name}
               className={
                 'group flex items-center gap-1 px-3 py-2 rounded-full text-sm whitespace-nowrap ' +
-                'transition select-none focus-visible:outline-2 focus-visible:outline-white/60 ' +
+                // active:scale-[0.97]:按压反馈(transition 已含 transform)——页面起滚前那一拍,界面先应一声
+                'transition select-none active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-white/60 ' +
                 // 选中拇指的实心白是 prototype/liquid-glass 定稿裁决:L2 镜头轨上的选中态
                 // 刻意区别于 .glass-segment-thumb 的 L1 轨道滑块(玻璃页签上再叠玻璃会糊)
                 (isActive
@@ -255,9 +256,10 @@ export default function PageTabs() {
       </LensBox>
 
       {/* 错误提示(删非空页 409 等):行内浮层,下一次操作清掉。
-          与 DashboardPage 容量提示同族(glass-panel rounded-full),统一提示样式。 */}
+          与 DashboardPage 容量提示同族(glass-panel rounded-full + animate-pop-in 入场
+          ——玻璃底禁 opacity 动画,同 pop-in 注释),统一提示样式。 */}
       {error && (
-        <div className="mt-2 text-center text-xs text-white/90 glass-panel rounded-full py-1 px-3 mx-auto w-fit max-w-full">
+        <div className="mt-2 text-center text-xs text-white/90 glass-panel rounded-full py-1 px-3 mx-auto w-fit max-w-full animate-pop-in">
           {error}
         </div>
       )}

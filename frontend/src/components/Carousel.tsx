@@ -104,11 +104,22 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
         }
       }
 
+      // 回弹越界直接写各真页内层的 transform(springTo 逐帧调用)。不走容器级 CSS
+      // 变量继承:继承变量每帧变更触发全部子树(所有页的全部图标)style recalc,
+      // 直接赋值只触碰各真页内层自身。跳过首尾克隆位——克隆快照静止不吃回弹。
+      const applyOvershoot = (px: number) => {
+        for (let i = 1; i < el.children.length - 1; i++) {
+          const inner = el.children[i].firstElementChild
+          if (inner instanceof HTMLElement)
+            inner.style.transform = px === 0 ? '' : `translateX(${px}px)`
+        }
+      }
+
       // 取消在飞的弹簧动画,并恢复 scroll-snap / scroll-behavior
       const resetOverrides = () => {
         el.style.scrollSnapType = ''
         el.style.scrollBehavior = ''
-        el.style.setProperty('--pg-overshoot', '0px')
+        applyOvershoot(0)
       }
       if (animRef.current != null) {
         cancelAnimationFrame(animRef.current)
@@ -131,9 +142,8 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
       }
 
       // 回弹分两路(pageTransitionFrame,见 lib/pageTransition.ts):scrollLeft 走 easeOutCubic
-      // 单调到位(永不越界 → 首/末页不再被浏览器夹掉回弹),越界回弹量交给 CSS 变量
-      // --pg-overshoot,由每页内容的 translateX 承担(transform 不受 scrollLeft 边界限制)。
-      // 合成视觉与原 easeOutBack 等价。560ms 落定。
+      // 单调到位(永不越界 → 首/末页不再被浏览器夹掉回弹),越界回弹量由每页内容
+      // 的 translateX 承担(transform 不受 scrollLeft 边界限制)。560ms 落定。
       // 动画期间必须同时关掉两项,否则回弹被吃掉:
       //   - scroll-snap-type: none —— mandatory 会把越界位置立刻拽回 snap 点
       //   - scroll-behavior: auto —— 容器带 scroll-smooth,smooth 会对「逐帧 scrollLeft 赋值」
@@ -149,7 +159,7 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
           const t = Math.min(1, (now - t0) / duration)
           const { scrollLeft, overshoot } = pageTransitionFrame(t, start, distance)
           el.scrollLeft = scrollLeft
-          el.style.setProperty('--pg-overshoot', `${overshoot}px`)
+          applyOvershoot(overshoot)
           if (t < 1) {
             animRef.current = requestAnimationFrame(tick)
           } else {
@@ -182,7 +192,7 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
           return
         }
         const snapshot = srcSlide.firstElementChild.cloneNode(true) as HTMLElement
-        snapshot.style.transform = '' // 快照静止,不吃动画期的 --pg-overshoot
+        snapshot.style.transform = '' // 清掉克隆自真页的回弹 transform,快照静止不吃 overshoot
         const slotInner = slot.firstElementChild as HTMLElement
         slotInner.replaceChildren(snapshot)
         slot.style.visibility = 'visible'
@@ -320,14 +330,10 @@ export default function Carousel({ labels, children, onActiveChange }: CarouselP
               aria-roledescription="slide"
               aria-label={labels[i]}
             >
-              {/* 回弹越界由 translateX(--pg-overshoot) 承担(goTo 逐帧设置);放在内层而非
-                  snap 子元素上,使 snap-child 休息态无 transform,避免干扰原生 snap 落点。 */}
-              <div
-                className="h-full px-4 sm:px-16"
-                style={{ transform: 'translateX(var(--pg-overshoot, 0px))' }}
-              >
-                {child}
-              </div>
+              {/* 回弹越界由本内层的 translateX 承担(goTo 逐帧直接写 transform,见
+                  applyOvershoot);放在内层而非 snap 子元素上,休息态 transform 清空,
+                  不干扰原生 snap 落点。 */}
+              <div className="h-full px-4 sm:px-16">{child}</div>
             </div>
           ))}
           <CloneSlot ref={rightSlotRef} />
