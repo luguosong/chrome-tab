@@ -83,8 +83,14 @@ export default function ChangelogModal({
         <div className="flex items-start px-6 pt-4 pb-2">
           <div className="min-w-0">
             <h2 className="text-lg font-semibold text-white/90">{sourceLabel} 更新日志</h2>
+            {/* 副标题三分对齐(:107 同病同修):数据未到才「加载中」;有版本无正式版
+                (全预发布,latest 为 undefined)如实报数、不再永显加载中 */}
             <p className="mt-0.5 text-xs text-white/50">
-              {latest ? `共 ${versions.length} 个版本 · 最新 ${latest}` : '加载中…'}
+              {data === undefined
+                ? '加载中…'
+                : latest
+                  ? `共 ${versions.length} 个版本 · 最新 ${latest}`
+                  : `共 ${versions.length} 个版本`}
             </p>
           </div>
         </div>
@@ -104,7 +110,13 @@ export default function ChangelogModal({
               )}
 
               <div className="modal-scroll max-h-[60vh] overflow-auto pr-1.5">
-                {versions.length === 0 && <QueryPane state={{ kind: 'loading' }} />}
+                {/* 加载/空三分(CONTEXT.md「详情 Modal 骨架」状态机):「取到过但为空」
+                    可达——无原文源版本流取 npm 表剔除预发布,纯预发布包剔后即空;
+                    曾把空混进加载态永显「加载中」(2026-09-02 修) */}
+                {data === undefined && <QueryPane state={{ kind: 'loading' }} />}
+                {data !== undefined && versions.length === 0 && (
+                  <QueryPane state={{ kind: 'empty', message: '该源暂无版本' }} />
+                )}
 
                 {noRaw && versions.length > 0 && (
                   <p className="mb-2 text-xs text-white/40">

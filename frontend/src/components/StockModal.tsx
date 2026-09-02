@@ -4,7 +4,7 @@ import { useCompanyProfile } from '../hooks/useCompanyProfile'
 import { useFundamentals } from '../hooks/useFundamentals'
 import { useKlines } from '../hooks/useKlines'
 import KlineChart from './KlineChart'
-import DetailModal, { QueryPane } from './DetailModal'
+import DetailModal, { Chip, QueryPane } from './DetailModal'
 import StatCell from './StatCell'
 import { formatMarketCap, isIndexSymbol, symbolToSecid, symbolToSecucode } from '../lib/companyOverview'
 import { extractString } from '../lib/iconData'
@@ -134,25 +134,11 @@ export default function StockModal({
           <div className="mb-2 flex items-center justify-between">
             <div className="text-meta uppercase tracking-wider text-white/50">K 线</div>
             <div role="group" aria-label="K 线时间档位" className="flex gap-1">
-              {(Object.keys(KLINE_RANGES) as KlineRange[]).map((key) => {
-                const active = range === key
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => setRange(key)}
-                    className={
-                      'rounded-full border px-2 py-0.5 text-meta transition ' +
-                      (active
-                        ? 'border-white/25 bg-white/15 text-white/90'
-                        : 'border-white/15 text-white/60 hover:border-white/30 hover:text-white/85 active:border-white/40')
-                    }
-                  >
-                    {KLINE_RANGES[key].label}
-                  </button>
-                )
-              })}
+              {(Object.keys(KLINE_RANGES) as KlineRange[]).map((key) => (
+                <Chip key={key} active={range === key} onClick={() => setRange(key)}>
+                  {KLINE_RANGES[key].label}
+                </Chip>
+              ))}
             </div>
           </div>
           <div className="h-32 rounded-xl border border-white/10 bg-white/5 px-3 py-2">

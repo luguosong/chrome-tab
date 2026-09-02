@@ -11,10 +11,10 @@ import {
   useKnownSet,
   useSetKnownMark,
   useTrending,
-  TRENDING_TRANSLATE_FRESH_MS,
 } from '../hooks/useTrending'
+import { isTranslateFresh } from '../lib/trending'
 import { paneState } from '../lib/detailModalState'
-import DetailModal, { QueryPane, retryButtonClass } from './DetailModal'
+import DetailModal, { Chip, QueryPane, retryButtonClass } from './DetailModal'
 import { KnownCheck } from './TileBody'
 
 /**
@@ -43,8 +43,9 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
   const repos = data?.repos ?? []
   // 有原文无译文的条数(wire 上 null 不分原因,以新鲜窗折算成 在途/暂未译出 两态)
   const untranslated = repos.filter((r) => r.description != null && r.descriptionZh == null).length
-  const translateFresh =
-    data != null && Date.now() - Math.max(Date.parse(data.fetchedAt), retryAt) < TRENDING_TRANSLATE_FRESH_MS
+  // 补译新鲜窗(与 useTrending 轮询闸同源谓词,lib/trending 单点——改一处另一处
+  // 不再静默失配)
+  const translateFresh = isTranslateFresh(data?.fetchedAt, retryAt)
 
   const onRetryTranslation = async () => {
     setRetryState('sending')
@@ -225,47 +226,14 @@ function ChipRow({
   return (
     <div role="group" aria-label={ariaLabel} className="flex items-center gap-1.5 overflow-x-auto modal-scroll -mt-1 mb-2 pb-1">
       <span className="shrink-0 text-meta text-white/35">{label}</span>
-      <Chip active={value === ''} label="不限" onClick={() => onChange('')} />
+      <Chip active={value === ''} onClick={() => onChange('')}>
+        不限
+      </Chip>
       {options.map((o) => (
-        <Chip
-          key={o.key}
-          active={value === o.key}
-          label={o.label}
-          color={o.color}
-          onClick={() => onChange(o.key)}
-        />
+        <Chip key={o.key} active={value === o.key} dot={o.color} onClick={() => onChange(o.key)}>
+          {o.label}
+        </Chip>
       ))}
     </div>
-  )
-}
-
-function Chip({
-  active,
-  label,
-  color,
-  onClick,
-}: {
-  active: boolean
-  label: string
-  color?: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={
-        'shrink-0 rounded-full border px-2.5 py-0.5 text-meta transition inline-flex items-center gap-1 ' +
-        (active
-          ? 'border-white/25 bg-white/15 text-white/90'
-          : 'border-white/15 text-white/60 hover:border-white/30 hover:text-white/85 active:border-white/40')
-      }
-    >
-      {color && (
-        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} aria-hidden="true" />
-      )}
-      {label}
-    </button>
   )
 }

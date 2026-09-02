@@ -2,14 +2,10 @@ import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { TrendingKnownMarks, TrendingResponse, TrendingSince } from 'chrome-tab-shared'
 import { apiFetch } from '../api/client'
+import { isTranslateFresh } from '../lib/trending'
 
 /** 图标卡片与 Modal 的默认视图(今日 + 不限;与后端 cron 保热组合一致,命中缓存零等待)。 */
 export const DEFAULT_TRENDING_QUERY = { since: 'daily', language: '', spoken: '' } as const
-
-/** 补译「在途」的判定窗:数据抓取时刻(或最近一次手动重试)距今 <5min 视为译文仍可能
- *  到来——行内挂「译文生成中」+ 15s 到达轮询;超窗仍有缺口即「暂未译出」,转顶部
- *  提示条 + 重试入口(与 staleTime 同量级,常量单点在此)。 */
-export const TRENDING_TRANSLATE_FRESH_MS = 5 * 60_000
 
 /**
  * GitHub 趋势取数(单例图标「GitHub 趋势」,CONTEXT.md;数据 = 后端 trending 页 HTML
@@ -47,10 +43,7 @@ export function useTrending(
       const list = q.state.data?.repos
       if (!Array.isArray(list)) return false
       const pending = list.some((x) => x.description != null && x.descriptionZh == null)
-      const fresh =
-        q.state.data != null &&
-        Date.now() - Math.max(Date.parse(q.state.data.fetchedAt ?? ''), retryAt) < TRENDING_TRANSLATE_FRESH_MS
-      return pending && fresh ? 15_000 : false
+      return pending && isTranslateFresh(q.state.data?.fetchedAt, retryAt) ? 15_000 : false
     },
   })
 }

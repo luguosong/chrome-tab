@@ -54,6 +54,16 @@ export async function fetchConfigOnce(): Promise<Config> {
   return normalizeConfig(await apiFetch<RawConfig>('/api/config'))
 }
 
+/** config 聚合的失效重拉(沿 hooks/useVideoUpdates 的 useInvalidateVideo 先例):
+ *  离散写操作(全量替换/页面增删改名/建图标)成功后统一走此出口,
+ *  「config 写后失效哪个 key」单点。 */
+function useInvalidateConfig() {
+  const qc = useQueryClient()
+  return () => {
+    void qc.invalidateQueries({ queryKey: CONFIG_KEY })
+  }
+}
+
 /**
  * 布局设置写:PUT /api/layout-settings,body 为整份「布局草稿」(13 字段)。
  * 成功后 invalidate 聚合查询拉回权威值(跨设备共享语义)。实时预览由
@@ -87,14 +97,14 @@ export function useUpdateLayoutSettings() {
  * 服务端整体重建并重排 id;成功后 invalidate 拉回权威数据。容量/单例/孤儿引用由服务端 409 把关。
  */
 export function useReplaceConfig() {
-  const qc = useQueryClient()
+  const invalidate = useInvalidateConfig()
   return useMutation({
     mutationFn: (body: WireConfig) =>
       apiFetch<{ updatedAt?: string }>('/api/config', {
         method: 'PUT',
         body: JSON.stringify(body),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: CONFIG_KEY }),
+    onSuccess: invalidate,
   })
 }
 
@@ -145,27 +155,27 @@ export function useUpdateIconData() {
 
 /** 新建页:POST /api/pages body={name} → 200 {id,name,sortOrder}。成功后 invalidate。 */
 export function useCreatePage() {
-  const qc = useQueryClient()
+  const invalidate = useInvalidateConfig()
   return useMutation({
     mutationFn: (name: string) =>
       apiFetch<Page>('/api/pages', {
         method: 'POST',
         body: JSON.stringify({ name }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: CONFIG_KEY }),
+    onSuccess: invalidate,
   })
 }
 
 /** 改名页:PUT /api/pages/{id} body={name} → 200。成功后 invalidate。 */
 export function useRenamePage() {
-  const qc = useQueryClient()
+  const invalidate = useInvalidateConfig()
   return useMutation({
     mutationFn: (vars: { id: number; name: string }) =>
       apiFetch<Page>(`/api/pages/${vars.id}`, {
         method: 'PUT',
         body: JSON.stringify({ name: vars.name }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: CONFIG_KEY }),
+    onSuccess: invalidate,
   })
 }
 
@@ -174,11 +184,11 @@ export function useRenamePage() {
  * 不做乐观更新:非空页 409 时调用方据 onError 的 ApiError.message 显示提示。
  */
 export function useDeletePage() {
-  const qc = useQueryClient()
+  const invalidate = useInvalidateConfig()
   return useMutation({
     mutationFn: (id: number) =>
       apiFetch<void>(`/api/pages/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: CONFIG_KEY }),
+    onSuccess: invalidate,
   })
 }
 
@@ -222,7 +232,7 @@ export type CreateIconBody = {
  * 抛 {@link ApiError};由 AddDrawer 转译为用户提示("此页已满…")。
  */
 export function useCreateIcon() {
-  const qc = useQueryClient()
+  const invalidate = useInvalidateConfig()
   return useMutation({
     mutationFn: (body: CreateIconBody) =>
       apiFetch<unknown>('/api/icons', {
@@ -233,7 +243,7 @@ export function useCreateIcon() {
           data: body.data,
         }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: CONFIG_KEY }),
+    onSuccess: invalidate,
   })
 }
 

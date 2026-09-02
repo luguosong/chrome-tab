@@ -19,6 +19,45 @@ import { type PaneState, type TabItem, normalizeTab } from '../lib/detailModalSt
 export const retryButtonClass =
   'rounded-full border border-white/30 px-3 py-1.5 min-h-8 text-xs text-white/80 hover:border-accent hover:text-accent active:bg-white/20 transition-colors focus-visible:outline-2 focus-visible:outline-white/60 disabled:opacity-50'
 
+/**
+ * 筛选胶囊方言单点(同 retryButtonClass 先例):Modal 内「叠加筛条件」的小圆钮,
+ *  模型种类过滤 / 趋势三行筛选 / K 线时间档位三家共用,active 两态类串写死在此,
+ *  改方言只改这里(2026-09-02 收拢:px-2.5 为 08-26 起既有方言,StockModal 的
+ *  px-2 系新拷贝抄漏,随收拢归一)。区别于 tab(切视图)与动作钮(翻译/重试,
+ *  accent hover 族)。dot = 可选前缀色点(趋势 linguist 语言色,与行内色点同色互证)。
+ */
+export function Chip({
+  active,
+  onClick,
+  children,
+  dot,
+}: {
+  active: boolean
+  onClick: () => void
+  children: ReactNode
+  /** 前缀色点的背景色(如 linguist 语言色);省缺不渲染。 */
+  dot?: string
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={
+        'shrink-0 inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-meta transition ' +
+        (active
+          ? 'border-white/25 bg-white/15 text-white/90'
+          : 'border-white/15 text-white/60 hover:border-white/30 hover:text-white/85 active:border-white/40')
+      }
+    >
+      {dot && (
+        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: dot }} aria-hidden="true" />
+      )}
+      {children}
+    </button>
+  )
+}
+
 /** 状态机零件:四态归约结果的渲染映射(决策在 lib/detailModalState)。 */
 export function QueryPane({
   state,

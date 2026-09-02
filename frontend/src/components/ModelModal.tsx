@@ -8,7 +8,7 @@ import type {
 import { useModelArchive } from '../hooks/useModelArchive'
 import { paneState } from '../lib/detailModalState'
 import { timeAgo } from '../lib/timeAgo'
-import DetailModal, { QueryPane } from './DetailModal'
+import DetailModal, { Chip, QueryPane } from './DetailModal'
 import {
   AVAILABILITY_LABELS,
   CODING_INDEX_BENCHMARK,
@@ -95,29 +95,15 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
           aria-label="按模型种类过滤"
           className="flex gap-1.5 overflow-x-auto modal-scroll -mt-1 mb-2 pb-1"
         >
-          {KIND_FILTERS.map(({ key, label }) => {
-            const active = kindFilter === key
-            return (
-              <button
-                key={key}
-                type="button"
-                aria-pressed={active}
-                onClick={() => setKindFilter(key)}
-                className={
-                  'shrink-0 rounded-full border px-2.5 py-0.5 text-meta transition ' +
-                  (active
-                    ? 'border-white/25 bg-white/15 text-white/90'
-                    : 'border-white/15 text-white/60 hover:border-white/30 hover:text-white/85 active:border-white/40')
-                }
+          {KIND_FILTERS.map(({ key, label }) => (
+            <Chip key={key} active={kindFilter === key} onClick={() => setKindFilter(key)}>
+              <span
+                className={key === 'all' ? undefined : MODEL_KIND_COLOR_CLASSES[key] || undefined}
               >
-                <span
-                  className={key === 'all' ? undefined : MODEL_KIND_COLOR_CLASSES[key] || undefined}
-                >
-                  {label}
-                </span>
-              </button>
-            )
-          })}
+                {label}
+              </span>
+            </Chip>
+          ))}
         </div>
         )}
 
