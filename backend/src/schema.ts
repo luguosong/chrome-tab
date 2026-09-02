@@ -240,6 +240,16 @@ CREATE TABLE IF NOT EXISTS trending_translations (
     translated   TEXT NOT NULL,
     created_at   TEXT NOT NULL
 );
+-- 已了解标记(CONTEXT.md「已了解」):账号级、项目级(owner/name)持久勾标记——用户
+-- 认知状态,不随榜单轮换失效;区别于榜单本体(ADR-0028 不落库),这是用户数据。
+-- UNIQUE 以 user_id 为前导即查询索引(同 news_sources 口径),单列 user 索引冗余。
+CREATE TABLE IF NOT EXISTS trending_known_marks (
+    user_id     INTEGER NOT NULL,
+    repo        TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    UNIQUE (user_id, repo),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 -- 服务器状态(CONTEXT.md「服务器状态」):cron 10min 采样落库的数值曲线,全局共享
 -- (机器是全局资产,同 model_archive 口径,无 user_id)。services/containers 快照
 -- 不落库——展示实时即可,无历史诉求;无保留策略(年增 ~10 万行,SQLite 无压力)。
@@ -503,6 +513,12 @@ export interface TrendingTranslationsTable {
   created_at: string
 }
 
+export interface TrendingKnownMarksTable {
+  user_id: number
+  repo: string
+  created_at: string
+}
+
 export interface ServerSamplesTable {
   id: Generated<number>
   machine: string
@@ -538,5 +554,6 @@ export interface SchemaDatabase {
   news_items: NewsItemsTable
   news_translations: NewsTranslationsTable
   trending_translations: TrendingTranslationsTable
+  trending_known_marks: TrendingKnownMarksTable
   server_samples: ServerSamplesTable
 }

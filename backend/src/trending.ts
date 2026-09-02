@@ -1,6 +1,7 @@
 import * as cheerio from 'cheerio'
 import { schedule } from 'node-cron'
 import { Hono } from 'hono'
+import type { Context } from 'hono'
 import {
   TRENDING_LANGUAGES,
   TRENDING_SPOKEN,
@@ -11,7 +12,7 @@ import {
 import type { AuthEnv } from './auth'
 import { makeBatchTranslator, makeTranslationStore, type BatchTranslator, type TranslationStore } from './translate'
 import type { Db } from './db'
-import { BadRequest, cachedOrNull, type CachedSource, FETCH_TIMEOUT, chromeHeaders, fetchText } from './common'
+import { BadRequest, cachedOrNull, type CachedSource, FETCH_TIMEOUT, chromeHeaders, fetchText, jsonBody } from './common'
 
 /**
  * 「GitHub 趋势」(CONTEXT.md「GitHub 趋势」;ADR-0028):独立单例图标的数据服务。
@@ -123,7 +124,7 @@ export class TrendingService {
   /** 描述译文仓(ADR-0034):原文键 load/ensure,哈希派生与补译骨架收进 store。 */
   private readonly translations: TranslationStore
 
-  constructor(db: Db, private readonly deps: TrendingDeps) {
+  constructor(private readonly db: Db, private readonly deps: TrendingDeps) {
     this.translations = makeTranslationStore(db, 'trending_translations')
     // mimosa-ignore 取数 host 钉死 github.com,用户筛选仅进 query string,无任意出站
     this.source = cachedOrNull<string, Entry>({
@@ -205,9 +206,47 @@ export class TrendingService {
       console.warn('趋势描述译制失败,保持原文:', e)
     }
   }
+  // ---- 已了解标记(CONTEXT.md「已了解」):账号级项目持久勾,与榜单缓存生命周期无关 ----
+
+  /** 全量已了解 repo(集合语义,字典序仅 wire 稳定用;年千级行,全量直发)。 */
+  async knownMarks(userId: number): Promise<string[]> {
+    const rows = await this.db
+      .selectFrom('trending_known_marks')
+      .select('repo')
+      .where('user_id', '=', userId)
+      .orderBy('repo')
+      .execute()
+    return rows.map((r) => r.repo)
+  }
+
+  /** 标记已了解;重复标记唯一约束吞掉(幂等,不双行)。 */
+  async markKnown(userId: number, repo: string): Promise<void> {
+    await this.db
+      .insertInto('trending_known_marks')
+      .values({ user_id: userId, repo, created_at: new Date().toISOString() })
+      .onConflict((oc) => oc.doNothing())
+      .execute()
+  }
+
+  /** 取消标记;未标记同样成功(幂等)。 */
+  async unmarkKnown(userId: number, repo: string): Promise<void> {
+    await this.db
+      .deleteFrom('trending_known_marks')
+      .where('user_id', '=', userId)
+      .where('repo', '=', repo)
+      .execute()
+  }
 }
 
 // ---- HTTP 路由 ----
+
+/** repo 字段校验(写入信任边界):owner/name 形态,GitHub 上限 owner≤39、repo≤100。 */
+const REPO_RE = /^[\w.-]{1,39}\/[\w.-]{1,100}$/
+const reqRepo = (v: unknown): string => {
+  const repo = typeof v === 'string' ? v.trim() : ''
+  if (!REPO_RE.test(repo)) throw new BadRequest('repo: 必须是 owner/name 形式')
+  return repo
+}
 
 export function trendingRoutes(service: TrendingService): Hono<AuthEnv> {
   /** 组合参数解析 + 白名单校验(参数直接进抓取 URL,拒绝任意值;GET/POST 共用)。 */
@@ -220,10 +259,24 @@ export function trendingRoutes(service: TrendingService): Hono<AuthEnv> {
     if (spoken && !SPOKEN_SET.has(spoken)) throw new BadRequest('spoken: 未收录的口语语言')
     return { since: since as TrendingSince, language, spoken }
   }
+  const userId = (c: Context<AuthEnv>) => c.get('user')!.id
   return new Hono<AuthEnv>()
     .get('/api/trending', async (c) => c.json(await service.get(parseQuery(c))))
     // mimosa-ignore 同上:补译取数 host 钉死,parseQuery 结果仅进 query string
     .post('/api/trending/retry-translation', (c) => service.retryTranslations(parseQuery(c)).then(() => c.json({ started: true })))
+    // 已了解标记(CONTEXT.md「已了解」):三端点响应均 = 写后全量(响应即数据,
+    // 前端 onSuccess 权威写,同「新闻源」勾选范式;DELETE 以 ?repo= 传值免 DELETE body)
+    .get('/api/trending/marks', async (c) => c.json(await service.knownMarks(userId(c))))
+    .put('/api/trending/marks', async (c) => {
+      const repo = reqRepo(((await jsonBody(c)) as { repo?: unknown } | null)?.repo)
+      await service.markKnown(userId(c), repo)
+      return c.json(await service.knownMarks(userId(c)))
+    })
+    .delete('/api/trending/marks', async (c) => {
+      const repo = reqRepo(c.req.query('repo'))
+      await service.unmarkKnown(userId(c), repo)
+      return c.json(await service.knownMarks(userId(c)))
+    })
 }
 
 // ---- 调度 ----

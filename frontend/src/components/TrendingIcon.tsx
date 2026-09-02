@@ -1,8 +1,8 @@
-import { DEFAULT_TRENDING_QUERY, useTrending } from '../hooks/useTrending'
+import { DEFAULT_TRENDING_QUERY, useKnownSet, useTrending } from '../hooks/useTrending'
 import { ICON_SCALE, tileFont } from '../lib/iconLayout'
 import type { Icon } from '../lib/types'
 import BigTile from './BigTile'
-import { TileBody, TileRowLink } from './TileBody'
+import { KnownCheck, TileBody, TileRowLink } from './TileBody'
 
 /**
  * GitHub 趋势图标的专属网格渲染(见 CONTEXT.md「GitHub 趋势」;3×2 大 tile,
@@ -24,6 +24,7 @@ export default function TrendingIconBody({
 }) {
   void icon // 单例无实例参数(data 无字段);保留形参对齐其它 body 的接口
   const { data, isError } = useTrending(DEFAULT_TRENDING_QUERY)
+  const knownSet = useKnownSet()
   const fontSize = tileFont(ICON_SCALE, 'secondary')
   const repos = data?.repos ?? []
 
@@ -56,6 +57,7 @@ export default function TrendingIconBody({
               title={
                 (r.descriptionZh ?? r.description) ? `${r.repo} — ${r.descriptionZh ?? r.description}` : r.repo
               }
+              marked={knownSet.has(r.repo)}
               className="flex min-w-0 items-center justify-between gap-2"
             >
               <span className="flex min-w-0 items-center gap-1.5">
@@ -70,6 +72,10 @@ export default function TrendingIconBody({
                 <span className="min-w-0 truncate text-white/90" style={{ fontSize }}>
                   {r.repo}
                 </span>
+                {knownSet.has(r.repo) && (
+                  // 已了解勾标(块内只读;手势唯一入口在 Modal,CONTEXT.md「已了解」)
+                  <KnownCheck className="h-3 w-3 shrink-0 text-emerald-300" />
+                )}
               </span>
               <span className="shrink-0 font-mono text-white/45" style={{ fontSize }}>
                 +{r.periodStars.toLocaleString('en-US')}

@@ -178,7 +178,7 @@ describe('schema:表结构(research/03 骨架 + sessions + 视频更新三表 + 
   })
 
   it('全库表数守护(加表时同步此数)', () => {
-    expect(tableCount(sqlite)).toBe(22)
+    expect(tableCount(sqlite)).toBe(23)
   })
 })
 
@@ -247,7 +247,7 @@ describe('schema:建表幂等', () => {
       migrate(sqlite)
       migrate(sqlite)
     }).not.toThrow()
-    expect(tableCount(sqlite)).toBe(22)
+    expect(tableCount(sqlite)).toBe(23)
   })
 
   it('增量加列:issues/01 时期的旧库(无 pricing/limits/training_params)migrate 后补齐且数据保留', () => {

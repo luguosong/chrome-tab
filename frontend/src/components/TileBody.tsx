@@ -82,6 +82,7 @@ export function TileRowLink({
   href,
   title,
   className,
+  marked = false,
   children,
 }: {
   href: string
@@ -89,6 +90,8 @@ export function TileRowLink({
   title?: string
   /** a 上的布局类;省缺 block(视频/新闻的行内块)。 */
   className?: string
+  /** 已了解态淡绿底(CONTEXT.md「已了解」;hover 白仍可辨——伪类特异性高于单类)。 */
+  marked?: boolean
   children: ReactNode
 }) {
   return (
@@ -98,7 +101,7 @@ export function TileRowLink({
         target="_blank"
         rel="noreferrer"
         title={title}
-        className={PILL_BASE + ' ' + PILL_HOVER + ' ' + (className ?? 'block')}
+        className={PILL_BASE + ' ' + PILL_HOVER + (marked ? ' bg-emerald-400/15' : '') + ' ' + (className ?? 'block')}
       >
         {children}
       </a>
@@ -110,4 +113,22 @@ export function TileRowLink({
 export function FreshDot({ show }: { show: boolean }) {
   if (!show) return null
   return <span className="h-1.5 w-1.5 shrink-0 self-center rounded-full bg-red-400" aria-hidden="true" />
+}
+
+/** 已了解勾标(CONTEXT.md「已了解」;行级视觉零件,语义与判据归域——同 FreshDot 分工)。 */
+export function KnownCheck({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  )
 }

@@ -77,3 +77,10 @@ export type TrendingResponse = {
   /** 该组合缓存的抓取时刻(ISO);tile 标头鲜度。 */
   fetchedAt: string
 }
+
+// ── 已了解标记 wire(CONTEXT.md「已了解」;GET/PUT/DELETE /api/trending/marks)────
+
+/** 已了解 repo(owner/name)集合:GET 即全量;PUT/DELETE 响应 = 写后最新全量
+ *  (前端 onSuccess 权威写,同「新闻源」勾选范式)。集合语义,顺序无含义。
+ *  PUT 请求体 = { repo };DELETE(取消)以同名 query 参数传同值(免 DELETE body)。 */
+export type TrendingKnownMarks = string[]

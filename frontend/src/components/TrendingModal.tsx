@@ -6,16 +6,23 @@ import {
   type TrendingSince,
 } from 'chrome-tab-shared'
 import { timeAgo } from '../lib/timeAgo'
-import { retryTrendingTranslation, useTrending, TRENDING_TRANSLATE_FRESH_MS } from '../hooks/useTrending'
+import {
+  retryTrendingTranslation,
+  useKnownSet,
+  useSetKnownMark,
+  useTrending,
+  TRENDING_TRANSLATE_FRESH_MS,
+} from '../hooks/useTrending'
 import { paneState } from '../lib/detailModalState'
 import DetailModal, { QueryPane, retryButtonClass } from './DetailModal'
+import { KnownCheck } from './TileBody'
 
 /**
  * GitHub 趋势详情 Modal(见 CONTEXT.md「GitHub 趋势」;ADR-0022「更多」标头唯一入口):
  * 口语语言 / 编程语言 / 周期**三行胶囊**正交筛选(单选互斥,role=group + aria-pressed,
  * 与 ModelModal 种类胶囊同语汇——胶囊 = 叠加筛条件,区别于 tab 的切视图)。筛选即
  * queryKey:切组合自动按需现拉(后端内存缓存 1h,非默认组合首拉 ~2.4s)。
- * 行 = repo 名 + 总 star / 描述(完整换行永不省略,非中文后台译中、悬停原文)/ 语言色点·语言名 + 周期内增量,点行新开 tab。
+ * 行 = repo 名 + 总 star / 描述(完整换行永不省略,非中文后台译中、悬停原文)/ 语言色点·语言名 + 周期内增量,点行新开 tab;行尾常驻勾钮标记「已了解」(标记手势唯一入口,CONTEXT.md「已了解」)。
  * 译制状态分两段呈现:补译新鲜窗内 = 行内「译文生成中」徽章(在途);超窗仍有缺口 =
  * 「暂未译出」聚合提示条 + 重试翻译钮(诚实失败态,POST 触发后端补一轮,轮询收果)。
  * 不持久化筛选状态:每次打开回到默认 Today 视图(trending 语义即「此刻什么热」)。
@@ -31,6 +38,8 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
   const [retryAt, setRetryAt] = useState(0)
   const [retryState, setRetryState] = useState<'idle' | 'sending' | 'error'>('idle')
   const { data, isError, refetch, isFetching } = useTrending({ since, language, spoken }, { retryAt })
+  const knownSet = useKnownSet()
+  const setKnownMark = useSetKnownMark()
   const repos = data?.repos ?? []
   // 有原文无译文的条数(wire 上 null 不分原因,以新鲜窗折算成 在途/暂未译出 两态)
   const untranslated = repos.filter((r) => r.description != null && r.descriptionZh == null).length
@@ -106,13 +115,24 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
               </div>
             )}
             <ol className="mt-2 flex flex-col gap-0.5">
-            {repos.map((r) => (
-              <li key={r.repo} className="min-w-0">
+            {repos.map((r) => {
+              const known = knownSet.has(r.repo)
+              return (
+              /* 行 = 锚(flex-1,外跳语义不变)+ 行尾常驻勾钮(toggle;标记手势唯一入口,
+                 CONTEXT.md「已了解」)。已了解 = 整行淡绿底,勾常驻点亮;未了解勾弱透明
+                 常驻,承担「可标记」的可发现性。 */
+              <li
+                key={r.repo}
+                className={
+                  'flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors ' +
+                  (known ? 'bg-emerald-400/15' : '')
+                }
+              >
                 <a
                   href={r.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="block rounded-lg px-2 py-1.5 hover:bg-white/10 transition-colors"
+                  className="min-w-0 flex-1 rounded-lg px-2 py-1.5 hover:bg-white/10 transition-colors"
                 >
                   <span className="flex min-w-0 items-baseline justify-between gap-3">
                     <span className="min-w-0 truncate text-sm text-white/90">
@@ -151,8 +171,22 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
                     </span>
                   </span>
                 </a>
+                <button
+                  type="button"
+                  aria-pressed={known}
+                  aria-label={(known ? '取消已了解:' : '标记为已了解:') + r.repo}
+                  title={known ? '取消已了解' : '标记为已了解'}
+                  onClick={() => setKnownMark.mutate({ repo: r.repo, known: !known })}
+                  className={
+                    'shrink-0 rounded-md p-1 transition-colors hover:bg-white/10 ' +
+                    (known ? 'text-emerald-300' : 'text-white/25 hover:text-white/60')
+                  }
+                >
+                  <KnownCheck className="h-4 w-4" />
+                </button>
               </li>
-            ))}
+              )
+            })}
             </ol>
       </QueryPane>
     </DetailModal>

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createApp } from './app'
 import { openDb } from './db'
+import { bootstrap } from './seed'
 import { TrendingService, parseTrending, trendingRoutes, type TrendingDeps } from './trending'
 
 /** 解析层 fixture 测试(锚点 2026-08-26 实抓 github.com/trending 核验;class 精简保留语义)。 */
@@ -275,5 +277,65 @@ describe('TrendingService 描述译制(ADR-0030/0036)', () => {
     expect((await svc.get(q)).repos[0]!.descriptionZh).toBe('译(A fast build tool)')
     await svc.retryTranslations(q) // 已入库后重复重试:ensure load 先滤掉,零新批
     expect(attempts.filter((a) => a === 'ok')).toHaveLength(1)
+  })
+})
+
+describe('已了解标记(HTTP 契约;CONTEXT.md「已了解」)', () => {
+  /** 真 app + 登录会话(videoUpdates.test 范式):marks 在 requireAuth 拦截面内。 */
+  async function world() {
+    const { db } = openDb(':memory:')
+    await bootstrap(db, { username: 'admin', password: 'pw' })
+    const deps: TrendingDeps = {
+      fetchText: async () => {
+        throw new Error('marks 不出站')
+      },
+      translateDescriptions: async () => [],
+    }
+    const app = createApp({ db, trending: new TrendingService(db, deps) })
+    const loginRes = await app.request('/api/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'pw' }),
+    })
+    const cookie = loginRes.headers.getSetCookie()[0]!.split(';')[0]!
+    const req = (method: string, path: string, body?: unknown) =>
+      app.request(path, {
+        method,
+        headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), cookie },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      })
+    return { req }
+  }
+
+  it('空集起步;PUT 标记/重复标记幂等,DELETE 取消/未标记也幂等,三端点响应均=写后全量', async () => {
+    const { req } = await world()
+    expect(await (await req('GET', '/api/trending/marks')).json()).toEqual([])
+    expect(await (await req('PUT', '/api/trending/marks', { repo: 'foo/bar' })).json()).toEqual(['foo/bar'])
+    // 重复标记:唯一约束吞掉,不 500 不双行
+    expect(await (await req('PUT', '/api/trending/marks', { repo: 'foo/bar' })).json()).toEqual(['foo/bar'])
+    await req('PUT', '/api/trending/marks', { repo: 'baz/qux' })
+    // 未标记 repo 的 DELETE 同样 200 幂等;集合语义,顺序=字典序(仅稳定 wire 用)
+    expect(await (await req('DELETE', '/api/trending/marks?repo=nope/x')).json()).toEqual(['baz/qux', 'foo/bar'])
+    expect(await (await req('DELETE', '/api/trending/marks?repo=foo%2Fbar')).json()).toEqual(['baz/qux'])
+  })
+
+  it('坏写入 400:非 owner/name、缺字段、多段斜杠;PUT/DELETE 同一口径', async () => {
+    const { req } = await world()
+    for (const repo of ['foobar', '', 'a/b/c', 42]) {
+      expect((await req('PUT', '/api/trending/marks', { repo })).status).toBe(400)
+    }
+    expect((await req('PUT', '/api/trending/marks', {})).status).toBe(400)
+    expect((await req('DELETE', '/api/trending/marks')).status).toBe(400)
+    expect((await req('DELETE', '/api/trending/marks?repo=foobar')).status).toBe(400)
+  })
+
+  it('未认证 401(requireAuth 拦截面)', async () => {
+    const { db } = openDb(':memory:')
+    await bootstrap(db, { username: 'admin', password: 'pw' })
+    const app = createApp({
+      db,
+      trending: new TrendingService(db, { fetchText: async () => '', translateDescriptions: async () => [] }),
+    })
+    expect((await app.request('/api/trending/marks')).status).toBe(401)
   })
 })
