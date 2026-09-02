@@ -100,6 +100,7 @@ export const AA_MODEL_MAP: Record<string, { provider: ModelProviderId; officialI
   'tts-1-hd': { provider: 'openai', officialId: 'tts-1-hd' },
   // Anthropic
   'claude-fable-5': { provider: 'anthropic', officialId: 'claude-fable-5' },
+  'claude-fable-5-1': { provider: 'anthropic', officialId: 'claude-fable-5-1' },
   'claude-opus-5': { provider: 'anthropic', officialId: 'claude-opus-5' },
   'claude-sonnet-5': { provider: 'anthropic', officialId: 'claude-sonnet-5' },
   'claude-4-5-haiku': { provider: 'anthropic', officialId: 'claude-haiku-4-5' },

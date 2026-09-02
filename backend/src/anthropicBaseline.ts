@@ -14,8 +14,10 @@ import type { BaselineModel } from './modelTracking'
  * 归属与研究结论(research/sources.md §3/§4/§5):Claude 均以文本为唯一主要模型种类
  * (视觉输入是能力不是第二条记录);官方明确不提供自有 embedding(文档推荐的 Voyage AI
  * 是外部厂家)、无独立审核模型(通用 Claude 的审核用法指南不算)——基线均无对应行。
- * 仅限 Project Glasswing 参与者的 Claude Mythos 5 / Mythos Preview 不在公开模型目录,
- * 待其公开发布后再核验纳入。
+ * 仅限受邀访问的模型(Project Glasswing):2026-08-25 首轮核验时 Mythos 5 不在公开
+ * 模型目录,决策「待公开发布后再核验纳入」;2026-09-02 复核,Mythos 5 / 5.1 已有公开
+ * 模型页与公开定价行(invite-only 只是访问方式),排除前提失效,依原决策一并入档;
+ * Mythos Preview 仍只见于迁移指南提及,不纳入。
  * ID 口径(研究 §5.3):4.6 世代起无日期后缀的 API ID 本身即固定快照(官方「Every
  * Claude model ID is a pinned snapshot, including the dateless IDs used from the 4.6
  * generation on」),不作移动别名处理,直接入档;4.5 及之前世代的日期后缀 ID
@@ -51,6 +53,29 @@ export const ANTHROPIC_BASELINE: BaselineModel[] = [
   // ---- 当前 lineup(总览 comparison 表)----
   {
     provider: 'anthropic',
+    officialId: 'claude-fable-5-1',
+    name: 'Claude Fable 5.1',
+    kind: 'text',
+    stage: 'ga',
+    availability: ['api'],
+    summary: 'Anthropic 当前能力最强的公开发布模型(Fable 5 后继):长时程智能体、编程与研究,自适应思考常开,缓存读降至输入价 0.025 倍',
+    sources: [
+      { title: 'Claude Fable 5.1 模型页', url: 'https://platform.claude.com/docs/en/models/fable-5-1/overview' },
+      OVERVIEW_PAGE,
+      PRICING_PAGE,
+    ],
+    pricing: price('10', '50'),
+    limits: ctx('1M', '128K'),
+    trainingParams: null, // Anthropic 从未披露任何 Claude 模型的参数量
+    matchAliases: ['Claude Fable 5.1', 'claude-fable-5-1'],
+    matchSlugs: ['claude-fable-5-1', 'fable-5-1'],
+    // 发布条目末链即此页(与轮询认领的 sourceUrl 逐字一致,历史去重同键不产重复行)
+    events: [
+      { kind: 'api_available', occurredOn: '2026-09-01', title: 'Claude Fable 5.1 发布,Fable 5 的长时程后继', sourceUrl: 'https://platform.claude.com/docs/en/models/fable-5-1/whats-new-fable-5-1' },
+    ],
+  },
+  {
+    provider: 'anthropic',
     officialId: 'claude-fable-5',
     name: 'Claude Fable 5',
     kind: 'text',
@@ -71,6 +96,51 @@ export const ANTHROPIC_BASELINE: BaselineModel[] = [
     matchSlugs: ['claude-fable-5', 'fable-5', 'introducing-claude-fable-5-and-claude-mythos-5'],
     events: [
       { kind: 'api_available', occurredOn: '2026-06-09', title: 'Claude Fable 5 发布,最强公开发布模型', sourceUrl: 'https://platform.claude.com/docs/en/models/fable-5/introducing-claude-fable-5-and-claude-mythos-5' },
+    ],
+  },
+  // ---- Invite only(Project Glasswing):公开模型页 + 公开定价行,访问受邀(2026-09-02 入档)----
+  // 行序须在 Fable 5 之后:共公告条目(6-09 发布)alias+slug 双命中两行,由基线行序归主模型
+  {
+    provider: 'anthropic',
+    officialId: 'claude-mythos-5',
+    name: 'Claude Mythos 5',
+    kind: 'text',
+    stage: 'ga',
+    availability: ['api'],
+    summary: '面向防御性网络安全与生命科学研究的受邀模型(Project Glasswing):与 Fable 5 同规格同价,自适应思考常开',
+    sources: [
+      { title: 'Claude Mythos 5 模型页', url: 'https://platform.claude.com/docs/en/models/mythos-5/overview' },
+      PRICING_PAGE,
+    ],
+    pricing: price('10', '50'),
+    limits: ctx('1M', '128K'),
+    trainingParams: null,
+    matchAliases: ['Claude Mythos 5', 'claude-mythos-5'],
+    matchSlugs: ['claude-mythos-5', 'mythos-5'],
+    events: [
+      // 与 Fable 5 同发布公告;该条目由基线行序归 Fable 5,Mythos 5 的上线动态在此锚定
+      { kind: 'api_available', occurredOn: '2026-06-09', title: 'Claude Mythos 5 发布(Project Glasswing 受邀访问)', sourceUrl: 'https://platform.claude.com/docs/en/models/fable-5/introducing-claude-fable-5-and-claude-mythos-5' },
+    ],
+  },
+  {
+    provider: 'anthropic',
+    officialId: 'claude-mythos-5-1',
+    name: 'Claude Mythos 5.1',
+    kind: 'text',
+    stage: 'ga',
+    availability: ['api'],
+    summary: 'Fable 5.1 的受邀版本(Project Glasswing):同规格同价,面向防御性网络安全与生命科学研究',
+    sources: [
+      { title: 'Claude Mythos 5.1 模型页', url: 'https://platform.claude.com/docs/en/models/mythos-5-1/overview' },
+      PRICING_PAGE,
+    ],
+    pricing: price('10', '50'),
+    limits: ctx('1M', '128K'),
+    trainingParams: null,
+    matchAliases: ['Claude Mythos 5.1', 'claude-mythos-5-1'],
+    matchSlugs: ['claude-mythos-5-1', 'mythos-5-1'],
+    events: [
+      { kind: 'api_available', occurredOn: '2026-09-01', title: 'Claude Mythos 5.1 发布(Project Glasswing 受邀访问)', sourceUrl: 'https://www.anthropic.com/claude-fable-and-mythos-5-1' },
     ],
   },
   {

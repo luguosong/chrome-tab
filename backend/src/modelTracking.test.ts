@@ -74,6 +74,11 @@ const ZHIPU_MD = `# 新品发布
  */
 const ANTHROPIC_MD = `# Claude Platform release notes
 
+### September 1, 2026
+
+* We've launched **Claude Fable 5.1** (\`claude-fable-5-1\`), the successor to Claude Fable 5 for long-running agentic coding, knowledge work, and research, alongside **Claude Mythos 5.1** (\`claude-mythos-5-1\`) for Project Glasswing participants. Both models support a [1M token context window](https://platform.claude.com/docs/en/build-with-claude/context-windows) by default, 128k max output tokens, and always-on [adaptive thinking](https://platform.claude.com/docs/en/build-with-claude/thinking), at $10 / $50 USD per MTok, the same as Claude Fable 5, with cache reads cut to $0.25 per MTok. Claude Fable 5.1 is available on the Claude API, [Claude in Amazon Bedrock](https://platform.claude.com/docs/en/build-with-claude/claude-in-amazon-bedrock), [Claude Platform on AWS](https://platform.claude.com/docs/en/build-with-claude/claude-platform-on-aws), [Claude on Google Cloud](https://platform.claude.com/docs/en/build-with-claude/claude-on-vertex-ai), and [Claude in Microsoft Foundry](https://platform.claude.com/docs/en/build-with-claude/claude-in-microsoft-foundry). See [What's new in Claude Fable 5.1](https://platform.claude.com/docs/en/models/fable-5-1/whats-new-fable-5-1) for capabilities, API changes, and migration guidance.
+* Prompt cache reads on Claude Fable 5.1 and Claude Mythos 5.1 cost $0.25 USD per million tokens: 0.025x the base input price, compared with 0.1x on other models. Cache writes are unchanged. See [Prompt caching pricing](https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching).
+
 ### August 20, 2026
 
 * We've released **v1.0 of the [Python SDK](https://platform.claude.com/docs/en/cli-sdks-libraries/sdks/python)**. The SDK's HTTP layer moves from httpx to httpx2.
@@ -741,11 +746,14 @@ describe('模型追踪:Anthropic release notes 解析(纯函数)', () => {
 
   it('提取日期段条目:段名归一为日期、条目原文与链接按出现序', () => {
     const notes = parseAnthropicReleases(ANTHROPIC_MD).entries
-    expect(notes).toHaveLength(6)
-    expect(notes[0]).toMatchObject({ date: '2026-08-20' })
-    expect(notes[0]!.links).toEqual(['https://platform.claude.com/docs/en/cli-sdks-libraries/sdks/python'])
+    expect(notes).toHaveLength(8)
+    expect(notes[0]).toMatchObject({ date: '2026-09-01' })
+    // 发布条目多链接按出现序,末链为模型专属 whats-new 页(认领锚点)
+    expect(notes[0]!.links.at(-1)).toBe('https://platform.claude.com/docs/en/models/fable-5-1/whats-new-fable-5-1')
+    expect(notes[2]).toMatchObject({ date: '2026-08-20' })
+    expect(notes[2]!.links).toEqual(['https://platform.claude.com/docs/en/cli-sdks-libraries/sdks/python'])
     // 序数后缀日期段(2024 年旧格式)正常解析
-    expect(notes[5]).toMatchObject({ date: '2024-10-03' })
+    expect(notes[7]).toMatchObject({ date: '2024-10-03' })
   })
 
   it('畸形日期段跳过,空文返回空数组;畸形段落意外跳过,非 bullet 行不计(ADR-0052)', () => {
@@ -755,9 +763,17 @@ describe('模型追踪:Anthropic release notes 解析(纯函数)', () => {
     expect(r.skipped).toEqual(['### Someday 1, 2026'])
   })
 
-  it('双条件归属:Opus 5/Fable 5 发布条目产事件;SDK、fast mode、弃用公告条目跳过', () => {
+  it('双条件归属:9-01/Opus 5/Fable 5 发布条目产事件;SDK、平台条目、弃用公告条目跳过', () => {
     const notes = parseAnthropicReleases(ANTHROPIC_MD).entries
-    const opus5 = matchAnthropicEvent(notes[1]!)!
+    // 9-01 Fable 5.1 发布条目:alias+模型专属 whats-new 链接双命中,归 fable-5-1 而非 fable-5
+    const fable51 = matchAnthropicEvent(notes[0]!)!
+    expect(fable51.officialId).toBe('claude-fable-5-1')
+    expect(fable51.event).toMatchObject({
+      kind: 'updated',
+      occurredOn: '2026-09-01',
+      sourceUrl: 'https://platform.claude.com/docs/en/models/fable-5-1/whats-new-fable-5-1',
+    })
+    const opus5 = matchAnthropicEvent(notes[3]!)!
     expect(opus5.officialId).toBe('claude-opus-5')
     expect(opus5.event).toMatchObject({
       kind: 'updated',
@@ -765,17 +781,21 @@ describe('模型追踪:Anthropic release notes 解析(纯函数)', () => {
       sourceUrl: 'https://platform.claude.com/docs/en/models/opus-5/whats-new-opus-5',
     })
     expect(opus5.event.title).toContain("We've launched **Claude Opus 5**")
-    expect(matchAnthropicEvent(notes[0]!)).toBeNull() // Python SDK(平台功能)
-    expect(matchAnthropicEvent(notes[2]!)).toBeNull() // fast mode 移除(链接不含 opus-4-7 slug)
-    expect(matchAnthropicEvent(notes[4]!)).toBeNull() // Opus 4.1 弃用公告(链接为弃用表,退役口径归基线)
-    expect(matchAnthropicEvent(notes[5]!)).toBeNull() // Haiku 3.5 产品页链接无本型号 slug
+    // 平台条目(链接无模型 slug)不认领——即使文本同时提及 Fable 5.1 与 Fable 5(词边界不误领)
+    expect(matchAnthropicEvent(notes[1]!)).toBeNull()
+    expect(matchAnthropicEvent(notes[2]!)).toBeNull() // Python SDK(平台功能)
+    expect(matchAnthropicEvent(notes[4]!)).toBeNull() // fast mode 移除(链接不含 opus-4-7 slug)
+    expect(matchAnthropicEvent(notes[6]!)).toBeNull() // Opus 4.1 弃用公告(链接为弃用表,退役口径归基线)
+    expect(matchAnthropicEvent(notes[7]!)).toBeNull() // Haiku 3.5 产品页链接无本型号 slug
   })
 
-  it('基线外型号不认领:仅限受邀项目(Project Glasswing)的 Mythos 条目不产动态', () => {
+  it('共同公告条目归主模型:Mythos 已入档,6-09 发布条目仍归 Fable 5(基线行序:主模型在前)', () => {
     const notes = parseAnthropicReleases(ANTHROPIC_MD).entries
-    // Fable 5 与 Mythos 5 同条目:基线只认领 Fable 5,Mythos 无档案行
-    expect(matchAnthropicEvent(notes[3]!)!.officialId).toBe('claude-fable-5')
-    expect(ANTHROPIC_BASELINE.some((b) => b.officialId.includes('mythos'))).toBe(false)
+    // Fable 5 与 Mythos 5 同条目:两行都双命中,数组顺序(Fable 5 在 Mythos 5 前)定归属
+    expect(matchAnthropicEvent(notes[5]!)!.officialId).toBe('claude-fable-5')
+    // Mythos 5/5.1 已随公开模型页+公开定价行核验入档(2026-09-02),invite only 记入 summary
+    expect(ANTHROPIC_BASELINE.filter((b) => b.officialId.includes('mythos')).map((b) => b.officialId).sort())
+      .toEqual(['claude-mythos-5', 'claude-mythos-5-1'])
   })
 
   it('词边界:「Claude Opus 4」不认领「Claude Opus 4.8」的条目,「claude-haiku-4-5」不认领 dated 快照链接', () => {
@@ -817,7 +837,7 @@ describe('模型追踪:Anthropic 基线自身(issues/04)', () => {
     const { db } = openDb(':memory:')
     const svc = await makeService(db, makeDeps(''))
     const anthropic = (await svc.archive()).models.filter((m) => m.provider === 'anthropic')
-    expect(anthropic).toHaveLength(16)
+    expect(anthropic).toHaveLength(19)
     const opus5 = anthropic.find((m) => m.officialId === 'claude-opus-5')!
     expect(opus5.pricing!.entries.map((e) => e.text)).toEqual([
       '输入 5 美元/百万 tokens',
