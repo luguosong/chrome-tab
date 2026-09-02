@@ -21,9 +21,10 @@ export interface PendingClue {
 
 /**
  * 单条目分派结果:命中 → 事件(家族式条目「Grok 4.20 and Grok 4.20 Multi-agent
- * are live」可多条);未认领信号 → 待核验线索(可多条:整条未认领一条,或部分认领
- * 条目每个残余 ID 一条;空数组 = 不落线索,如月暗文章流、无 `Model:` 字段的平台
- * 条目)。
+ * are live」可多条);未认领 → 待核验线索是**默认**(整条未认领一条,或部分认领条目
+ * 每个残余 ID 一条;键稳定优先——文档链接/锚点/裸 ID 类恒定键,无结构化键才用
+ * 日期+文本派生)。空数组 = 不落线索,仅有两形态合法:月暗文章流(线索即洪水)与
+ * 无 `Model:` 字段的平台条目(非模型信号)。
  */
 export interface MatchEntryResult {
   hits: MatchedHit[]
@@ -67,15 +68,33 @@ export const clipFragment = (raw: string): string => {
   return cps.length > 80 ? `${cps.slice(0, 80).join('')}…` : raw
 }
 
-/** 'YYYY-MM-DD' 是实日期(回滚校验,`2026-13-45`/`2026-02-30` 拒收)——月暗卡日期
- *  与 DeepSeek 段日期共用(单一实现防漂移;各 normalize*Date 是归一+校验复合体,
- *  形态不同不合并)。 */
+/** 'YYYY-MM-DD' 是实日期(回滚校验,`2026-13-45`/`2026-02-30` 拒收)——月暗卡日期、
+ *  DeepSeek 段日期与 normalizeIsoDate 的归一侧共用(单一实现防漂移)。归一复合体:
+ *  数字未补零形态单点 normalizeIsoDate;Anthropic/xAI 的英文月份形态各异,不合并。 */
 export const isRealIsoDate = (s: string): boolean => {
   const d = new Date(`${s}T00:00:00Z`)
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s
 }
 
-// ---- 匹配底座(多家共享的词边界/slug/月份判定;单一实现防两处漂移)----
+/** '2026-8-19' / '2026-06-16' → '2026-08-19' / '2026-06-16';非法 → null——智谱
+ *  label 与百炼时间列共用(两上游实测产未补零形态,同源漂移不该在接入侧蒸发;
+ *  2026-09-02 评审候选 2 收编逐字符同构对,回滚校验复合 isRealIsoDate 不另立)。 */
+export function normalizeIsoDate(raw: string): string | null {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(raw.trim())
+  if (!m) return null
+  const [, y, mo, d] = m
+  const iso = `${y}-${mo!.padStart(2, '0')}-${d!.padStart(2, '0')}`
+  return isRealIsoDate(iso) ? iso : null
+}
+
+// ---- 匹配底座(多家共享的词边界/slug/ID 解析/月份判定;单一实现防两处漂移)----
+//
+// 认领优先级三策略(一条目命中多行基线时归谁;各族策略有存在理由,非通则):
+// · 基线行序——双条件族(智谱/Anthropic):共公告条目归行序在前的主模型,是基线数据的
+//   人工排布意图(住址:anthropicBaseline 注释 + modelTracking.test「共同公告」用例)
+// · 最长 alias——标题族月暗:「Kimi K2 Thinking」同时命中「Kimi K2」与「Kimi K2
+//   Thinking」取更长(标题无链接 slug 佐证,靠更具体的别名消歧)
+// · 精确 + 最长前缀——结构化 ID 族(makeIdResolver):ID 前缀天然分层,快照归家族行
 
 /**
  * alias 词边界命中:前不得是 [A-Za-z0-9_.-];后不得是标识符延续(单词字符、连字符,
@@ -91,6 +110,31 @@ export function aliasIn(alias: string, description: string): boolean {
 export function slugIn(slug: string, docUrl: string): boolean {
   const re = new RegExp(`${slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.-])`)
   return re.test(docUrl)
+}
+
+/**
+ * 结构化 ID → 基线行解析器工厂(OpenAI `Model:` 字段与百炼 ID 列共用;2026-09-02
+ * 评审候选 2 收编逐字符同构对):**精确 alias 命中优先返回**(「gpt-5.2-codex」归自己,
+ * 不被「gpt-5.2」前缀认领);否则取最长 `id.startsWith(alias + '-')` 前缀命中——日期
+ * 快照/变体归家族行;无命中 → null(残余 ID 线索走 residualIdClues)。
+ */
+export function makeIdResolver(
+  baseline: ReadonlyArray<{ officialId: string; matchAliases: readonly string[] }>,
+): (id: string) => string | null {
+  return (id) => {
+    let best: string | null = null
+    let bestLen = -1
+    for (const b of baseline) {
+      for (const a of b.matchAliases) {
+        if (a === id) return b.officialId
+        if (id.startsWith(`${a}-`) && a.length > bestLen) {
+          best = b.officialId
+          bestLen = a.length
+        }
+      }
+    }
+    return best
+  }
 }
 
 /**

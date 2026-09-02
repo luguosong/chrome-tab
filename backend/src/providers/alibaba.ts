@@ -1,5 +1,5 @@
 import { QWEN_BASELINE, QWEN_RELEASES_URL } from '../qwenBaseline'
-import { clipFragment, type MatchedHit, type ParseResult, type ProviderDef, residualIdClues } from './def'
+import { clipFragment, makeIdResolver, type MatchedHit, normalizeIsoDate, type ParseResult, type ProviderDef, residualIdClues } from './def'
 
 // ---- 阿里通义:百炼「模型上下架与更新」(研究 §3:主发布源 SSR 纯表格。解析器
 //  原随 qwenBaseline 走(并行接入防撞车约定),ADR-0038 起归一为厂家 provider 文件)----
@@ -28,16 +28,6 @@ function cellText(cell: string): string {
     .trim()
 }
 
-/** 'YYYY-M-D' 零填充并回滚校验(实日期);非法 → null。 */
-function normalizeBailianDate(raw: string): string | null {
-  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(raw)
-  if (!m) return null
-  const [, y, mo, d] = m
-  const date = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)))
-  if (date.getUTCMonth() !== Number(mo) - 1 || date.getUTCDate() !== Number(d)) return null
-  return `${y}-${mo!.padStart(2, '0')}-${d!.padStart(2, '0')}`
-}
-
 /**
  * 页面 HTML → 首表行数组。**只取第一个 `<table>`**(华北2 北京区;页面 10 张表 = 5 唯一
  * 表 × 2 拷贝 SSR+hydration,首表即全量北京区)。表头行为 `<th>` 无 `<td>` 自然跳过;
@@ -58,7 +48,7 @@ export function parseBailianReleases(html: string): ParseResult<BailianRow> {
       skipped.push(frag) // 意外跳过:数据行列数异常(表头为 0 格,此处必为错列)
       continue
     }
-    const date = normalizeBailianDate(cells[1]!)
+    const date = normalizeIsoDate(cells[1]!)
     if (date === null) {
       skipped.push(frag) // 意外跳过:时间列日期校验失败
       continue
@@ -74,26 +64,12 @@ export function parseBailianReleases(html: string): ParseResult<BailianRow> {
 }
 
 /**
- * 表格行模型 ID → 基线 officialId。**精确命中优先返回**(「qwen3.7-flash」归自己,不被
- * 别的更长前缀抢走);否则取最长 `id.startsWith(alias + '-')` 前缀命中——快照/变体
- * (qwen3.7-max-2026-06-08、qwen-plus-latest)归家族行。无版本别名(qwen-plus 等)与
- * 百炼托管第三方模型(kimi-k3、ZHIPU/GLM-5.3、vidu/…)不在任何 alias 集,天然 null
- * ——这是「跟踪厂家」定义性约束(不认领非自家模型)。
+ * 表格行模型 ID → 基线 officialId(makeIdResolver 绑定实例,精确/最长前缀口径立法见
+ * def;快照/变体 qwen3.7-max-2026-06-08、qwen-plus-latest 归家族行)。无版本别名
+ * (qwen-plus 等)与百炼托管第三方模型(kimi-k3、ZHIPU/GLM-5.3、vidu/…)不在任何
+ * alias 集,天然 null——这是「跟踪厂家」定义性约束(不认领非自家模型)。
  */
-export function resolveQwenModelId(id: string): string | null {
-  let best: string | null = null
-  let bestLen = -1
-  for (const b of QWEN_BASELINE) {
-    for (const a of b.matchAliases) {
-      if (a === id) return b.officialId
-      if (id.startsWith(`${a}-`) && a.length > bestLen) {
-        best = b.officialId
-        bestLen = a.length
-      }
-    }
-  }
-  return best
-}
+export const resolveQwenModelId = makeIdResolver(QWEN_BASELINE)
 
 /**
  * 表格行 → 每个被认领模型一条事件(kind 恒 'updated',自动解析不猜语义;同格多 ID 命中

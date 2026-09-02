@@ -10,6 +10,7 @@ import { ANTHROPIC_BASELINE } from './anthropicBaseline'
 import { XAI_BASELINE } from './xaiBaseline'
 import { KIMI_BASELINE } from './kimiBaseline'
 import { OPENAI_BASELINE } from './openaiBaseline'
+import { normalizeIsoDate } from './providers/def'
 import {
   ANTHROPIC_RELEASES_URL,
   matchAnthropicEvent,
@@ -19,7 +20,7 @@ import {
 import { KIMI_BLOG_URL, KIMI_NEWS_URL, matchKimiEvent, parseKimiArticles } from './providers/moonshot'
 import { matchOpenAIEvents, OPENAI_CHANGELOG_URL, OPENAI_DEF, parseOpenAIChangelog, resolveOpenAIModelId, type OpenAIChangelogEntry } from './providers/openai'
 import { matchXaiEvent, parseXaiReleaseNotes, XAI_RELEASES_URL } from './providers/xai'
-import { matchZhipuEvent, normalizeZhipuDate, parseZhipuReleases, ZHIPU_RELEASES_URL } from './providers/zhipu'
+import { matchZhipuEvent, parseZhipuReleases, ZHIPU_RELEASES_URL } from './providers/zhipu'
 import { DEEPSEEK_BASELINE, DEEPSEEK_UPDATES_URL } from './deepseekBaseline'
 import { matchDeepSeekEvent, parseDeepSeekUpdates } from './providers/deepseek'
 import { QWEN_BASELINE, QWEN_RELEASES_URL } from './qwenBaseline'
@@ -288,10 +289,10 @@ describe('模型追踪:图标类型接线(单例/占格)', () => {
 
 describe('模型追踪:智谱发布页解析(纯函数)', () => {
   it('日期归一化:不补零 label 补齐、非法日期拒绝', () => {
-    expect(normalizeZhipuDate('2026-8-19')).toBe('2026-08-19')
-    expect(normalizeZhipuDate('2026-06-16')).toBe('2026-06-16')
-    expect(normalizeZhipuDate('2026-13-01')).toBeNull()
-    expect(normalizeZhipuDate('')).toBeNull()
+    expect(normalizeIsoDate('2026-8-19')).toBe('2026-08-19')
+    expect(normalizeIsoDate('2026-06-16')).toBe('2026-06-16')
+    expect(normalizeIsoDate('2026-13-01')).toBeNull()
+    expect(normalizeIsoDate('')).toBeNull()
   })
 
   it('提取 Update 块:label/description/块内首个链接;相对路径归一为绝对', () => {

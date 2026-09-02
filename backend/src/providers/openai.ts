@@ -1,5 +1,5 @@
 import { OPENAI_BASELINE, OPENAI_CHANGELOG_PAGE_URL, openaiChangelogAnchor } from '../openaiBaseline'
-import { clipFragment, isRealIsoDate, MONTHS, type MatchedHit, type ParseResult, type ProviderDef, residualIdClues } from './def'
+import { clipFragment, isRealIsoDate, makeIdResolver, MONTHS, type MatchedHit, type ParseResult, type ProviderDef, residualIdClues } from './def'
 
 // ---- OpenAI API changelog(研究 §3:主发布源。与别家不同,条目类型行自带
 //  `Model: id` 结构化字段,归属无需双条件猜测——精确 ID 匹配 + 最长前缀快照归族)----
@@ -81,25 +81,11 @@ export function parseOpenAIChangelog(md: string): ParseResult<OpenAIChangelogEnt
 }
 
 /**
- * 条目模型 ID → 基线 officialId。**精确 alias 命中优先返回**(「gpt-5.2-codex」归自己,
- * 不被「gpt-5.2」前缀认领);否则取最长 `id.startsWith(alias + '-')` 前缀命中——日期
- * 快照(gpt-image-2-2026-04-21、gpt-4o-mini-transcribe-2025-12-15)归家族行;移动别名
- * (chat-latest、daybreak-*-latest、gpt-5.x-chat-latest)不在基线,天然返回 null。
+ * 条目模型 ID → 基线 officialId(makeIdResolver 绑定实例,精确/最长前缀口径立法见
+ * def;日期快照 gpt-image-2-2026-04-21 等归家族行;移动别名 chat-latest、
+ * daybreak-*-latest、gpt-5.x-chat-latest 不在基线,天然返回 null)。
  */
-export function resolveOpenAIModelId(id: string): string | null {
-  let best: string | null = null
-  let bestLen = -1
-  for (const b of OPENAI_BASELINE) {
-    for (const a of b.matchAliases) {
-      if (a === id) return b.officialId
-      if (id.startsWith(`${a}-`) && a.length > bestLen) {
-        best = b.officialId
-        bestLen = a.length
-      }
-    }
-  }
-  return best
-}
+export const resolveOpenAIModelId = makeIdResolver(OPENAI_BASELINE)
 
 /** 条目标题:正文首行,超长截断(changelog 无短标题,首句即最接近的概述)。 */
 function openaiEntryTitle(firstLine: string): string {

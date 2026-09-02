@@ -1,6 +1,6 @@
 import type { ModelEvent } from 'chrome-tab-shared'
 import { ZHIPU_BASELINE } from '../zhipuBaseline'
-import { aliasIn, clipFragment, type ParseResult, type ProviderDef, slugIn } from './def'
+import { aliasIn, clipFragment, normalizeIsoDate, type ParseResult, type ProviderDef, slugIn } from './def'
 
 // ---- 智谱新品发布页(研究 §3:主发布源;发布页 Markdown 的 `<Update>` 块)----
 
@@ -14,16 +14,6 @@ export interface ZhipuUpdate {
   docUrl: string | null
 }
 
-/** '2026-8-19' / '2026-06-16' → '2026-08-19' / '2026-06-16';非法 → null。 */
-export function normalizeZhipuDate(raw: string): string | null {
-  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(raw.trim())
-  if (!m) return null
-  const [, y, mo, d] = m
-  const date = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)))
-  if (date.getUTCMonth() !== Number(mo) - 1 || date.getUTCDate() !== Number(d)) return null
-  return `${y}-${mo!.padStart(2, '0')}-${d!.padStart(2, '0')}`
-}
-
 /** 智谱新品发布 Markdown → 更新块数组。结构化 `<Update>` 块逐个提取 label/description/块内首个链接;
  *  双 lookahead 锚定两属性、**次序无关**(上游调整属性序不致静默清零);畸形块跳过。 */
 export function parseZhipuReleases(md: string): ParseResult<ZhipuUpdate> {
@@ -32,7 +22,7 @@ export function parseZhipuReleases(md: string): ParseResult<ZhipuUpdate> {
   const blockRe = /<Update\b(?=[^>]*label="([^"]*)")(?=[^>]*description="([^"]*)")[^>]*>([\s\S]*?)<\/Update>/g
   const blocks = [...md.matchAll(blockRe)]
   for (const m of blocks) {
-    const date = normalizeZhipuDate(m[1]!)
+    const date = normalizeIsoDate(m[1]!)
     if (!date) {
       // 片段用已提取字段(label 前置):畸形 label 正是排障要看的内容,原始块截断会被
       // 前置长 description 推出 80 字符窗口(属性调序是双 lookahead 声称防御的动作)
