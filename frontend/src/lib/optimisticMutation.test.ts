@@ -149,6 +149,7 @@ describe('authoritativeCallbacks(权威写形态,useSetNewsSources/useSetKnownMa
   const marksKey = ['ut-known'] as const
 
   it('onSuccess 整份写响应(响应即数据);失败静默由「仅此一个回调」构造保证', async () => {
+    // 空客户端即「缓存未载入照写」——权威写无判空门(与乐观写门 prev != null 的差异点)
     const qc = new QueryClient()
     const cb = authoritativeCallbacks<string[]>(qc, marksKey)
 
@@ -182,13 +183,5 @@ describe('authoritativeCallbacks(权威写形态,useSetNewsSources/useSetKnownMa
     )
     await new Promise((r) => setTimeout(r, 0))
     expect(qc.getQueryData<string[]>(marksKey)).toEqual(['a', 'b'])
-  })
-
-  it('缓存未载入时照写(权威写无判空门——与乐观写门的差异点)', async () => {
-    const qc = new QueryClient()
-    const cb = authoritativeCallbacks<string[]>(qc, marksKey)
-
-    await cb.onSuccess(['x'])
-    expect(qc.getQueryData<string[]>(marksKey)).toEqual(['x'])
   })
 })
