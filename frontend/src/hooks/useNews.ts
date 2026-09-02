@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { NewsFeedResponse, NewsSourceId } from 'chrome-tab-shared'
 import { apiFetch } from '../api/client'
+import { authoritativeCallbacks } from '../lib/optimisticMutation'
 
 /**
  * 新闻取数与勾选写回(单例图标「新闻」,CONTEXT.md;数据落库、后端 30min 轮询预取,
@@ -29,10 +30,6 @@ export function useSetNewsSources() {
   return useMutation({
     mutationFn: (sources: NewsSourceId[]) =>
       apiFetch<NewsFeedResponse>('/api/news/sources', { method: 'PUT', body: JSON.stringify({ sources }) }),
-    onSuccess: async (data) => {
-      // 先取消在途 GET 再写缓存,防止先发的旧快照后到覆盖勾选结果(勾选框回弹;同 useTodo 先例)
-      await qc.cancelQueries({ queryKey: KEYS.feed })
-      qc.setQueryData(KEYS.feed, data)
-    },
+    ...authoritativeCallbacks<NewsFeedResponse>(qc, KEYS.feed),
   })
 }

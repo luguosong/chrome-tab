@@ -17,7 +17,8 @@ export type OptimisticUpdater<T, V> = (prev: NonNullable<T>, vars: V) => T
  *
  * 不经此骨架的例外(CONTEXT.md「乐观 mutation」词条):「布局草稿」的乐观写
  * 发生在松手前;「拖拽编排」的连续乐观流靠松手落定的失效重拉自愈,均无快照
- * 还原语义;「新闻」勾选是 onSuccess 权威写(响应即数据,无乐观写无还原)。
+ * 还原语义。「新闻」勾选与「已了解」标记的 onSuccess 权威写走下方姊妹出口
+ * authoritativeCallbacks,不在例外之列。
  */
 export function optimisticCallbacks<T, V>(
   qc: QueryClient,
@@ -40,5 +41,27 @@ export function optimisticCallbacks<T, V>(
       if (ctx?.prev !== undefined) qc.setQueryData<T>(key, ctx.prev)
     },
     onSettled: () => qc.invalidateQueries({ queryKey: key }),
+  }
+}
+
+/**
+ * 权威写出口(optimisticCallbacks 的姊妹,同文件单点):onSuccess 取消在途
+ * GET → 整份写响应。「响应即数据」——响应本身就是服务端写后权威值(SQLite
+ * 点写毫秒级,不做乐观回滚),故无乐观写、无快照还原、无失效重拉;仅此一个
+ * 回调即是「mutation 失败时缓存不动」的静默语义(无 onMutate 就无乐观态可
+ * 还原,无 onError 就无还原可漏)。消费方仅声明 mutationFn:「新闻」勾选
+ * (key = news feed)与「已了解」标记(key = known marks,响应 = 写后全量)。
+ */
+export function authoritativeCallbacks<T>(
+  qc: QueryClient,
+  key: readonly unknown[],
+) {
+  return {
+    onSuccess: async (data: T) => {
+      // 先取消在途 GET 再写缓存,防先发的旧快照后到覆盖权威值(勾选框回弹;
+      // 取消前提与乐观骨架同源,useSetNewsSources 手抄序列收编而来)
+      await qc.cancelQueries({ queryKey: key })
+      qc.setQueryData(key, data)
+    },
   }
 }

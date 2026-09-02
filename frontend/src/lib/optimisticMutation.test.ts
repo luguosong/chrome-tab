@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
-import { optimisticCallbacks } from './optimisticMutation'
+import { authoritativeCallbacks, optimisticCallbacks } from './optimisticMutation'
 import { CONFIG_KEY } from '../api/config'
 import type { Config, Icon, LayoutSettings } from './types'
 
@@ -141,5 +141,54 @@ describe('optimisticCallbacks(null 语义,useTodo 收编形态)', () => {
     qc.setQueryData<Bundle | null>(todoKey, null)
     cb.onError(new Error('net'), 1, ctx)
     expect(qc.getQueryData<Bundle | null>(todoKey)).toEqual({ today: [1], week: [], inbox: [1] })
+  })
+})
+
+describe('authoritativeCallbacks(权威写形态,useSetNewsSources/useSetKnownMark 收编形态)', () => {
+  /** 已了解标记形态:string[] 全量(响应 = 写后全量,CONTEXT.md「已了解」)。 */
+  const marksKey = ['ut-known'] as const
+
+  it('onSuccess 整份写响应(响应即数据);失败静默由「仅此一个回调」构造保证', async () => {
+    const qc = new QueryClient()
+    const cb = authoritativeCallbacks<string[]>(qc, marksKey)
+
+    await cb.onSuccess(['a', 'b'])
+    expect(qc.getQueryData<string[]>(marksKey)).toEqual(['a', 'b'])
+    // 无 onMutate(不产乐观态)/onError(无还原)/onSettled(无失效重拉)——
+    // mutation 失败时缓存天然不动,「漏 cancel/漏还原」类 bug 无表达位
+    expect(Object.keys(cb)).toEqual(['onSuccess'])
+  })
+
+  it('在途 GET 后到不覆盖权威值(cancelQueries 防勾选回弹同款坑)', async () => {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { staleTime: 0, retry: false } },
+    })
+    await qc.fetchQuery({ queryKey: marksKey, queryFn: async () => ['old'] })
+    // 在途 refetch 挂起(真实场景:列表 stale 后的后台重拉)
+    let resolveGet!: (v: string[]) => void
+    const inflight = qc.fetchQuery({
+      queryKey: marksKey,
+      queryFn: () => new Promise<string[]>((res) => (resolveGet = res)),
+    })
+
+    const cb = authoritativeCallbacks<string[]>(qc, marksKey)
+    await cb.onSuccess(['a', 'b'])
+    expect(qc.getQueryData<string[]>(marksKey)).toEqual(['a', 'b'])
+
+    resolveGet(['old']) // 旧快照后到;若未取消,将覆盖写结果(勾选框回弹)
+    await inflight.then(
+      () => {},
+      () => {},
+    )
+    await new Promise((r) => setTimeout(r, 0))
+    expect(qc.getQueryData<string[]>(marksKey)).toEqual(['a', 'b'])
+  })
+
+  it('缓存未载入时照写(权威写无判空门——与乐观写门的差异点)', async () => {
+    const qc = new QueryClient()
+    const cb = authoritativeCallbacks<string[]>(qc, marksKey)
+
+    await cb.onSuccess(['x'])
+    expect(qc.getQueryData<string[]>(marksKey)).toEqual(['x'])
   })
 })
