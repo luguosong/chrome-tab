@@ -9,13 +9,7 @@ import {
 import type { Db } from './db'
 import type { AuthEnv } from './auth'
 import { fetchText, jsonBody } from './common'
-import {
-  callModel,
-  isCandidateExhausted,
-  makeTranslationStore,
-  modelCandidates,
-  type TranslationStore,
-} from './translate'
+import { makeBlockTranslator, makeTranslationStore, type TranslationStore } from './translate'
 
 /**
  * 更新日志译制代理(ADR-0005/0016/0017,语义照搬 Java changelog 模块;多源化见 ADR-0020)。
@@ -54,25 +48,6 @@ export function splitBlocks(markdown: string): Blocks {
     blocks.push({ title: heading.replace(/^##\s*/, '').trim(), raw })
   }
   return { prefix: markdown.slice(0, starts[0]), blocks }
-}
-
-/** 版本块再切段(2026-08-26):段 = 连续整行(行是原子,不撕开),总长 ≤ maxChars;
- *  单行自身超限独占一段。动机:非流式译制耗时 ∝ 输出长度,2.1.246 块 9.2k 字符单请求
- *  生成 >60s,7 候选全超时;切段后单请求输出 ~1/N(~700 字符),稳离 60s 上限,
- *  段失败换候选只重试该段。段边界在行尾,译文段拼回即整块译文。 */
-export function splitSegments(block: string, maxChars = 2000): string[] {
-  if (block.length <= maxChars) return [block]
-  const segments: string[] = []
-  let cur = ''
-  for (const line of block.split(/(?<=\n)/)) {
-    if (cur && cur.length + line.length > maxChars) {
-      segments.push(cur)
-      cur = ''
-    }
-    cur += line
-  }
-  if (cur) segments.push(cur)
-  return segments
 }
 
 /** 块是否含标题行以外的内容:合成源的预发布占位块(仅 `## x.y.z` 一行)无可译内容,
@@ -158,20 +133,27 @@ export function composeReleasesMarkdown(
 
 // ---- 编排(Java ChangelogService)----
 
+/** 外源发布信息:latest(稳定轴)+ times(版本号→ISO,大 tile 版本榜单一行一版本带时间)。 */
+export interface ReleaseInfo {
+  latest: string | null
+  times: Record<string, string>
+}
+
 /** IO 协作器,测试注入假实现(Java 的函数式接口对应物)。 */
 export interface ChangelogDeps {
-  /** 拉 CHANGELOG.md 原文。抛错 → 兜底路径 500,前端走「刷新失败/重试」。 */
-  fetchMarkdown: () => Promise<string>
-  /** 译制单个版本块。返回 null = 拒绝(如未配置 Key);抛错 = 译制失败。
+  /** 一次拉全「外源」(ADR-0053 取数单 adapter):原文 markdown **必在**——拉不到即抛错
+   *  (兜底路径 500 / refreshQuietly 重试);发布信息**可空** = 显式部分成功(npm 日期源
+   *  失败降级 null,调用方沿用旧值——GitHub 主链失败由实现方上抛,不吞:假成功会钉死
+   *  空表到下个 6h 窗,ADR-0050)。「同周期单次抓取两用」(~26MB releases 不拉两次,
+   *  ADR-0050 §5②)从调用序协议收为本函数 implementation 内的局部量。 */
+  fetchUpstream: () => Promise<{ markdown: string; releaseInfo: ReleaseInfo | null }>
+  /** 译制单个版本块(makeBlockTranslator 组装)。返回 null = 拒绝(如未配置 Key);
+   *  抛错 = 译制失败。
    *  onPhase:每次尝试一个候选模型前上报(model, 候选序 1 基, 链长),Service 据此暴露译制阶段。 */
   translate: (
     versionBlock: string,
     onPhase?: (model: string, attempt: number, total: number) => void,
   ) => Promise<string | null>
-  /** 外源全量发布信息:latest + times(版本号→ISO,大 tile 版本榜单一行一版本
-   *  带时间)。npm 日期源失败由实现方吞掉返回 null(降级空表,不阻塞主链路);GitHub
-   *  主链(合成源/matt 日期)失败**上抛**——假成功会钉死空表到下个 6h 窗(ADR-0050)。 */
-  fetchReleaseInfo: () => Promise<{ latest: string | null; times: Record<string, string> } | null>
 }
 
 /** 译制阶段(GET /api/changelog/translate/status 透传,内存态不落库):链上正在调
@@ -278,14 +260,15 @@ export class ChangelogService {
   }
 
   private async doRefresh(): Promise<void> {
-    const raw = await this.deps.fetchMarkdown()
+    // 单次取数一次返回(ADR-0053):releaseInfo 与 markdown 同刻到手——GitHub 主链失败在
+    // 译制前即上抛(已声明漂移:省掉注定丢弃的 LLM 调用;译文逐块即存,重试 byRaw 命中零浪费)。
+    const { markdown: raw, releaseInfo: info } = await this.deps.fetchUpstream()
     const blocks = splitBlocks(raw)
     const byRaw = await this.translations.load(blocks.blocks.map((b) => b.raw))
     // 只译最近 N 版中缺失的块;跳过空块(预发布占位)再取窗——否则 alpha 扎堆时窗口被占位块耗尽
     for (const b of blocks.blocks.filter(hasEntries).slice(0, this.translateRecent)) {
       await this.translateIfMissing(b, byRaw)
     }
-    const info = await this.deps.fetchReleaseInfo()
     // 发布时间 immutable:merge 落库只增不减——新拉值覆盖同键旧值,新拉缺的版本(GitHub
     // 只回前 100 release)/发布信息失败(npm 分支吞错 null)保留旧值。否则空表会被当成功
     // 落库,日期钉死到下个 6h cron 窗(2026-08-31 二次线上消失的另一半洞)。
@@ -421,11 +404,9 @@ const SYSTEM_PROMPT = `你是专业技术译者。把用户给出的 CHANGELOG m
 
 export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_SOURCE): ChangelogDeps {
   const def = getChangelogSource(source)
-  const apiKey = process.env.AIHUBMIX_API_KEY ?? ''
   // GitHub API 认证(可选):未认证限额 60 req/h 按出口 IP 计,机场共享出口常态被耗光
   // (2026-08-31 matt 发布日期 403 remaining:0);带 token 提至 5000/h。缺省无头,行为不变。
   const githubToken = process.env.GITHUB_TOKEN ?? ''
-  const models = modelCandidates()
   // 解构到 const:narrowing 才能保进 fetchText 回调(属性访问的收窄不进闭包)
   const rawUrl = def.changelogUrl
   const releasesApiUrl = def.githubReleasesApiUrl
@@ -440,33 +421,25 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
         headers: githubToken ? { Authorization: `Bearer ${githubToken}` } : undefined,
       }),
     )
-  // 同周期单次抓取两用:合成源的 doRefresh 先 fetchMarkdown(合成分支拉一次存 promise)
-  // 再 fetchReleaseInfo(复用)——codex 响应 ~26MB(assets 大头),拉两次翻倍带宽/内存/
-  // GitHub 限额。一次性:读完即清,不跨 refresh 周期(matt 走 raw 分支不写,恒真拉)。
-  let composedReleases: Promise<Awaited<ReturnType<typeof fetchGithubReleases>>> | null = null
-  const fetchReleaseInfo = async () => {
-    if (releasesApiUrl) {
-      // GitHub 主链不吞错:失败上抛 → refresh 整体失败 → refreshQuietly 5min 重试。吞成
-      // null 会被 doRefresh 当成功落空表,日期钉死到下个 6h 窗(2026-08-31 matt 实录,
-      // 81888ea 同动机的收编)。
-      const pending = composedReleases
-      composedReleases = null
-      const releases = await (pending ?? fetchGithubReleases())
-      const times: Record<string, string> = {}
-      for (const release of releases) {
-        if (release.tag_name && release.published_at) {
-          const v = versionOfTag(release.tag_name)
-          if (VERSION_LIKE_RE.test(v)) times[v] = release.published_at
-        }
+  /** Releases → 发布信息:tag 去前缀、版本样态过滤;latest = 最新稳定版(与 npm
+   *  dist-tags.latest 同轴):releasedAt 供块内鲜度回退,取全量最新会把预发布时间戳
+   *  算到稳定版头上(codex alpha 日均 2-3 个)。 */
+  const releasesInfo = (releases: Awaited<ReturnType<typeof fetchGithubReleases>>): ReleaseInfo => {
+    const times: Record<string, string> = {}
+    for (const release of releases) {
+      if (release.tag_name && release.published_at) {
+        const v = versionOfTag(release.tag_name)
+        if (VERSION_LIKE_RE.test(v)) times[v] = release.published_at
       }
-      // latest = 最新稳定版(与 npm dist-tags.latest 同轴):releasedAt 供块内鲜度回退,
-      // 取全量最新会把预发布时间戳算到稳定版头上(codex alpha 日均 2-3 个)
-      const latest =
-        Object.keys(times)
-          .filter((v) => !isPrereleaseVersion(v))
-          .sort((a, b) => times[b]!.localeCompare(times[a]!))[0] ?? null
-      return { latest, times }
     }
+    const latest =
+      Object.keys(times)
+        .filter((v) => !isPrereleaseVersion(v))
+        .sort((a, b) => times[b]!.localeCompare(times[a]!))[0] ?? null
+    return { latest, times }
+  }
+  /** npm 日期源(降级语义住此):失败吞错返回 null——调用方 merge 沿用旧值,不阻塞主链路。 */
+  const fetchNpmReleaseInfo = async (): Promise<ReleaseInfo | null> => {
     try {
       const root = JSON.parse(
         await fetchText(`https://registry.npmjs.org/${def.npmPackage}`, 30_000),
@@ -480,68 +453,35 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
       return null
     }
   }
+  // 取数单 adapter(ADR-0053):原文三形态(ADR-0050——changelogUrl 直取 raw CHANGELOG.md;
+  // githubReleasesApiUrl 合成 release 正文;两者皆无 = 无原文源,npm time 合成空块)一次
+  // 返回「原文 + 发布信息」。markdown 必在:拉不动作主链路失败上抛——refresh 沿用旧快照 /
+  // 冷启动 500。GitHub 主链(合成源/matt 日期)失败**上抛**不吞:假成功会钉死空表到下个
+  // 6h 窗(2026-08-31 matt 实录,81888ea 同动机的收编);npm 日期源失败降级 null。合成源
+  // 的「单次抓取两用」(~26MB 响应不拉两次,ADR-0050 §5②)原是两函数间的调用序协议
+  // (composedReleases 共享态),现为本函数内局部量。
+  const fetchUpstream: ChangelogDeps['fetchUpstream'] = async () => {
+    if (rawUrl) {
+      const markdown = await fetchText(rawUrl, 60_000)
+      // GitHub 主链不吞错(见上);matt 形态日期走 GitHub,raw 形态(如 claude-code)走 npm
+      const releaseInfo = releasesApiUrl
+        ? releasesInfo(await fetchGithubReleases())
+        : await fetchNpmReleaseInfo()
+      return { markdown, releaseInfo }
+    }
+    if (releasesApiUrl) {
+      const releases = await fetchGithubReleases()
+      return { markdown: composeReleasesMarkdown(releases), releaseInfo: releasesInfo(releases) }
+    }
+    const info = await fetchNpmReleaseInfo()
+    if (!info) throw new Error(`npm packument(${def.npmPackage}) 拉取失败,无法合成版本流`)
+    return { markdown: synthesizeVersionsMarkdown(info.times), releaseInfo: info }
+  }
   return {
-    // 原文三形态(ADR-0050):changelogUrl 直取 raw CHANGELOG.md;githubReleasesApiUrl
-    // 合成 release 正文;两者皆无 = 无原文源,npm time 合成空块。后两者拉不动作主链路
-    // 失败上抛——refresh 沿用旧快照 / 冷启动 500,与「拉 CHANGELOG.md 失败」同语义。
-    fetchMarkdown: rawUrl
-      ? () => fetchText(rawUrl, 60_000)
-      : releasesApiUrl
-        ? async () => {
-            const p = fetchGithubReleases()
-            composedReleases = p
-            return composeReleasesMarkdown(await p)
-          }
-        : async () => {
-            const info = await fetchReleaseInfo()
-            if (!info) throw new Error(`npm packument(${def.npmPackage}) 拉取失败,无法合成版本流`)
-            return synthesizeVersionsMarkdown(info.times)
-          },
-    fetchReleaseInfo,
-    translate: async (block, onPhase) => {
-      if (!apiKey) return null // Key 缺失:Service 层据此透传英文原文
-      const segments = splitSegments(block)
-      /** 单段走候选链:候选失效换下一个,全链失效上抛(整块失败,Service 层 warn 降级)。 */
-      const translateSegment = async (seg: string, si: number): Promise<string> => {
-        let lastErr: unknown
-        for (const [i, model] of models.entries()) {
-          onPhase?.(model, i + 1, models.length)
-          const startedAt = Date.now()
-          // 每次尝试一行结果日志(线上排障:段/模型/序号/耗时/status+body/走向,全部收容器 stdout)
-          const log = (outcome: string, extra = '') =>
-            console.warn(`[changelog-translate] ${source} 段${si + 1}/${segments.length} 候选 ${i + 1}/${models.length} ${model} ${outcome}(${Date.now() - startedAt}ms)${extra}`)
-          try {
-            const { content, resp } = await callModel(model, apiKey, SYSTEM_PROMPT, seg)
-            // 200 但拿不到译文(空补全/内容过滤/非 JSON 响应体)也按候选失效换下一个——
-            // 2026-08-25 线上即此形态静默失败:后台有 200 调用记录、无后续候选、译文缺位。
-            // 空串同判:空译文会以哈希主键终身缓存,该版本永久渲染成空行(批量路径
-            // parseNumberedTranslations 的 !text 守卫同款,code-review 补齐)
-            if (content == null || !content.trim()) {
-              lastErr = new Error(`HTTP 200 但响应无 content:${resp.slice(0, 200)}`)
-              log(`失败: ${lastErr}`, ',换下一候选')
-              continue
-            }
-            log(`成功: ${content.length} 字符`)
-            return content
-          } catch (e) {
-            if (!isCandidateExhausted(e)) {
-              log(`失败: ${e}`, ',换模型无益,放弃本次译制')
-              throw e
-            }
-            lastErr = e
-            log(`失败: ${e} ${(e as { body?: string }).body ?? ''}`, ',换下一候选')
-          }
-        }
-        throw lastErr
-      }
-      // 串行逐段(free 渠道限流敏感,不并发);非末段译文补尾换行——LLM 偶尔丢,缺了会与下段粘行
-      // (末段不补:单段块行为不变,块级兜底在 assemble)
-      const out: string[] = []
-      for (const [si, seg] of segments.entries()) out.push(await translateSegment(seg, si))
-      return out
-        .map((t, i) => (i < out.length - 1 && !t.endsWith('\n') ? `${t}\n` : t))
-        .join('')
-    },
+    fetchUpstream,
+    // 译制机制(候选链/分段/onPhase)单点 translate.ts(ADR-0032 地基 + ADR-0053 归位);
+    // SYSTEM_PROMPT 是「更新日志」域的译制词表,留域内(同 trending 传 TRENDING_SYSTEM_PROMPT 先例)。
+    translate: makeBlockTranslator(SYSTEM_PROMPT, `changelog-translate-${source}`),
   }
 }
 

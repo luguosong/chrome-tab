@@ -10,7 +10,6 @@ import {
   prodChangelogDeps,
   refreshQuietly,
   splitBlocks,
-  splitSegments,
   synthesizeVersionsMarkdown,
   type ChangelogDeps,
   type TranslatePhase,
@@ -40,9 +39,8 @@ function makeService(
   translateRecent = 2,
 ) {
   const defaults: ChangelogDeps = {
-    fetchMarkdown: async () => RAW,
+    fetchUpstream: async () => ({ markdown: RAW, releaseInfo: null }),
     translate: async (b) => TRANSLATOR(b),
-    fetchReleaseInfo: async () => null,
   }
   return new ChangelogService(db, source, { ...defaults, ...deps }, translateRecent)
 }
@@ -166,7 +164,7 @@ describe('ChangelogService 编排(ADR-0017)', () => {
     const raw = '## 2.0\n- two\n\n## 1.0\n- one\n'
     const s = makeService(
       db,
-      { fetchMarkdown: async () => raw, translate: async (block) => block.trimEnd() },
+      { fetchUpstream: async () => ({ markdown: raw, releaseInfo: null }), translate: async (block) => block.trimEnd() },
       DEFAULT_CHANGELOG_SOURCE,
       1,
     )
@@ -178,7 +176,7 @@ describe('ChangelogService 编排(ADR-0017)', () => {
     const db = openDb(':memory:').db
     const seen: string[] = []
     const s = makeService(db, {
-      fetchMarkdown: async () => '## 0.2.0-alpha.1\n## 0.1.0\n- one\n## 0.0.9\n- zero\n',
+      fetchUpstream: async () => ({ markdown: '## 0.2.0-alpha.1\n## 0.1.0\n- one\n## 0.0.9\n- zero\n', releaseInfo: null }),
       translate: async (b) => (seen.push(b), b),
     })
 
@@ -207,7 +205,7 @@ describe('ChangelogService 编排(ADR-0017)', () => {
     let idx = 0
     let calls = 0
     const s = makeService(db, {
-      fetchMarkdown: async () => feed[Math.min(idx++, feed.length - 1)]!,
+      fetchUpstream: async () => ({ markdown: feed[Math.min(idx++, feed.length - 1)]!, releaseInfo: null }),
       translate: async (b) => (calls++, TRANSLATOR(b)),
     })
 
@@ -253,7 +251,7 @@ describe('ChangelogService 编排(ADR-0017)', () => {
 
   it('冷启动且拉取失败:get 上抛(→ HTTP 500,前端重试)', async () => {
     const db = openDb(':memory:').db
-    const s = makeService(db, { fetchMarkdown: async () => { throw new Error('GitHub 不可达') } })
+    const s = makeService(db, { fetchUpstream: async () => { throw new Error('GitHub 不可达') } })
 
     await expect(s.get()).rejects.toThrow('GitHub 不可达')
   })
@@ -262,9 +260,9 @@ describe('ChangelogService 编排(ADR-0017)', () => {
     const db = openDb(':memory:').db
     let networkUp = true
     const s = makeService(db, {
-      fetchMarkdown: async () => {
+      fetchUpstream: async () => {
         if (!networkUp) throw new Error('GitHub 不可达')
-        return RAW
+        return { markdown: RAW, releaseInfo: null }
       },
     })
 
@@ -278,7 +276,7 @@ describe('ChangelogService 编排(ADR-0017)', () => {
   it('重启恢复:loadFromDb 从快照表重建镜像(含 releaseTimes),零外呼零 LLM', async () => {
     const db = openDb(':memory:').db
     await makeService(db, {
-      fetchReleaseInfo: async () => ({ latest: '3.0', times: { '3.0': '2026-08-30T00:00:00.000Z' } }),
+      fetchUpstream: async () => ({ markdown: RAW, releaseInfo: { latest: '3.0', times: { '3.0': '2026-08-30T00:00:00.000Z' } } }),
     }).get() // 前一进程:建库(含发布时间)
     expect(
       await db
@@ -290,7 +288,7 @@ describe('ChangelogService 编排(ADR-0017)', () => {
 
     let llmCalls = 0
     const restarted = makeService(db, {
-      fetchMarkdown: async () => { throw new Error('重启后 GitHub 不可达') }, // 任何外呼即失败
+      fetchUpstream: async () => { throw new Error('重启后 GitHub 不可达') }, // 任何外呼即失败
       translate: async (b) => (llmCalls++, TRANSLATOR(b)),
     })
     await restarted.loadFromDb()
@@ -305,17 +303,17 @@ describe('ChangelogService 编排(ADR-0017)', () => {
   it('releaseTimes 落库只增不减:新拉缺的版本保留旧值,发布信息失败(null)不清日期', async () => {
     const db = openDb(':memory:').db
     const s = makeService(db, {
-      fetchReleaseInfo: async () => ({ latest: '3.0', times: { '3.0': '2026-08-01T00:00:00.000Z' } }),
+      fetchUpstream: async () => ({ markdown: RAW, releaseInfo: { latest: '3.0', times: { '3.0': '2026-08-01T00:00:00.000Z' } } }),
     })
     await s.get() // 3.0 日期入库
 
     // 下轮发布信息失败(npm 分支吞错语义)/新拉只含 2.0:3.0 旧日期都不得丢
-    const s2 = makeService(db, { fetchReleaseInfo: async () => null })
+    const s2 = makeService(db, { fetchUpstream: async () => ({ markdown: RAW, releaseInfo: null }) })
     await s2.refresh()
     expect((await s2.get()).releaseTimes).toEqual({ '3.0': '2026-08-01T00:00:00.000Z' })
 
     const s3 = makeService(db, {
-      fetchReleaseInfo: async () => ({ latest: '2.0', times: { '2.0': '2026-08-30T00:00:00.000Z' } }),
+      fetchUpstream: async () => ({ markdown: RAW, releaseInfo: { latest: '2.0', times: { '2.0': '2026-08-30T00:00:00.000Z' } } }),
     })
     await s3.refresh()
     expect((await s3.get()).releaseTimes).toEqual({
@@ -396,13 +394,12 @@ describe('多源(ADR-0020:每源一 Service,快照按源分行;译文按块哈�
   it('双源同库:快照各占一行互不覆盖,releasedAt 各自独立', async () => {
     const db = openDb(':memory:').db
     const a = makeService(db, {
-      fetchReleaseInfo: async () => ({ latest: '3.0', times: { '3.0': '2026-08-01T00:00:00.000Z' } }),
+      fetchUpstream: async () => ({ markdown: RAW, releaseInfo: { latest: '3.0', times: { '3.0': '2026-08-01T00:00:00.000Z' } } }),
     })
     const b = makeService(
       db,
       {
-        fetchMarkdown: async () => RAW_B,
-        fetchReleaseInfo: async () => ({ latest: '3.0', times: { '3.0': '2026-08-05T00:00:00.000Z' } }),
+        fetchUpstream: async () => ({ markdown: RAW_B, releaseInfo: { latest: '3.0', times: { '3.0': '2026-08-05T00:00:00.000Z' } } }),
       },
       'matt-skills',
     )
@@ -426,7 +423,7 @@ describe('多源(ADR-0020:每源一 Service,快照按源分行;译文按块哈�
     const a = makeService(db, { translate: spy })
     await a.get() // 译 A 的 3.0/2.0(共享块 = 3.0)
 
-    const b = makeService(db, { fetchMarkdown: async () => RAW_B, translate: spy }, 'matt-skills')
+    const b = makeService(db, { fetchUpstream: async () => ({ markdown: RAW_B, releaseInfo: null }), translate: spy }, 'matt-skills')
     await b.get() // 3.0 哈希命中;窗口(recent=2)内只有 1.4 缺失
 
     expect(translated.filter((x) => x.includes('3.0'))).toHaveLength(1) // 3.0 只被译过一次
@@ -444,10 +441,10 @@ describe('多源(ADR-0020:每源一 Service,快照按源分行;译文按块哈�
       throw new Error(`未知块: ${b}`)
     }
     const a = makeService(db, {
-      fetchMarkdown: async () => '# A\n\n## 1.2.3\n- alpha fix\n',
+      fetchUpstream: async () => ({ markdown: '# A\n\n## 1.2.3\n- alpha fix\n', releaseInfo: null }),
       translate,
     })
-    const b = makeService(db, { fetchMarkdown: async () => '# B\n\n## 1.2.3\n- beta fix\n', translate }, 'matt-skills')
+    const b = makeService(db, { fetchUpstream: async () => ({ markdown: '# B\n\n## 1.2.3\n- beta fix\n', releaseInfo: null }), translate }, 'matt-skills')
 
     await a.get()
     await b.get()
@@ -463,11 +460,11 @@ describe('多源(ADR-0020:每源一 Service,快照按源分行;译文按块哈�
   it('loadFromDb 只恢复本源行', async () => {
     const db = openDb(':memory:').db
     await makeService(db).get()
-    await makeService(db, { fetchMarkdown: async () => RAW_B }, 'matt-skills').get()
+    await makeService(db, { fetchUpstream: async () => ({ markdown: RAW_B, releaseInfo: null }) }, 'matt-skills').get()
 
     const b = makeService(
       db,
-      { fetchMarkdown: async () => { throw new Error('任何外呼即失败') } },
+      { fetchUpstream: async () => { throw new Error('任何外呼即失败') } },
       'matt-skills',
     )
     await b.loadFromDb()
@@ -491,9 +488,11 @@ describe('无原文源源的 Service 构造(source 参数借用 codex 行键)', 
       db,
       'codex',
       {
-        fetchMarkdown: async () => synthesizeVersionsMarkdown(CODEX_TIMES),
+        fetchUpstream: async () => ({
+          markdown: synthesizeVersionsMarkdown(CODEX_TIMES),
+          releaseInfo: { latest: '0.149.1', times: CODEX_TIMES },
+        }),
         translate: async (b) => (calls++, TRANSLATOR(b)),
-        fetchReleaseInfo: async () => ({ latest: '0.149.1', times: CODEX_TIMES }),
       },
       0, // index.ts 对无原文源(hasChangelogRaw=false,现无实例)的同款构造
     )
@@ -519,9 +518,8 @@ describe('无原文源源的 Service 构造(source 参数借用 codex 行键)', 
       db,
       'codex',
       {
-        fetchMarkdown: async () => synthesizeVersionsMarkdown(CODEX_TIMES),
+        fetchUpstream: async () => ({ markdown: synthesizeVersionsMarkdown(CODEX_TIMES), releaseInfo: null }),
         translate: async () => null,
-        fetchReleaseInfo: async () => null,
       },
       0,
     ).get()
@@ -530,9 +528,8 @@ describe('无原文源源的 Service 构造(source 参数借用 codex 行键)', 
       db,
       'codex',
       {
-        fetchMarkdown: async () => { throw new Error('任何外呼即失败') },
+        fetchUpstream: async () => { throw new Error('任何外呼即失败') },
         translate: async () => { throw new Error('任何 LLM 即失败') },
-        fetchReleaseInfo: async () => null,
       },
       0,
     )
@@ -544,226 +541,8 @@ describe('无原文源源的 Service 构造(source 参数借用 codex 行键)', 
   })
 })
 
-// ---- 模型候选链(prodChangelogDeps.translate 真链路,mock globalThis.fetch)----
 
-describe('translate 候选链(候选失效=403/404/429/5xx/no_available_channel/超时/200空content 换下一个,401等直接抛)', () => {
-  const realFetch = globalThis.fetch
-  // 闸门住 callModel(ADR-0037):真链路用例过闸,注入 1ms 跳过等待;节流行为本身单测见末尾用例
-  beforeEach(() => {
-    process.env.LLM_MIN_REQUEST_INTERVAL_MS = '1'
-  })
-  afterEach(() => {
-    globalThis.fetch = realFetch
-    delete process.env.AIHUBMIX_API_KEY
-    delete process.env.CHANGELOG_LLM_MODEL
-    delete process.env.LLM_MIN_REQUEST_INTERVAL_MS
-  })
-
-  /** 依次返回 seq 响应(超出取末个),记录每次请求的 model 字段顺序;timeout: true 模拟超时拒绝。 */
-  function mockFetchSeq(seq: Array<{ status?: number; body?: unknown; timeout?: boolean }>): string[] {
-    const models: string[] = []
-    let i = 0
-    globalThis.fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
-      models.push(JSON.parse(String(init?.body)).model)
-      const s = seq[Math.min(i++, seq.length - 1)]!
-      if (s.timeout) throw new DOMException('The operation was aborted due to timeout', 'TimeoutError')
-      return new Response(JSON.stringify(s.body), { status: s.status ?? 200 })
-    }) as typeof fetch
-    return models
-  }
-
-  const OK = { status: 200, body: { choices: [{ message: { content: '译文' } }] } }
-  const NO_CHANNEL = { status: 400, body: { error: { code: 'no_available_channel' } } }
-
-  it('no_available_channel → 换下一候选直到成功,请求按候选序', async () => {
-    process.env.AIHUBMIX_API_KEY = 'k'
-    process.env.CHANGELOG_LLM_MODEL = 'm1,m2,m3'
-    const models = mockFetchSeq([NO_CHANNEL, NO_CHANNEL, OK])
-    await expect(prodChangelogDeps().translate('块')).resolves.toBe('译文')
-    expect(models).toEqual(['m1', 'm2', 'm3'])
-  })
-
-  it('403(模型被禁,如线上 coding-kimi-k3-free)同样换下一候选', async () => {
-    process.env.AIHUBMIX_API_KEY = 'k'
-    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
-    const models = mockFetchSeq([{ status: 403, body: {} }, OK])
-    await expect(prodChangelogDeps().translate('块')).resolves.toBe('译文')
-    expect(models).toEqual(['m1', 'm2'])
-  })
-
-  it('超时(TimeoutError)同样换下一候选:挂死模型不再拖满单模型上限(300s→60s 语义配套)', async () => {
-    process.env.AIHUBMIX_API_KEY = 'k'
-    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
-    const models = mockFetchSeq([{ timeout: true }, OK])
-    await expect(prodChangelogDeps().translate('块')).resolves.toBe('译文')
-    expect(models).toEqual(['m1', 'm2'])
-  })
-
-  it('200 但响应无 content(free 模型空补全/畸形)→ 换下一候选,不整体静默失败', async () => {
-    process.env.AIHUBMIX_API_KEY = 'k'
-    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
-    const models = mockFetchSeq([{ status: 200, body: { choices: [{ message: { content: null } }] } }, OK])
-    await expect(prodChangelogDeps().translate('块')).resolves.toBe('译文')
-    expect(models).toEqual(['m1', 'm2'])
-  })
-
-  it('200 但 content 为空串 → 同判候选失效:空译文入哈希表会让该版本永久渲染空行', async () => {
-    process.env.AIHUBMIX_API_KEY = 'k'
-    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
-    const models = mockFetchSeq([{ status: 200, body: { choices: [{ message: { content: '' } }] } }, OK])
-    await expect(prodChangelogDeps().translate('块')).resolves.toBe('译文')
-    expect(models).toEqual(['m1', 'm2'])
-  })
-
-  it('5xx(网关/上游错误)→ 换下一候选', async () => {
-    process.env.AIHUBMIX_API_KEY = 'k'
-    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
-    const models = mockFetchSeq([{ status: 502, body: 'bad gateway' }, OK])
-    await expect(prodChangelogDeps().translate('块')).resolves.toBe('译文')
-    expect(models).toEqual(['m1', 'm2'])
-  })
-
-  it('401(key 无效)换模型无益:直接抛,不再请求', async () => {
-    process.env.AIHUBMIX_API_KEY = 'k'
-    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
-    const models = mockFetchSeq([{ status: 401, body: { error: { code: 'invalid_api_key' } } }])
-    await expect(prodChangelogDeps().translate('块')).rejects.toThrow('HTTP 401')
-    expect(models).toEqual(['m1'])
-  })
-
-  it('全链候选失效:抛末次错误(调用方 warn 降级英文)', async () => {
-    process.env.AIHUBMIX_API_KEY = 'k'
-    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
-    const models = mockFetchSeq([NO_CHANNEL, NO_CHANNEL])
-    await expect(prodChangelogDeps().translate('块')).rejects.toThrow('HTTP 400')
-    expect(models).toEqual(['m1', 'm2'])
-  })
-
-  it('Key 缺失:返回 null(Service 层据此透传英文原文)', async () => {
-    expect(prodChangelogDeps().translate('块')).resolves.toBeNull()
-  })
-
-  it('onPhase 回调:每次换候选前上报 (model, attempt, total),Service 据此暴露阶段', async () => {
-    process.env.AIHUBMIX_API_KEY = 'k'
-    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
-    const events: Array<[string, number, number]> = []
-    mockFetchSeq([NO_CHANNEL, OK])
-    await prodChangelogDeps().translate('块', (model, attempt, total) => events.push([model, attempt, total]))
-    expect(events).toEqual([
-      ['m1', 1, 2],
-      ['m2', 2, 2],
-    ])
-  })
-
-  it('节流闸门:换候选的连续两次请求至少间隔 LLM_MIN_REQUEST_INTERVAL_MS(闸门住 callModel,三域共享)', async () => {
-    process.env.AIHUBMIX_API_KEY = 'k'
-    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
-    process.env.LLM_MIN_REQUEST_INTERVAL_MS = '80'
-    const times: number[] = []
-    globalThis.fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
-      times.push(Date.now())
-      const model = JSON.parse(String(init?.body)).model
-      if (model === 'm1') return new Response(JSON.stringify(NO_CHANNEL.body), { status: NO_CHANNEL.status })
-      return new Response(JSON.stringify(OK.body), { status: 200 })
-    }) as typeof fetch
-    await expect(prodChangelogDeps().translate('块')).resolves.toBe('译文')
-    expect(times.length).toBe(2)
-    // 闸门间隔按「放行时刻」计,fetch 时刻差带 ±几 ms 微任务噪声,80 全额会偶发 79——
-    // 无闸裸奔实测 0~3ms,50 居中判别(translate.test.ts 闸门用例同款)
-    expect(times[1] - times[0]).toBeGreaterThanOrEqual(50)
-  })
-})
-
-// ---- 分段译制(2026-08-26:2.1.246 块 9.2k 字符,非流式单请求生成 >60s,7 候选全超时)----
-
-describe('splitSegments(段=行边界,单请求输出压小,稳离 60s 超时)', () => {
-  it('不超过上限整块一段,原样返回', () => {
-    expect(splitSegments('## 1.0\n- x\n')).toEqual(['## 1.0\n- x\n'])
-  })
-
-  it('超上限按行切段:每段 ≤上限、行不撕开、标题行留首段', () => {
-    const line = `- ${'a'.repeat(98)}\n` // 101 字符/行
-    const block = `## 9.9\n${line.repeat(20)}` // 7 + 2020 = 2027 > 2000
-    const segs = splitSegments(block)
-    expect(segs.length).toBe(2)
-    expect(segs[0]).toBe(`## 9.9\n${line.repeat(19)}`)
-    expect(segs[1]).toBe(line)
-    expect(segs.every((s) => s.length <= 2000)).toBe(true)
-  })
-
-  it('单行自身超上限:独占一段不撕行(前段先按上限封住)', () => {
-    const huge = `- ${'a'.repeat(3000)}\n`
-    expect(splitSegments(`## 1.0\n${huge}- small\n`)).toEqual(['## 1.0\n', huge, '- small\n'])
-  })
-})
-
-describe('translate 分段(大块逐段请求,段失败换候选只重试该段)', () => {
-  const realFetch = globalThis.fetch
-  // 闸门住 callModel(ADR-0037):分段真链路多次过闸,注入 1ms 跳过等待
-  beforeEach(() => {
-    process.env.LLM_MIN_REQUEST_INTERVAL_MS = '1'
-  })
-  afterEach(() => {
-    globalThis.fetch = realFetch
-    delete process.env.AIHUBMIX_API_KEY
-    delete process.env.CHANGELOG_LLM_MODEL
-    delete process.env.LLM_MIN_REQUEST_INTERVAL_MS
-  })
-
-  /** mockFetchSeq 的分段版:另记录每次请求的 user content(断言段大小与内容)。 */
-  function mockFetchSeqLog(seq: Array<{ status?: number; body?: unknown; timeout?: boolean }>): {
-    models: string[]
-    users: string[]
-  } {
-    const models: string[] = []
-    const users: string[] = []
-    let i = 0
-    globalThis.fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body))
-      models.push(body.model)
-      users.push(body.messages[1].content)
-      const s = seq[Math.min(i++, seq.length - 1)]!
-      if (s.timeout) throw new DOMException('The operation was aborted due to timeout', 'TimeoutError')
-      return new Response(JSON.stringify(s.body), { status: s.status ?? 200 })
-    }) as typeof fetch
-    return { models, users }
-  }
-
-  const NO_CHANNEL = { status: 400, body: { error: { code: 'no_available_channel' } } }
-  const line = (tag: string) => `- ${'a'.repeat(96)} ${tag}\n` // 102 字符/行
-  const ok = (content: string) => ({ status: 200, body: { choices: [{ message: { content } }] } })
-
-  /** 21 行 × 102 字符 + 标题 = 2149 > 2000 → 恰切 2 段;段内容断言委托 splitSegments 自身。 */
-  const bigBlock = `## 9.9\n${Array.from({ length: 21 }, (_, i) => line(`s${i}`)).join('')}`
-  const segs = splitSegments(bigBlock)
-
-  it('大块 → 多次请求,每次 user = splitSegments 的段,译文按段序拼接(段间补换行防粘行)', async () => {
-    process.env.AIHUBMIX_API_KEY = 'k'
-    process.env.CHANGELOG_LLM_MODEL = 'm1'
-    const { models, users } = mockFetchSeqLog([ok('段一译文'), ok('段二译文')])
-    await expect(prodChangelogDeps().translate(bigBlock)).resolves.toBe('段一译文\n段二译文')
-    expect(models).toEqual(['m1', 'm1'])
-    expect(users).toEqual(segs)
-  })
-
-  it('段 2 首候选 no_available_channel → 换候选只重试该段,段 1 译文不重译', async () => {
-    process.env.AIHUBMIX_API_KEY = 'k'
-    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
-    const { models } = mockFetchSeqLog([ok('段一'), NO_CHANNEL, ok('段二')])
-    await expect(prodChangelogDeps().translate(bigBlock)).resolves.toBe('段一\n段二')
-    expect(models).toEqual(['m1', 'm1', 'm2'])
-  })
-
-  it('某段全链候选失效 → 整块 reject(Service 层 warn 降级英文,语义同前)', async () => {
-    process.env.AIHUBMIX_API_KEY = 'k'
-    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
-    const { models } = mockFetchSeqLog([ok('段一'), NO_CHANNEL, NO_CHANNEL])
-    await expect(prodChangelogDeps().translate(bigBlock)).rejects.toThrow('HTTP 400')
-    expect(models).toEqual(['m1', 'm1', 'm2'])
-  })
-})
-
-describe('codex prodChangelogDeps:fetchMarkdown/fetchReleaseInfo 走 GitHub Releases 合成(ADR-0050)', () => {
+describe('codex prodChangelogDeps:fetchUpstream 走 GitHub Releases 合成(ADR-0050;取数单 adapter ADR-0053)', () => {
   const realFetch = globalThis.fetch
   afterEach(() => {
     globalThis.fetch = realFetch
@@ -775,7 +554,7 @@ describe('codex prodChangelogDeps:fetchMarkdown/fetchReleaseInfo 走 GitHub Rele
     { tag_name: 'rust-v0.151.0', published_at: '2026-08-28T10:00:00Z', body: '## New Features\n- MCP grace period.\n' },
   ]
 
-  it('同一 refresh 周期单次抓取两用(~26MB 响应不拉两次):fetchMarkdown 合成 → fetchReleaseInfo 复用;Bearer 打到 codex releases 端点;latest 稳定轴', async () => {
+  it('单次抓取两用(~26MB 响应不拉两次):合成 markdown 与发布信息同一次 releases 拉取;Bearer 打到 codex releases 端点;latest 稳定轴', async () => {
     process.env.GITHUB_TOKEN = 't0'
     let calls = 0
     globalThis.fetch = vi.fn(async (url: unknown, init?: unknown) => {
@@ -786,21 +565,20 @@ describe('codex prodChangelogDeps:fetchMarkdown/fetchReleaseInfo 走 GitHub Rele
     }) as typeof fetch
     const deps = prodChangelogDeps('codex')
 
-    await expect(deps.fetchMarkdown()).resolves.toBe(
-      '## 0.152.0-alpha.6\n## 0.151.0\n### New Features\n- MCP grace period.\n',
-    )
-    await expect(deps.fetchReleaseInfo()).resolves.toEqual({
-      latest: '0.151.0', // 稳定轴(与 npm dist-tags.latest 同),不取全量最新的 alpha
-      times: { '0.152.0-alpha.6': '2026-08-31T02:12:53Z', '0.151.0': '2026-08-28T10:00:00Z' },
+    await expect(deps.fetchUpstream()).resolves.toEqual({
+      markdown: '## 0.152.0-alpha.6\n## 0.151.0\n### New Features\n- MCP grace period.\n',
+      releaseInfo: {
+        latest: '0.151.0', // 稳定轴(与 npm dist-tags.latest 同),不取全量最新的 alpha
+        times: { '0.152.0-alpha.6': '2026-08-31T02:12:53Z', '0.151.0': '2026-08-28T10:00:00Z' },
+      },
     })
     expect(calls).toBe(1)
   })
 
-  it('API 不可达:两者均上抛(GitHub 主链不吞错——假成功会钉死空表,refreshQuietly 重试的前提)', async () => {
+  it('API 不可达:上抛(GitHub 主链不吞错——假成功会钉死空表,refreshQuietly 重试的前提)', async () => {
     globalThis.fetch = vi.fn(async () => new Response('nope', { status: 403 })) as typeof fetch
     const deps = prodChangelogDeps('codex')
-    await expect(deps.fetchMarkdown()).rejects.toThrow('HTTP 403')
-    await expect(deps.fetchReleaseInfo()).rejects.toThrow('HTTP 403')
+    await expect(deps.fetchUpstream()).rejects.toThrow('HTTP 403')
   })
 })
 
@@ -811,19 +589,26 @@ describe('Matt Skills prodChangelogDeps:发布日期走 GitHub Releases', () => 
   })
 
   it('v 前缀标签映射为 CHANGELOG 版本号', async () => {
+    // matt 形态 = changelogUrl 直取 + GitHub 日期:fetchUpstream 内两路各拉各的,mock 按 URL 分流
     globalThis.fetch = vi.fn(async (url: unknown) => {
-      expect(String(url)).toBe('https://api.github.com/repos/mattpocock/skills/releases?per_page=100')
-      return new Response(JSON.stringify([
-        { tag_name: 'v1.2.3', published_at: '2026-08-06T14:05:28Z' },
-        { tag_name: 'v1.2.2', published_at: '2026-08-05T18:10:19Z' },
-      ]))
+      if (String(url).includes('api.github.com')) {
+        expect(String(url)).toBe('https://api.github.com/repos/mattpocock/skills/releases?per_page=100')
+        return new Response(JSON.stringify([
+          { tag_name: 'v1.2.3', published_at: '2026-08-06T14:05:28Z' },
+          { tag_name: 'v1.2.2', published_at: '2026-08-05T18:10:19Z' },
+        ]))
+      }
+      return new Response('# Changelog\n\n## 1.2.3\n- x\n')
     }) as typeof fetch
 
-    await expect(prodChangelogDeps('matt-skills').fetchReleaseInfo()).resolves.toEqual({
-      latest: '1.2.3',
-      times: {
-        '1.2.3': '2026-08-06T14:05:28Z',
-        '1.2.2': '2026-08-05T18:10:19Z',
+    await expect(prodChangelogDeps('matt-skills').fetchUpstream()).resolves.toEqual({
+      markdown: '# Changelog\n\n## 1.2.3\n- x\n',
+      releaseInfo: {
+        latest: '1.2.3',
+        times: {
+          '1.2.3': '2026-08-06T14:05:28Z',
+          '1.2.2': '2026-08-05T18:10:19Z',
+        },
       },
     })
   })
@@ -872,7 +657,7 @@ describe('GET /api/changelog ?source 分流(ADR-0020)', () => {
   const db2 = openDb(':memory:').db
   const svcB = makeService(
     db2,
-    { fetchMarkdown: async () => '# Matt\n\n## 1.5\n- one\n' },
+    { fetchUpstream: async () => ({ markdown: '# Matt\n\n## 1.5\n- one\n', releaseInfo: null }) },
     'matt-skills',
   )
   const app2 = createApp({
@@ -983,7 +768,7 @@ describe('releasedAt 成功路径(npm dist-tags.latest time 条目透传)', () =
     const db = openDb(':memory:').db
     const { req, login } = await setupApp(
       makeService(db, {
-        fetchReleaseInfo: async () => ({ latest: '3.0', times: { '3.0': '2026-08-01T00:00:00.000Z' } }),
+        fetchUpstream: async () => ({ markdown: RAW, releaseInfo: { latest: '3.0', times: { '3.0': '2026-08-01T00:00:00.000Z' } } }),
       }),
     )
     const res = await req('GET', '/api/changelog', { cookie: await login() })
@@ -998,7 +783,7 @@ describe('releaseTimes(每版本 npm 发布时间:大 tile 版本榜单一行一
     const db = openDb(':memory:').db
     const times = { '3.0': '2026-08-01T00:00:00.000Z', '2.0': '2026-07-01T00:00:00.000Z' }
     const { req, login } = await setupApp(
-      makeService(db, { fetchReleaseInfo: async () => ({ latest: '3.0', times }) }),
+      makeService(db, { fetchUpstream: async () => ({ markdown: RAW, releaseInfo: { latest: '3.0', times } }) }),
     )
     const res = await req('GET', '/api/changelog', { cookie: await login() })
     expect(res.status).toBe(200)
@@ -1009,7 +794,7 @@ describe('releaseTimes(每版本 npm 发布时间:大 tile 版本榜单一行一
 
   it('npm 失败:null 降级 → 空表 + releasedAt null,主链路照常 200', async () => {
     const db = openDb(':memory:').db
-    const { req, login } = await setupApp(makeService(db, { fetchReleaseInfo: async () => null }))
+    const { req, login } = await setupApp(makeService(db, { fetchUpstream: async () => ({ markdown: RAW, releaseInfo: null }) }))
     const res = await req('GET', '/api/changelog', { cookie: await login() })
     expect(res.status).toBe(200)
     const json = (await res.json()) as { releasedAt: string | null; releaseTimes: Record<string, string> }
@@ -1020,7 +805,7 @@ describe('releaseTimes(每版本 npm 发布时间:大 tile 版本榜单一行一
   it('time[latest] 为空串:releasedAt 显式 null(不透 ""),times 原样下发', async () => {
     const db = openDb(':memory:').db
     const { req, login } = await setupApp(
-      makeService(db, { fetchReleaseInfo: async () => ({ latest: '3.0', times: { '3.0': '' } }) }),
+      makeService(db, { fetchUpstream: async () => ({ markdown: RAW, releaseInfo: { latest: '3.0', times: { '3.0': '' } } }) }),
     )
     const res = await req('GET', '/api/changelog', { cookie: await login() })
     expect(res.status).toBe(200)
@@ -1033,7 +818,7 @@ describe('releaseTimes(每版本 npm 发布时间:大 tile 版本榜单一行一
 describe('冷启动兜底失败 → 500', () => {
   it('内存空且拉取失败:get 上抛经全局兜底 → {status:500, message:"服务器错误"}', async () => {
     const db = openDb(':memory:').db
-    const { req, login } = await setupApp(makeService(db, { fetchMarkdown: async () => { throw new Error('GitHub 不可达') } }))
+    const { req, login } = await setupApp(makeService(db, { fetchUpstream: async () => { throw new Error('GitHub 不可达') } }))
     await expectError(await req('GET', '/api/changelog', { cookie: await login() }), 500, '服务器错误')
   })
 })
@@ -1052,12 +837,14 @@ describe('refreshQuietly(刷新失败重试——2026-08-31 线上:启动预热�
     // 对齐线上时间线:call1 基线刷新发布信息失败(空表,症状起点);call2 抖动期
     // markdown 拉取超时(06:33 形态,refresh 上抛);call3 网络恢复,发布信息一并拿到
     const svc = makeService(db, {
-      fetchMarkdown: async () => {
+      fetchUpstream: async () => {
         calls++
         if (calls === 2) throw new Error('网络抖动')
-        return RAW
+        return {
+          markdown: RAW,
+          releaseInfo: calls < 3 ? null : { latest: '3.0', times: { '3.0': '2026-08-31T00:00:00.000Z' } },
+        }
       },
-      fetchReleaseInfo: async () => (calls < 3 ? null : { latest: '3.0', times: { '3.0': '2026-08-31T00:00:00.000Z' } }),
     })
     await svc.refresh()
     expect((await svc.get()).releaseTimes).toEqual({}) // 基线:发布信息失败 → 空表,前端行级降级不显示日期
@@ -1073,23 +860,24 @@ describe('refreshQuietly(刷新失败重试——2026-08-31 线上:启动预热�
   })
 })
 
-describe('fetchReleaseInfo GitHub 认证(GITHUB_TOKEN 可选:未认证限额 60 req/h 按出口 IP 计,机场共享出口常态被别人耗光 → 403 remaining:0,matt 发布日期因此消失;2026-08-31)', () => {
+describe('fetchUpstream 侧 GitHub 认证(GITHUB_TOKEN 可选:未认证限额 60 req/h 按出口 IP 计,机场共享出口常态被别人耗光 → 403 remaining:0,matt 发布日期因此消失;2026-08-31)', () => {
   const realFetch = globalThis.fetch
   afterEach(() => {
     globalThis.fetch = realFetch
     delete process.env.GITHUB_TOKEN
   })
 
-  /** mock 单次 GitHub releases 200,返回捕获的请求 headers 与解析结果。 */
+  /** mock matt 形态两路(raw CHANGELOG.md + GitHub releases),releases 请求捕获 headers;返回解析结果。 */
   const mockGithub = async () => {
     let init: RequestInit | undefined
-    globalThis.fetch = vi.fn(async (_u: unknown, i?: RequestInit) => {
+    globalThis.fetch = vi.fn(async (u: unknown, i?: RequestInit) => {
+      if (!String(u).includes('api.github.com')) return new Response('# Changelog\n\n## 1.2.3\n- x\n')
       init = i
       return new Response(JSON.stringify([{ tag_name: 'v1.2.3', published_at: '2026-08-01T00:00:00Z' }]), {
         status: 200,
       })
     }) as typeof fetch
-    const info = await prodChangelogDeps('matt-skills').fetchReleaseInfo()
+    const { releaseInfo: info } = await prodChangelogDeps('matt-skills').fetchUpstream()
     return { headers: new Headers(init?.headers), info }
   }
 
