@@ -248,6 +248,29 @@ code {
   background-color: rgba(255, 255, 255, 0.25);
 }
 
+/* 倒计时「今天」提醒光晕(CountdownIcon 主行,2026-09-02):静态光晕常在
+   (reduced-motion 下保留提醒语义),呼吸脉动只进 no-preference;琥珀=注意档,
+   与 accent(交互)/danger(错误)语义隔离。只画 text-shadow 不占布局,
+   对块内截断零影响 */
+.countdown-glow {
+  text-shadow:
+    0 0 12px rgba(252, 211, 77, 0.55),
+    0 0 4px rgba(252, 211, 77, 0.35);
+}
+@keyframes glow-pulse {
+  0%,
+  100% {
+    text-shadow:
+      0 0 12px rgba(252, 211, 77, 0.55),
+      0 0 4px rgba(252, 211, 77, 0.35);
+  }
+  50% {
+    text-shadow:
+      0 0 18px rgba(252, 211, 77, 0.85),
+      0 0 6px rgba(252, 211, 77, 0.55);
+  }
+}
+
 /* 「待办详情」备注的 markdown 排版(react-markdown 输出无类裸元素,一个类统管;
    面板已有 glass-panel-readable 垫底,颜色走 white 透明阶、链接走 accent)。
    滚动条挂 .modal-scroll(容器类由调用方带上)。 */
@@ -298,6 +321,11 @@ code {
 @media (prefers-reduced-motion: no-preference) {
   .editing-jiggle {
     animation: jiggle 1.2s ease-in-out infinite;
+  }
+  /* 倒计时「今天」光晕呼吸(CountdownIcon):2.4s 慢脉动——动效即提醒本身,
+     全主屏唯一的常驻动画位;reduce 下退回上方静态光晕 */
+  .countdown-glow {
+    animation: glow-pulse 2.4s ease-in-out infinite;
   }
   .animate-slide-in-right {
     animation: slide-in-right 0.22s ease-out;

@@ -24,14 +24,29 @@ export default function CountdownIconBody({ overlay = false }: { icon: Icon; ove
   )
   const dateText =
     next && `${next.date.getMonth() + 1}月${next.date.getDate()}日`
+  // 提醒阶梯(2026-09-02 立法):≤1 天进琥珀档、当天叠加粗+光晕脉动——恒定高亮
+  // 会让 200 天外也大呼小叫,提醒力被稀释;琥珀是「注意」语义,不撞 accent(交互)
+  // /danger(错误)/up·down(涨跌)的既有立法
+  const urgent = !!next && next.days <= 1
+  const today = !!next && next.days === 0
 
   return (
     <Tile label="倒计时" overlay={overlay}>
-      <TilePrimary className="text-white" title={dateText}>
+      <TilePrimary
+        className={
+          urgent
+            ? 'text-amber-300' + (today ? ' font-semibold countdown-glow' : '')
+            : 'text-white'
+        }
+        title={dateText}
+      >
         {next ? describeDays(next.days) : '—'}
       </TilePrimary>
       {next && (
-        <TileSecondary className="text-white/60" title={next.name}>
+        <TileSecondary
+          className={urgent ? 'text-amber-200/80' : 'text-white/60'}
+          title={next.name}
+        >
           {next.name}
         </TileSecondary>
       )}
