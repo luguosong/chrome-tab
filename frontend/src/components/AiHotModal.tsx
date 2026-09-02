@@ -41,7 +41,7 @@ export default function AiHotModal({ icon, onClose }: { icon: Icon; onClose: () 
     <DetailModal
       onClose={onClose}
       ariaLabel="AI 热点"
-      width="lg"
+      width="2xl"
       className="p-6"
       title={extractString(icon.data, 'name') || 'AI 热点'}
       subtitle="AIHOT 事件热点榜 + 模型精选 + AI 日报"
