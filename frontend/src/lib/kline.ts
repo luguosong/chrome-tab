@@ -64,3 +64,24 @@ export function sparklinePoints(closes: number[], w: number, h: number): string 
   const y = (c: number) => (range > 0 ? (1 - (c - min) / range) * h : h / 2)
   return closes.map((c, i) => `${x(i).toFixed(2)},${y(c).toFixed(2)}`).join(' ')
 }
+
+/**
+ * 当日(1 分钟)档:只留最新一个交易日的根。东财按根数回溯(klt=1&lmt=N),
+ * 周一早盘请求会混入上一交易日尾段,此处按末根的日期部分截掉——解析层单点,
+ * 消费端不做防御。空数组 → []。
+ */
+export function latestDayOnly(pts: KlinePoint[]): KlinePoint[] {
+  if (pts.length === 0) return []
+  const day = pts[pts.length - 1].date.slice(0, 10)
+  return pts.filter((p) => p.date.slice(0, 10) === day)
+}
+
+/**
+ * 悬浮定位:指针横轴像素 → 最近一根的下标(x 均分铺满容器宽,同折线的 x 归一)。
+ * 两端钳制在 [0, n-1];n≤1 恒 0(单点/空序列不出 NaN)。
+ */
+export function nearestIndex(px: number, width: number, n: number): number {
+  if (n <= 1) return 0
+  const i = Math.round((px / width) * (n - 1))
+  return Math.min(n - 1, Math.max(0, i))
+}

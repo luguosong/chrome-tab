@@ -1,7 +1,8 @@
+import { useState } from 'react'
 import { useIconData } from '../context/IconDataContext'
 import { useCompanyProfile } from '../hooks/useCompanyProfile'
 import { useFundamentals } from '../hooks/useFundamentals'
-import { useKlines } from '../hooks/useKlines'
+import { useKlines, type KlineRange } from '../hooks/useKlines'
 import KlineChart from './KlineChart'
 import DetailModal, { QueryPane } from './DetailModal'
 import StatCell from './StatCell'
@@ -10,11 +11,20 @@ import { extractString } from '../lib/iconData'
 import type { Icon } from '../lib/types'
 import type { Quote } from '../lib/quoteParser'
 
+/** K 线档位表(短→长,同主流行情 App 惯例当日居首):label 与 useKlines 的 KlineRange 一一对应。 */
+const RANGES: { key: KlineRange; label: string }[] = [
+  { key: 'day', label: '当日' },
+  { key: '1m', label: '近一月' },
+  { key: '1y', label: '近一年' },
+  { key: 'all', label: '全部' },
+]
+
 /**
  * 股票详情 Modal(spec user story 11)。
  *
  * 内容:名称/符号、价格、涨跌(▲/▼ 绝对值 + 百分比)、公司概述(公司档案 + 随价估值,东财双端点
- * 纯前端取数,见 ADR-0004)、K 线(收盘价折线,东财 push2his JSONP,spec 原 Out of Scope 已落地)。
+ * 纯前端取数,见 ADR-0004)、K 线(收盘价折线,东财 push2his JSONP,spec 原 Out of Scope 已落地;
+ * 四档胶囊 当日|近一月|近一年|全部,按档各拉各存,当日档 1 分钟分时 + 60s 轮询,悬浮看价)。
  *
  * 刷新失败降级(spec user story 15):quotesError 非空 → 行情区显示「刷新失败,重试」按钮,
  * 点击重拉 quotes(关联查询,与 useQuotes 批拉粒度一致)。单 symbol null(查询成功但无该
@@ -49,7 +59,8 @@ export default function StockModal({
   const showOverview = !isIndex && (overviewLoading || !!profile || !!fundamentals)
 
   // K 线(收盘序列,东财 push2his):secid 对指数也成立(sh000001→1.000001),故不随 isIndex 置 null。
-  const klinesQ = useKlines(symbolToSecid(symbol))
+  const [range, setRange] = useState<KlineRange>('1y')
+  const klinesQ = useKlines(symbolToSecid(symbol), range)
   const klines = klinesQ.data ?? []
 
   return (
@@ -124,10 +135,32 @@ export default function StockModal({
           </div>
         )}
 
-        {/* K 线(收盘价折线,东财 push2his,见 ADR-0004 / CONTEXT「公司概述」) */}
+        {/* K 线(收盘价折线,东财 push2his,见 ADR-0004 / CONTEXT「公司概述」)。
+            档位胶囊按档各拉各存(queryKey 含档位),当日档为 1 分钟分时 + 60s 轮询。 */}
         <div>
-          <div className="text-meta uppercase tracking-wider text-white/50 mb-2">
-            K 线
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-meta uppercase tracking-wider text-white/50">K 线</div>
+            <div role="group" aria-label="K 线时间档位" className="flex gap-1">
+              {RANGES.map(({ key, label }) => {
+                const active = range === key
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setRange(key)}
+                    className={
+                      'rounded-full border px-2 py-0.5 text-meta transition ' +
+                      (active
+                        ? 'border-white/25 bg-white/15 text-white/90'
+                        : 'border-white/15 text-white/60 hover:border-white/30 hover:text-white/85 active:border-white/40')
+                    }
+                  >
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
           </div>
           <div className="h-32 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
             {klinesQ.isLoading ? (
@@ -135,7 +168,11 @@ export default function StockModal({
                 K 线加载中…
               </div>
             ) : klines.length > 0 ? (
-              <KlineChart klines={klines} />
+              <KlineChart
+                klines={klines}
+                prevClose={range === 'day' ? q?.prev ?? null : null}
+                intraday={range === 'day'}
+              />
             ) : (
               <div className="flex h-full items-center justify-center text-xs text-white/40">
                 暂无数据

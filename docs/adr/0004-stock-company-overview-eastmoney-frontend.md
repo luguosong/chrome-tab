@@ -9,3 +9,8 @@
 ## 附注:K 线(收盘价折线)同源落地
 
 本 ADR 原 spec(`spec.md` Out of Scope)将「股票详情里的真实 K 线数据源」列为范围外、先用占位。后已落地,沿用同一架构姿态:浏览器直连东财 **`push2his.eastmoney.com/api/qt/stock/kline/get`**,JSONP(`cb=`)绕 CORS,react-query 缓存(`staleTime` 60s、不轮询——Modal 短生命周期 + 120 根 payload 较大,重开超 60s 才重取)。取 `fields2=f51,f53`(日期+收盘)、`klt=101` 日线、`fqt=1` 前复权、`lmt=120`。公司与指数均适用(secid 对指数成立,如 `sh000001`→`1.000001`);美股指数 secid 未必命中,优雅降级为「暂无数据」。parser(`parseKlines`)收敛逗号串解析,与 `parseFundamentals` 同接缝、同 Vitest 覆盖。渲染为手写 SVG 收盘折线(无第三方图表库,`vector-effect` 保描边、CSS 变量取涨跌色)。
+
+## 附注:K 线时间档位与当日分时(修订「不轮询」)
+
+K 线区后增四档胶囊(当日|近一月|近一年|全部,默认近一年),按档各拉各存(queryKey 含档位)。**上段「不轮询」仅日线档继续成立**;当日档为 `klt=1` 1 分钟分时、随行情 60s 轮询(Modal 关闭即停)——分时的价值在实时,不轮询即死数据,与 quotes 同节奏不开新例外。当日档解析层按最新交易日过滤(`latestDayOnly`:东财按根数回溯,早盘会混入上一交易日尾段),叠昨收虚线为分时专属语义(日线档不传昨收)。悬浮 crosshair+tooltip(手写 SVG 内实现,无新依赖)。
+

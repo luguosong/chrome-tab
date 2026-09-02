@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseKlines, sparklinePoints } from './kline'
+import { latestDayOnly, nearestIndex, parseKlines, sparklinePoints } from './kline'
 
 // K 线(收盘价序列)取数纯函数(见 CONTEXT.md「公司概述」K 线 / spec user story 11)。
 // 数据来自东财 push2his,fields2=f51,f53 → 每行 "日期,收盘价"。无 DOM。
@@ -73,5 +73,60 @@ describe('sparklinePoints — 收盘序列→迷你折线坐标', () => {
 
   it('空序列 → 空串(渲染层隐藏 svg)', () => {
     expect(sparklinePoints([], 100, 30)).toBe('')
+  })
+})
+
+// latestDayOnly — 当日(1 分钟)档:只留最新一个交易日的根。东财按根数回溯,
+// 周一早盘请求会混入上一交易日尾段,解析层单点截掉(component 不做防御)。
+
+describe('latestDayOnly — 只留最新交易日的根', () => {
+  it('混入上一交易日尾段:按末根日期截当日', () => {
+    const pts = [
+      { date: '2026-09-01 14:59', close: 10 },
+      { date: '2026-09-01 15:00', close: 10.1 },
+      { date: '2026-09-02 09:30', close: 10.2 },
+      { date: '2026-09-02 09:31', close: 10.3 },
+    ]
+    expect(latestDayOnly(pts)).toEqual([
+      { date: '2026-09-02 09:30', close: 10.2 },
+      { date: '2026-09-02 09:31', close: 10.3 },
+    ])
+  })
+
+  it('全部同一天(盘后完整分时)→ 原样返回', () => {
+    const pts = [
+      { date: '2026-09-02 09:30', close: 10 },
+      { date: '2026-09-02 11:30', close: 10.5 },
+      { date: '2026-09-02 15:00', close: 11 },
+    ]
+    expect(latestDayOnly(pts)).toEqual(pts)
+  })
+
+  it('空数组 → []', () => {
+    expect(latestDayOnly([])).toEqual([])
+  })
+})
+
+// nearestIndex — 悬浮定位:指针横轴像素 → 最近一根的下标(x 均分铺满容器宽)。
+
+describe('nearestIndex — 指针像素→最近根下标', () => {
+  it('正中落在中点下标', () => {
+    expect(nearestIndex(150, 300, 5)).toBe(2)
+  })
+
+  it('就近取整:偏左归左根、过半归右根', () => {
+    expect(nearestIndex(100, 300, 5)).toBe(1) // 1.33 → 1
+    expect(nearestIndex(140, 300, 5)).toBe(2) // 1.87 → 2
+  })
+
+  it('两端钳制:0 与超界都落在首末根', () => {
+    expect(nearestIndex(0, 300, 5)).toBe(0)
+    expect(nearestIndex(-20, 300, 5)).toBe(0)
+    expect(nearestIndex(320, 300, 5)).toBe(4)
+  })
+
+  it('n≤1 → 恒 0(单点/空序列不出 NaN)', () => {
+    expect(nearestIndex(123, 300, 1)).toBe(0)
+    expect(nearestIndex(123, 300, 0)).toBe(0)
   })
 })
