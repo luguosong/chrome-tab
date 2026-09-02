@@ -1,8 +1,40 @@
 import { describe, expect, it } from 'vitest'
-import { latestDayOnly, nearestIndex, parseKlines, sparklinePoints } from './kline'
+import {
+  KLINE_RANGES,
+  klineChartModel,
+  latestDayOnly,
+  nearestIndex,
+  parseKlines,
+  parsePreClose,
+  type KlinePoint,
+} from './kline'
 
-// K 线(收盘价序列)取数纯函数(见 CONTEXT.md「公司概述」K 线 / spec user story 11)。
-// 数据来自东财 push2his,fields2=f51,f53 → 每行 "日期,收盘价"。无 DOM。
+// K 线区纯函数接缝:时间档位声明(KLINE_RANGES)、响应解析(parseKlines)、
+// 图型决策(klineChartModel)。数据来自东财 push2his,fields2=f51,f53 → 每行 "日期,收盘价"。无 DOM。
+
+describe('KLINE_RANGES — 时间档位声明表', () => {
+  it('四档,短→长(胶囊顺序即声明序)', () => {
+    expect(Object.keys(KLINE_RANGES)).toEqual(['day', '1m', '1y', 'all'])
+  })
+
+  it('仅当日档是分时;轮询仅当日档——档位谓词的唯一真源', () => {
+    expect(KLINE_RANGES.day.intraday).toBe(true)
+    expect(KLINE_RANGES['1m'].intraday).toBe(false)
+    expect(KLINE_RANGES['1y'].intraday).toBe(false)
+    expect(KLINE_RANGES.all.intraday).toBe(false)
+    expect(KLINE_RANGES.day.refetchInterval).toBe(60_000)
+    expect(KLINE_RANGES['1m'].refetchInterval).toBeUndefined()
+    expect(KLINE_RANGES['1y'].refetchInterval).toBeUndefined()
+    expect(KLINE_RANGES.all.refetchInterval).toBeUndefined()
+  })
+
+  it('日线三档共用 klt=101,day 走 1 分钟线', () => {
+    expect(KLINE_RANGES.day.klt).toBe(1)
+    expect(KLINE_RANGES['1m'].klt).toBe(101)
+    expect(KLINE_RANGES['1y'].klt).toBe(101)
+    expect(KLINE_RANGES.all.klt).toBe(101)
+  })
+})
 
 describe('parseKlines — 东财 push2his 响应→收盘价序列', () => {
   it('正常:每行第 0 列日期、第 1 列收盘', () => {
@@ -39,11 +71,6 @@ describe('parseKlines — 东财 push2his 响应→收盘价序列', () => {
     ])
   })
 
-  it('max 截断:只保留最近 max 根(klines 为旧→新)', () => {
-    const raw = { data: { klines: ['d1,1', 'd2,2', 'd3,3', 'd4,4', 'd5,5'] } }
-    expect(parseKlines(raw, 3).map((p) => p.date)).toEqual(['d3', 'd4', 'd5'])
-  })
-
   it('data 缺失 / klines 空 / 非对象 → []', () => {
     expect(parseKlines({ data: { klines: [] } })).toEqual([])
     expect(parseKlines({ data: {} })).toEqual([])
@@ -52,27 +79,107 @@ describe('parseKlines — 东财 push2his 响应→收盘价序列', () => {
   })
 })
 
-// sparklinePoints — 收盘序列→SVG polyline "x,y" 串(大尺寸 stock 小组件迷你走势)。
-// 归一化铺满给定盒;等价 KlineChart 的防除零(全平→垂直居中)与单点(居中)约定。
+// parsePreClose — 分时档昨收(响应级 data.preKPrice,与序列同一前复权口径)。
 
-describe('sparklinePoints — 收盘序列→迷你折线坐标', () => {
-  it('正常:首末点贴 x 两端,极值贴 y 两端', () => {
-    // 1→最低(y=h)、3→最高(y=0);坐标固定 2 位小数
-    expect(sparklinePoints([1, 2, 3], 100, 30)).toBe('0.00,30.00 50.00,15.00 100.00,0.00')
+describe('parsePreClose — 响应级昨收', () => {
+  it('正常:数值与字符串数形态都取到', () => {
+    expect(parsePreClose({ data: { preKPrice: 1299.56 } })).toBe(1299.56)
+    expect(parsePreClose({ data: { preKPrice: '1299.56' } })).toBe(1299.56)
   })
 
-  it('全平(极差 0)→ 所有点垂直居中,不产生 NaN', () => {
-    expect(sparklinePoints([5, 5, 5, 5], 100, 30)).toBe(
-      '0.00,15.00 33.33,15.00 66.67,15.00 100.00,15.00',
-    )
+  it('缺失 / 非数 / 0 / 畸形响应 → null(消费端按昨收未到退化)', () => {
+    expect(parsePreClose({ data: {} })).toBeNull()
+    expect(parsePreClose({ data: { preKPrice: 'abc' } })).toBeNull()
+    expect(parsePreClose({ data: { preKPrice: Infinity } })).toBeNull()
+    expect(parsePreClose({ data: { preKPrice: 0 } })).toBeNull()
+    expect(parsePreClose({})).toBeNull()
+    expect(parsePreClose(null)).toBeNull()
+  })
+})
+
+// klineChartModel — 图型决策按档位分派。调用方无脑传 prevClose,消费与否由声明裁决:
+// 「日线不叠昨收(并入会改写 y 域与涨跌语义,e20c581 实锤)」在此钉死为回归锚。
+
+describe('klineChartModel — 分时档(当日)', () => {
+  const pts: KlinePoint[] = [
+    { date: '2026-09-02 09:31', close: 10 },
+    { date: '2026-09-02 09:32', close: 10.5 },
+    { date: '2026-09-02 09:33', close: 9.8 },
+  ]
+
+  it('昨收到位:锚=昨收,y 域并入锚(基准虚线防裁),悬浮基恒昨收', () => {
+    const m = klineChartModel(pts, 'day', 10.2)
+    expect(m.anchor).toBe(10.2)
+    expect(m.domainMin).toBe(9.8)
+    expect(m.domainMax).toBe(10.5) // 昨收 10.2 在序列范围内,域不变
+    expect(m.baseline).toBe(10.2)
+    expect(m.hoverBase(0)).toBe(10.2)
+    expect(m.hoverBase(2)).toBe(10.2)
+    expect(m.time('2026-09-02 09:31')).toBe('09:31')
   })
 
-  it('单点 → 居中', () => {
-    expect(sparklinePoints([7], 100, 30)).toBe('50.00,15.00')
+  it('昨收超出序列范围:并入 y 域防虚线被裁', () => {
+    const m = klineChartModel(pts, 'day', 12)
+    expect(m.domainMax).toBe(12)
   })
 
-  it('空序列 → 空串(渲染层隐藏 svg)', () => {
-    expect(sparklinePoints([], 100, 30)).toBe('')
+  it('昨收未到(quotes 未返回,null):锚退化首根,虚线与悬浮 % 静默省缺', () => {
+    const m = klineChartModel(pts, 'day', null)
+    expect(m.anchor).toBe(10)
+    expect(m.baseline).toBeNull()
+    expect(m.hoverBase(1)).toBeNull()
+  })
+
+  it('空序列:域回 0 不出 Infinity/NaN(导出接缝对下一调用方的防护,同 nearestIndex 口径)', () => {
+    const m = klineChartModel([], '1y', null)
+    expect(m.domainMin).toBe(0)
+    expect(m.domainMax).toBe(0)
+    expect(m.anchor).toBe(0)
+    expect(m.hoverBase(0)).toBeNull()
+  })
+
+  it('涨跌基为 0(上游畸形)作缺失:不出 Infinity%', () => {
+    const zeros: KlinePoint[] = [
+      { date: '2026-08-10', close: 0 },
+      { date: '2026-08-11', close: 5 },
+    ]
+    expect(klineChartModel(zeros, '1y', null).hoverBase(1)).toBeNull()
+    expect(klineChartModel(pts, 'day', 0).hoverBase(1)).toBeNull()
+    // baseline 是机械透传,不在此拒 0——preKPrice=0 已被 parsePreClose 拒,到不了 model
+  })
+})
+
+describe('klineChartModel — 日线档(近一月/近一年/全部)', () => {
+  const pts: KlinePoint[] = [
+    { date: '2026-08-10', close: 10 },
+    { date: '2026-08-11', close: 10.5 },
+    { date: '2026-08-12', close: 9.8 },
+  ]
+
+  it('e20c581 回归锚:调用方无脑传昨收也不被消费——锚恒首根,y 域不含昨收', () => {
+    const m = klineChartModel(pts, '1y', 12) // 12 超出序列范围:若被并入即 bug
+    expect(m.anchor).toBe(10)
+    expect(m.domainMax).toBe(10.5)
+    expect(m.domainMin).toBe(9.8)
+    expect(m.baseline).toBeNull()
+    expect(m.time('2026-08-10')).toBe('2026-08-10')
+  })
+
+  it('悬浮涨跌基对前一根,首根无基(无 %)', () => {
+    const m = klineChartModel(pts, '1y', null)
+    expect(m.hoverBase(0)).toBeNull()
+    expect(m.hoverBase(1)).toBe(10)
+    expect(m.hoverBase(2)).toBe(10.5)
+  })
+
+  it('全平序列:域两端相等(组件防除零的输入)', () => {
+    const flat: KlinePoint[] = [
+      { date: '2026-08-10', close: 5 },
+      { date: '2026-08-11', close: 5 },
+    ]
+    const m = klineChartModel(flat, '1m', null)
+    expect(m.domainMin).toBe(5)
+    expect(m.domainMax).toBe(5)
   })
 })
 

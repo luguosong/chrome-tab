@@ -2,22 +2,15 @@ import { useState } from 'react'
 import { useIconData } from '../context/IconDataContext'
 import { useCompanyProfile } from '../hooks/useCompanyProfile'
 import { useFundamentals } from '../hooks/useFundamentals'
-import { useKlines, type KlineRange } from '../hooks/useKlines'
+import { useKlines } from '../hooks/useKlines'
 import KlineChart from './KlineChart'
 import DetailModal, { QueryPane } from './DetailModal'
 import StatCell from './StatCell'
 import { formatMarketCap, isIndexSymbol, symbolToSecid, symbolToSecucode } from '../lib/companyOverview'
 import { extractString } from '../lib/iconData'
+import { KLINE_RANGES, type KlineRange } from '../lib/kline'
 import type { Icon } from '../lib/types'
 import type { Quote } from '../lib/quoteParser'
-
-/** K 线档位表(短→长,同主流行情 App 惯例当日居首):label 与 useKlines 的 KlineRange 一一对应。 */
-const RANGES: { key: KlineRange; label: string }[] = [
-  { key: 'day', label: '当日' },
-  { key: '1m', label: '近一月' },
-  { key: '1y', label: '近一年' },
-  { key: 'all', label: '全部' },
-]
 
 /**
  * 股票详情 Modal(spec user story 11)。
@@ -61,7 +54,7 @@ export default function StockModal({
   // K 线(收盘序列,东财 push2his):secid 对指数也成立(sh000001→1.000001),故不随 isIndex 置 null。
   const [range, setRange] = useState<KlineRange>('1y')
   const klinesQ = useKlines(symbolToSecid(symbol), range)
-  const klines = klinesQ.data ?? []
+  const kl = klinesQ.data ?? null
 
   return (
     <DetailModal
@@ -141,7 +134,7 @@ export default function StockModal({
           <div className="mb-2 flex items-center justify-between">
             <div className="text-meta uppercase tracking-wider text-white/50">K 线</div>
             <div role="group" aria-label="K 线时间档位" className="flex gap-1">
-              {RANGES.map(({ key, label }) => {
+              {(Object.keys(KLINE_RANGES) as KlineRange[]).map((key) => {
                 const active = range === key
                 return (
                   <button
@@ -156,7 +149,7 @@ export default function StockModal({
                         : 'border-white/15 text-white/60 hover:border-white/30 hover:text-white/85 active:border-white/40')
                     }
                   >
-                    {label}
+                    {KLINE_RANGES[key].label}
                   </button>
                 )
               })}
@@ -167,12 +160,10 @@ export default function StockModal({
               <div className="flex h-full items-center justify-center text-xs text-white/40">
                 K 线加载中…
               </div>
-            ) : klines.length > 0 ? (
-              <KlineChart
-                klines={klines}
-                prevClose={range === 'day' ? q?.prev ?? null : null}
-                intraday={range === 'day'}
-              />
+            ) : kl && kl.points.length > 0 ? (
+              // 调用方零档位知识:昨收无脑传(分时档来自同响应 preKPrice,前复权口径除权日不漂移),
+              // 是否消费由档位声明裁决(lib/kline.ts klineChartModel)。
+              <KlineChart klines={kl.points} range={range} prevClose={kl.preClose} />
             ) : (
               <div className="flex h-full items-center justify-center text-xs text-white/40">
                 暂无数据
