@@ -203,6 +203,8 @@ export interface CalendarCell {
   iso: string
   day: number
   inMonth: boolean
+  /** 周六/日(周末淡绿泛标记用;补班红、假日深绿在优先级上盖过它)。 */
+  weekend: boolean
 }
 
 /** 月网格 42 格(6 周固定,月份导航高度不跳):周一起始,首尾补位。 */
@@ -211,7 +213,7 @@ export function buildMonthGrid(year: number, month: number): CalendarCell[] {
   const cells: CalendarCell[] = []
   for (let i = 0; i < 42; i++) {
     const d = new Date(year, month, 1 - lead + i)
-    cells.push({ iso: toIsoDate(d), day: d.getDate(), inMonth: d.getMonth() === month })
+    cells.push({ iso: toIsoDate(d), day: d.getDate(), inMonth: d.getMonth() === month, weekend: d.getDay() === 0 || d.getDay() === 6 })
   }
   return cells
 }

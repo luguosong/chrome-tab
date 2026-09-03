@@ -158,12 +158,13 @@ describe('日历月视图(ADR-0054):当月内实例化,区别于「下一次出�
     expect(toIsoDate(new Date(2026, 8, 3))).toBe('2026-09-03')
   })
 
-  it('buildMonthGrid:周一起始、42 格固定、首尾补位 inMonth=false', () => {
+  it('buildMonthGrid:周一起始、42 格固定、首尾补位 inMonth=false、weekend 标记', () => {
     const grid = buildMonthGrid(2026, 8) // 2026-09:1 日是周二 → 首格补 8-31(周一)
     expect(grid).toHaveLength(42)
-    expect(grid[0]).toEqual({ iso: '2026-08-31', day: 31, inMonth: false })
-    expect(grid[1]).toEqual({ iso: '2026-09-01', day: 1, inMonth: true })
-    expect(grid[41]).toEqual({ iso: '2026-10-11', day: 11, inMonth: false })
+    expect(grid[0]).toEqual({ iso: '2026-08-31', day: 31, inMonth: false, weekend: false })
+    expect(grid[1]).toEqual({ iso: '2026-09-01', day: 1, inMonth: true, weekend: false })
+    expect(grid[5]).toMatchObject({ iso: '2026-09-05', weekend: true }) // 周六
+    expect(grid[41]).toEqual({ iso: '2026-10-11', day: 11, inMonth: false, weekend: true }) // 周日
   })
 
   it('holidaysInMonth:已过节日也返回(10 月中旬开日历,国庆须在格上)', () => {
