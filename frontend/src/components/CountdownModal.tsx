@@ -11,13 +11,15 @@ import ModalShell from './ModalShell'
 
 /**
  * 倒计时详情 Modal(CONTEXT.md「倒计时」,ADR-0054 日历化):点块打开
- * (detailEntry:'block'),打开即当月月历(原双 tab 撤)。格内三轴标记——休/班
- * 角标(法定安排,GET /api/holidays ics 上游;降级无标不报错)、节日名小字
- * (内置清单,含不放假的文化节日)、重要日子琥珀底(用户条目,编辑的**全局唯一
- * 入口**迁至格子点击;点空格不新建)。编辑表单沿用既有草稿态:每动作即时整份
- * PUT(useUpdateLayoutSettings,ADR-0026 布局设置通道),无草稿暂存;编辑态附
- * 删除(日历无行级 ✎,CRUD 完整性由此兜)。月视图数据是「当月内实例化」口径
- * (含已过),与块内/弹层的「下一次出现」语义(getAllCountdowns)分立。
+ * (detailEntry:'block'),打开即当月月历(原双 tab 撤),可切年视图(4×3 月份壁,
+ * 点卡钻取进月)。格内三轴标记——休/班角标(法定安排,GET /api/holidays ics 上游;
+ * 降级无标不报错)、节日名小字(内置清单,含不放假的文化节日)、重要日子琥珀底
+ * (用户条目,编辑的**全局唯一入口**迁至格子点击;点空格不新建)。配色语义轴:
+ * 休=深绿、班=红、周末=淡绿(2026-09-03 用户定案;补班多落周末,红须盖过绿)。
+ * 编辑表单沿用既有草稿态:每动作即时整份 PUT(useUpdateLayoutSettings,ADR-0026
+ * 布局设置通道),无草稿暂存;编辑态附删除(日历无行级 ✎,CRUD 完整性由此兜)。
+ * 月视图数据是「当月内实例化」口径(含已过),与块内/弹层的「下一次出现」语义
+ * (getAllCountdowns)分立。
  */
 
 type Draft = {
@@ -30,13 +32,25 @@ type Draft = {
   day: string
 }
 
+type CellMark = { rest?: boolean; work?: boolean; holiday?: string; importantId?: string }
+
 const emptyDraft: Draft = { id: null, name: '', calendar: 'solar', repeat: 'annual', year: '', month: '', day: '' }
 
 const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'] as const
+const CN_MONTHS = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二'] as const
 
 function toDraft(d: ImportantDate): Draft {
   const [year, month, day] = d.date.split('-')
   return { id: d.id, name: d.name, calendar: d.calendar, repeat: d.repeat, year, month, day }
+}
+
+/** 格底色语义(月视图大格与年壁迷你点共用一套色语)。 */
+function cellBg(m: CellMark | undefined, weekend: boolean): string {
+  if (m?.importantId) return 'bg-amber-300/15' // 重要日子:个人语义最高
+  if (m?.rest) return 'bg-emerald-500/20' // 法定假日深绿
+  if (m?.work) return 'bg-red-400/10' // 补班红(多落周末,盖过淡绿)
+  if (weekend) return 'bg-emerald-300/10' // 普通周末淡绿
+  return 'bg-white/[0.04]'
 }
 
 /** 二选一胶囊组(触达 ≥32px,Liquid Glass 触达规范)。 */
@@ -70,6 +84,47 @@ function Seg<T extends string>({
   )
 }
 
+/** 年壁月卡:整卡可点钻取进月;迷你点阵复用 cellBg 色语,仅当月内着色。 */
+function YearMonthCard({
+  year,
+  month,
+  marks,
+  todayIso,
+  isCurrentMonth,
+  onPick,
+}: {
+  year: number
+  month: number
+  marks: Map<string, CellMark>
+  todayIso: string
+  isCurrentMonth: boolean
+  onPick: () => void
+}) {
+  const grid = useMemo(() => buildMonthGrid(year, month), [year, month])
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      aria-label={`${month + 1}月`}
+      className="rounded-xl p-2 text-left bg-white/[0.03] hover:bg-white/[0.07] transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
+    >
+      <div className={`text-xs mb-1.5 ${isCurrentMonth ? 'text-accent font-semibold' : 'text-white/70'}`}>
+        {CN_MONTHS[month]}月
+      </div>
+      <div className="grid grid-cols-7 gap-[3px]">
+        {grid.map((cell) => (
+          <span
+            key={cell.iso}
+            className={`aspect-square rounded-[3px] ${
+              cell.inMonth ? cellBg(marks.get(cell.iso), cell.weekend) : 'opacity-0'
+            } ${cell.iso === todayIso ? 'ring-1 ring-accent' : ''}`}
+          />
+        ))}
+      </div>
+    </button>
+  )
+}
+
 export default function CountdownModal({ onClose }: { icon: Icon; onClose: () => void }) {
   const layout = useLayoutSettings()
   const save = useUpdateLayoutSettings()
@@ -80,6 +135,7 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
   const now = useNow(60_000)
   const dayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`
   const todayIso = toIsoDate(now)
+  const [mode, setMode] = useState<'month' | 'year'>('month')
   const [view, setView] = useState(() => ({ year: now.getFullYear(), month: now.getMonth() }))
   const holidaysQuery = useHolidays()
 
@@ -87,31 +143,41 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
 
   // 格标记合成(同 iso 三源合并):休/班(ics)打底、节日名(内置)覆盖副行、
   // 重要日子置琥珀底(同日撞期个人优先;rest 转副行「休」提示不丢)。
+  // 年视图范围 = 全年 12 月;ics 全量平铺直接入 map(~500 条,月视图只查当月 iso)。
   const marks = useMemo(() => {
-    const map = new Map<string, { rest?: boolean; work?: boolean; holiday?: string; importantId?: string }>()
+    const map = new Map<string, CellMark>()
     for (const d of holidaysQuery.data?.days ?? []) {
       const m = map.get(d.date) ?? {}
       if (d.kind === 'rest') m.rest = true
       else m.work = true
       map.set(d.date, m)
     }
-    for (const h of holidaysInMonth(view.year, view.month)) {
-      const iso = toIsoDate(h.date)
-      map.set(iso, { ...map.get(iso), holiday: h.name })
-    }
-    for (const i of importantDatesInMonth(layout.importantDates, view.year, view.month)) {
-      const iso = toIsoDate(i.date)
-      map.set(iso, { ...map.get(iso), importantId: i.id })
+    const months = mode === 'year' ? Array.from({ length: 12 }, (_, i) => i) : [view.month]
+    for (const mo of months) {
+      for (const h of holidaysInMonth(view.year, mo)) {
+        const iso = toIsoDate(h.date)
+        map.set(iso, { ...map.get(iso), holiday: h.name })
+      }
+      for (const i of importantDatesInMonth(layout.importantDates, view.year, mo)) {
+        const iso = toIsoDate(i.date)
+        map.set(iso, { ...map.get(iso), importantId: i.id })
+      }
     }
     return map
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view.year, view.month, dayKey, holidaysQuery.data, layout.importantDates])
+  }, [mode, view.year, view.month, dayKey, holidaysQuery.data, layout.importantDates])
 
-  const stepMonth = (delta: number) =>
+  const step = (delta: number) =>
     setView((v) => {
+      if (mode === 'year') return { year: v.year + delta, month: v.month }
       const d = new Date(v.year, v.month + delta, 1)
       return { year: d.getFullYear(), month: d.getMonth() }
     })
+
+  const pickMonth = (mo: number) => {
+    setView((v) => ({ ...v, month: mo }))
+    setMode('month')
+  }
 
   async function commit(next: ImportantDate[]) {
     setErr(null)
@@ -145,87 +211,110 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
   }
 
   return (
-    <ModalShell onClose={onClose} ariaLabel="倒计时" width="sm" scroll className="p-5 text-sm text-white/90">
+    <ModalShell onClose={onClose} ariaLabel="倒计时" width="2xl" scroll className="p-5 text-sm text-white/90">
       {draft === null ? (
         <>
-          <div className="flex items-center justify-between gap-2 mb-3 pr-10">
-            <div className="text-sm font-semibold shrink-0">倒计时</div>
+          <div className="flex items-center justify-between gap-2 mb-4 pr-10">
             <div className="flex items-center gap-0.5">
               <button
                 type="button"
-                aria-label="上一月"
-                onClick={() => stepMonth(-1)}
-                className="w-7 h-7 rounded-full text-white/60 hover:bg-white/20 hover:text-white flex items-center justify-center transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
+                aria-label={mode === 'year' ? '上一年' : '上一月'}
+                onClick={() => step(-1)}
+                className="w-8 h-8 rounded-full text-white/60 hover:bg-white/20 hover:text-white flex items-center justify-center transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
               >
                 ‹
               </button>
-              <span className="tabular-nums text-xs text-white/70 min-w-16 text-center">
-                {view.year}年{view.month + 1}月
-              </span>
+              <div className="text-lg font-semibold tabular-nums min-w-28 text-center">
+                {view.year}年{mode === 'month' && `${view.month + 1}月`}
+              </div>
               <button
                 type="button"
-                aria-label="下一月"
-                onClick={() => stepMonth(1)}
-                className="w-7 h-7 rounded-full text-white/60 hover:bg-white/20 hover:text-white flex items-center justify-center transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
+                aria-label={mode === 'year' ? '下一年' : '下一月'}
+                onClick={() => step(1)}
+                className="w-8 h-8 rounded-full text-white/60 hover:bg-white/20 hover:text-white flex items-center justify-center transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
               >
                 ›
               </button>
             </div>
-            <button
-              type="button"
-              onClick={() => { setDraft(emptyDraft); setErr(null) }}
-              className="min-h-8 px-3 py-1.5 rounded-full bg-white/20 text-xs text-white/85 hover:bg-white/30 transition focus-visible:outline-2 focus-visible:outline-white/60"
-            >
-              + 添加
-            </button>
+            <div className="flex items-center gap-2">
+              <Seg
+                value={mode}
+                onChange={(m) => setMode(m)}
+                options={[
+                  { id: 'month', label: '月' },
+                  { id: 'year', label: '年' },
+                ]}
+              />
+              <button
+                type="button"
+                onClick={() => { setDraft(emptyDraft); setErr(null) }}
+                className="min-h-8 px-3 py-1.5 rounded-full bg-white/20 text-xs text-white/85 hover:bg-white/30 transition focus-visible:outline-2 focus-visible:outline-white/60"
+              >
+                + 添加
+              </button>
+            </div>
           </div>
-          <div className="grid grid-cols-7 gap-1 mb-1 text-center text-[10px] text-white/40">
-            {WEEKDAYS.map((w) => (
-              <div key={w} className="py-0.5">{w}</div>
-            ))}
-          </div>
-          <div className="grid grid-cols-7 gap-1">
-            {grid.map((cell) => {
-              const m = marks.get(cell.iso)
-              const importantId = m?.importantId
-              const sub = m?.holiday ?? (m?.rest ? '休' : m?.work ? '班' : '')
-              return (
-                <button
-                  key={cell.iso}
-                  type="button"
-                  disabled={!importantId}
-                  title={importantId ? '编辑' : undefined}
-                  onClick={() => {
-                    const d = layout.importantDates.find((x) => x.id === importantId)
-                    if (d) { setDraft(toDraft(d)); setErr(null) }
-                  }}
-                  className={`h-9 rounded-lg text-xs transition-colors focus-visible:outline-2 focus-visible:outline-white/60 ${
-                    cell.inMonth ? '' : 'opacity-30'
-                  } ${
-                    importantId
-                      ? 'bg-amber-300/15 hover:bg-amber-300/30 cursor-pointer'
-                      : m?.rest
-                        ? 'bg-accent/15'
-                        : 'bg-white/[0.04]'
-                  } ${cell.iso === todayIso ? 'ring-1 ring-accent font-semibold' : ''}`}
-                >
-                  {cell.day}
-                  {sub && (
-                    <span
-                      className={`block text-[9px] leading-none truncate px-0.5 ${
-                        m?.holiday ? 'text-white/55' : m?.rest ? 'text-accent' : 'text-white/50'
+          {mode === 'month' ? (
+            <>
+              <div className="grid grid-cols-7 gap-1 mb-1 text-center text-[11px] text-white/40">
+                {WEEKDAYS.map((w) => (
+                  <div key={w} className="py-1">{w}</div>
+                ))}
+              </div>
+              <div className="grid grid-cols-7 gap-1.5">
+                {grid.map((cell) => {
+                  const m = marks.get(cell.iso)
+                  const importantId = m?.importantId
+                  const sub = m?.holiday ?? (m?.rest ? '休' : m?.work ? '班' : '')
+                  return (
+                    <button
+                      key={cell.iso}
+                      type="button"
+                      disabled={!importantId}
+                      title={importantId ? '编辑' : undefined}
+                      onClick={() => {
+                        const d = layout.importantDates.find((x) => x.id === importantId)
+                        if (d) { setDraft(toDraft(d)); setErr(null) }
+                      }}
+                      className={`h-12 rounded-xl transition-colors focus-visible:outline-2 focus-visible:outline-white/60 ${
+                        cell.inMonth ? '' : 'opacity-30'
+                      } ${importantId ? `${cellBg(m, cell.weekend)} hover:bg-amber-300/30 cursor-pointer` : cellBg(m, cell.weekend)} ${
+                        cell.iso === todayIso ? 'ring-1 ring-accent font-semibold' : ''
                       }`}
                     >
-                      {sub}
-                    </span>
-                  )}
-                </button>
-              )
-            })}
-          </div>
+                      {cell.day}
+                      {sub && (
+                        <span
+                          className={`block text-[10px] leading-tight truncate px-0.5 ${
+                            m?.holiday ? 'text-white/55' : m?.work ? 'text-red-300' : m?.rest ? 'text-emerald-300' : ''
+                          }`}
+                        >
+                          {sub}
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </>
+          ) : (
+            <div className="grid grid-cols-4 gap-2">
+              {Array.from({ length: 12 }, (_, mo) => (
+                <YearMonthCard
+                  key={mo}
+                  year={view.year}
+                  month={mo}
+                  marks={marks}
+                  todayIso={todayIso}
+                  isCurrentMonth={view.year === now.getFullYear() && mo === now.getMonth()}
+                  onPick={() => pickMonth(mo)}
+                />
+              ))}
+            </div>
+          )}
         </>
       ) : (
-        <>
+        <div className="max-w-sm mx-auto">
           <div className="text-sm font-semibold mb-3 pr-10">{draft.id ? '编辑重要日子' : '添加重要日子'}</div>
           <div className="space-y-3">
             <input
@@ -332,7 +421,7 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
               />
             )}
           </div>
-        </>
+        </div>
       )}
     </ModalShell>
   )
