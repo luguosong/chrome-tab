@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import {
   getChangelogSource,
   hasChangelogRaw,
+  isLtsVersion,
   isPrereleaseVersion,
   type ChangelogSourceId,
 } from 'chrome-tab-shared'
@@ -159,6 +160,14 @@ export default function ChangelogModal({
                           {isLatest && (
                             <span className="rounded-full bg-accent/20 px-2 py-0.5 text-meta font-medium leading-none text-accent">
                               最新
+                            </span>
+                          )}
+                          {isLtsVersion(v.title, def) && (
+                            <span
+                              title={`${def.ltsBranches?.join('/')} 长期支持分支`}
+                              className="rounded-full border border-white/25 px-2 py-0.5 text-meta leading-none text-white/55"
+                            >
+                              LTS
                             </span>
                           )}
                           {noRaw && (

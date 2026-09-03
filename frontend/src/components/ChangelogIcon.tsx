@@ -1,4 +1,4 @@
-import { changelogSourceOf, getChangelogSource, isPrereleaseVersion } from 'chrome-tab-shared'
+import { changelogSourceOf, getChangelogSource, isLtsVersion, isPrereleaseVersion } from 'chrome-tab-shared'
 import { useChangelog } from '../hooks/useChangelog'
 import { timeAgo } from '../lib/timeAgo'
 import { isFreshRow } from '../lib/tileBody'
@@ -71,6 +71,11 @@ export default function ChangelogIconBody({
                   >
                     {v.title}
                   </span>
+                  {isLtsVersion(v.title, sourceDef) && (
+                    <span className="shrink-0 text-white/40" style={{ fontSize }}>
+                      LTS
+                    </span>
+                  )}
                 </span>
                 {at && (
                   <span className="font-mono shrink-0 text-white/40" style={{ fontSize }}>

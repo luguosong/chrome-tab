@@ -138,7 +138,7 @@ describe('composeReleasesMarkdown(GitHub Releases 正文合成,ADR-0050)', () =>
   })
 })
 
-describe('composeWhatsnewMarkdown(IDEA:Data Services whatsnew 摘要合成版本块;数组序≠时间序,date 倒排)', () => {
+describe('composeWhatsnewMarkdown(IDEA:Data Services whatsnew 摘要合成版本块;版本号降排,LTS 补丁线归尾)', () => {
   const WHATSNEW_HTML = [
     '<p>IntelliJ IDEA 2026.2.2 is out with the following improvements:</p>',
     '<ul>',
@@ -162,14 +162,14 @@ describe('composeWhatsnewMarkdown(IDEA:Data Services whatsnew 摘要合成版本
     expect(composeWhatsnewMarkdown([{ version: '2026.2.1', date: '2026-08-10', whatsnew: '' }])).toBe('## 2026.2.1\n')
   })
 
-  it('date 倒排不保 API 序(2026.1.5 数组第 2 但晚于 2026.2.1);杂项滤除(缺 version / 非版本样态)', () => {
+  it('版本号降排不保 API 序;LTS 补丁线归尾——2025.3.6.1(07-29 发布)排在 2026.2(07-16)之后,与 date 序相反;杂项滤除(缺 version / 非版本样态)', () => {
     const md = composeWhatsnewMarkdown([
       { version: '2026.2', date: '2026-07-16', whatsnew: '<ul><li>big feature.</li></ul>' },
       { date: '2026-08-12', whatsnew: '<ul><li>no version.</li></ul>' },
       { version: 'EAP-blurb', date: '2026-09-01' },
-      { version: '2026.1.5', date: '2026-08-12', whatsnew: '<ul><li>patch fixes.</li></ul>' },
+      { version: '2025.3.6.1', date: '2026-07-29', whatsnew: '<ul><li>lts patch.</li></ul>' },
     ])
-    expect(md).toBe('## 2026.1.5\n- patch fixes.\n## 2026.2\n- big feature.\n')
+    expect(md).toBe('## 2026.2\n- big feature.\n## 2025.3.6.1\n- lts patch.\n')
   })
 
   it('合成结果可被 splitBlocks 按版本切开(## 边界对齐)', () => {
@@ -187,15 +187,17 @@ describe('idea prodChangelogDeps:fetchUpstream 走 Data Services(版本/日期/w
     globalThis.fetch = realFetch
   })
 
-  // 数组序刻意乱于时间序:2026.2.2 排最后但 date 最大(上游数组序 = 分支序,非发布序)
+  // 数组序刻意乱于版本号序;2025.3.6.2 刻意 date 最大而版本号最小——latest 若按 date 轴
+  // 会错取它,按版本号轴(与列表同轴)正确取 2026.2.2
   const IIU = [
     { version: '2026.2', date: '2026-07-16', whatsnew: '<ul><li>big feature.</li></ul>' },
     { version: '2026.1.5', date: '2026-08-12', whatsnew: '' },
     { version: '2026.2.1', date: '2026-08-10' },
     { version: '2026.2.2', date: '2026-09-02', whatsnew: '<ul><li>fixed A.</li></ul>' },
+    { version: '2025.3.6.2', date: '2026-09-03', whatsnew: '' },
   ]
 
-  it('单次调用同拿三样;latest 按 date 取最大不信数组序;时间戳无时刻(date 原样透传)', async () => {
+  it('单次调用同拿三样;latest = 版本号最大者(不信数组序也不信 date 序);时间戳无时刻(date 原样透传)', async () => {
     let calls = 0
     globalThis.fetch = vi.fn(async (url: unknown) => {
       calls++
@@ -205,7 +207,8 @@ describe('idea prodChangelogDeps:fetchUpstream 走 Data Services(版本/日期/w
     const deps = prodChangelogDeps('idea')
 
     await expect(deps.fetchUpstream()).resolves.toEqual({
-      markdown: '## 2026.2.2\n- fixed A.\n## 2026.1.5\n## 2026.2.1\n## 2026.2\n- big feature.\n',
+      markdown:
+        '## 2026.2.2\n- fixed A.\n## 2026.2.1\n## 2026.2\n- big feature.\n## 2026.1.5\n## 2025.3.6.2\n',
       releaseInfo: {
         latest: '2026.2.2',
         times: {
@@ -213,6 +216,7 @@ describe('idea prodChangelogDeps:fetchUpstream 走 Data Services(版本/日期/w
           '2026.1.5': '2026-08-12',
           '2026.2.1': '2026-08-10',
           '2026.2.2': '2026-09-02',
+          '2025.3.6.2': '2026-09-03',
         },
       },
     })
