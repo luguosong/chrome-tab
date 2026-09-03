@@ -6,6 +6,7 @@ import { bootstrap } from './seed'
 import { expectError, setupApp } from './testUtils'
 import {
   ChangelogService,
+  blogVersionOf,
   composeReleasesMarkdown,
   composeWhatsnewMarkdown,
   prodChangelogDeps,
@@ -181,6 +182,74 @@ describe('composeWhatsnewMarkdown(IDEA:Data Services whatsnew 摘要合成版本
   })
 })
 
+describe("博客文章合成(IDEA:What's New 长文 → Blog post 小节;小版本公告与 whatsnew 重复、What's fixed 为 issue 级清单,均不追加——2026-09-03 定案)", () => {
+  const BLOG_HTML = [
+    '<p>IntelliJ IDEA 2026.2 comes with a redesigned terminal.</p>',
+    '<h2>AI assistance</h2>',
+    '<p>New AI features include:</p>',
+    '<ul><li>Inline AI completion for <strong>all languages</strong>.</li></ul>',
+    '<figure><img src="x.png"></figure>',
+    '<iframe src="https://www.youtube.com/embed/x"></iframe>',
+  ].join('')
+
+  it('标题解析:只认 What\'s New in IntelliJ IDEA(弯/直撇号兼容);Is Out! / What\'s fixed / Scala Plugin 天然滤除', () => {
+    expect(blogVersionOf('What’s New in IntelliJ IDEA 2026.2')).toBe('2026.2')
+    expect(blogVersionOf("What's New in IntelliJ IDEA 2026.2.1")).toBe('2026.2.1')
+    expect(blogVersionOf('IntelliJ IDEA 2026.2.2 Is Out!')).toBeNull()
+    expect(blogVersionOf('What’s fixed in IntelliJ IDEA 2026.2')).toBeNull()
+    expect(blogVersionOf('IntelliJ Scala Plugin 2026.2 Is Out!')).toBeNull()
+  })
+
+  it('compose 带 blogMap:版本块尾追加 Blog post 小节(h2→加粗 bullet、p/li→bullet、figure/iframe 剥);无博客文版本无小节', () => {
+    const md = composeWhatsnewMarkdown(
+      [
+        { version: '2026.2', date: '2026-07-16', whatsnew: '<ul><li>highlights.</li></ul>' },
+        { version: '2026.1.5', date: '2026-08-12' },
+      ],
+      new Map([['2026.2', BLOG_HTML]]),
+    )
+    expect(md).toBe(
+      '## 2026.2\n' +
+        '- highlights.\n' +
+        '### Blog post\n' +
+        '- IntelliJ IDEA 2026.2 comes with a redesigned terminal.\n' +
+        '- **AI assistance**\n' +
+        '- New AI features include:\n' +
+        '- Inline AI completion for **all languages**.\n' +
+        '## 2026.1.5\n',
+    )
+  })
+
+  it('fetchUpstream:RSS 失败吞错降级(增强臂非必需——版本块照常无 Blog post 小节,不阻塞主链)', async () => {
+    let calls = 0
+    globalThis.fetch = vi.fn(async (url: unknown) => {
+      calls++
+      if (String(url).includes('data.services')) {
+        return new Response(JSON.stringify({ IIU: [{ version: '2026.2', date: '2026-07-16', whatsnew: '<ul><li>big feature.</li></ul>' }] }))
+      }
+      throw new Error('RSS 不可达')
+    }) as typeof fetch
+    const { markdown } = await prodChangelogDeps('idea').fetchUpstream()
+    expect(markdown).toBe('## 2026.2\n- big feature.\n')
+    expect(calls).toBe(2)
+  })
+
+  it('fetchUpstream:RSS 正常时博客文进版本块(两次调用:API 主链 + RSS 增强;标题实体解码后匹配)', async () => {
+    const FEED =
+      '<rss><channel><item>' +
+      '<title>What&#8217;s New in IntelliJ IDEA 2026.2</title>' +
+      '<content:encoded><![CDATA[<p>full article.</p>]]></content:encoded>' +
+      '</item><item><title>IntelliJ IDEA 2026.2.2 Is Out!</title><content:encoded><![CDATA[<p>dup.</p>]]></content:encoded></item></channel></rss>'
+    globalThis.fetch = vi.fn(async (url: unknown) =>
+      String(url).includes('data.services')
+        ? new Response(JSON.stringify({ IIU: [{ version: '2026.2', date: '2026-07-16', whatsnew: '<ul><li>big feature.</li></ul>' }] }))
+        : new Response(FEED),
+    ) as typeof fetch
+    const { markdown } = await prodChangelogDeps('idea').fetchUpstream()
+    expect(markdown).toBe('## 2026.2\n- big feature.\n### Blog post\n- full article.\n')
+  })
+})
+
 describe('idea prodChangelogDeps:fetchUpstream 走 Data Services(版本/日期/whatsnew 原文同源一次调用)', () => {
   const realFetch = globalThis.fetch
   afterEach(() => {
@@ -197,12 +266,15 @@ describe('idea prodChangelogDeps:fetchUpstream 走 Data Services(版本/日期/w
     { version: '2025.3.6.2', date: '2026-09-03', whatsnew: '' },
   ]
 
-  it('单次调用同拿三样;latest = 版本号最大者(不信数组序也不信 date 序);时间戳无时刻(date 原样透传)', async () => {
+  it('API 主链一次调用同拿三样(版本/日期/whatsnew;latest = 版本号最大者,不信数组序也不信 date 序)+ RSS 增强臂另一次(空 feed → 无 Blog post 小节);时间戳无时刻(date 原样透传)', async () => {
     let calls = 0
     globalThis.fetch = vi.fn(async (url: unknown) => {
       calls++
-      expect(String(url)).toBe('https://data.services.jetbrains.com/products/releases?code=IIU')
-      return new Response(JSON.stringify({ IIU }))
+      if (String(url).includes('data.services')) {
+        expect(String(url)).toBe('https://data.services.jetbrains.com/products/releases?code=IIU')
+        return new Response(JSON.stringify({ IIU }))
+      }
+      return new Response('<rss><channel></channel></rss>')
     }) as typeof fetch
     const deps = prodChangelogDeps('idea')
 
@@ -220,7 +292,7 @@ describe('idea prodChangelogDeps:fetchUpstream 走 Data Services(版本/日期/w
         },
       },
     })
-    expect(calls).toBe(1)
+    expect(calls).toBe(2)
   })
 
   it('拉取失败上抛不吞(假成功会钉死空表到下个 6h 窗,同 GitHub 主链)', async () => {

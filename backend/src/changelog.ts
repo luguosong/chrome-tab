@@ -149,6 +149,50 @@ const compareVersion = (a: string, b: string): number => {
   return 0
 }
 
+/** HTML 实体解码(正则抽 RSS 标题的通道——标题不走 cheerio,无 text() 自带解码)。 */
+const NAMED_ENTITIES: Record<string, string> = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }
+const decodeHtmlEntities = (s: string): string =>
+  s.replace(/&(#\d+|#x[0-9a-fA-F]+|[a-z]+);/g, (m, code: string) => {
+    if (code[0] === '#') return String.fromCodePoint(parseInt(code[1] === 'x' || code[1] === 'X' ? code.slice(2) : code.slice(1), code[1] === 'x' || code[1] === 'X' ? 16 : 10))
+    return NAMED_ENTITIES[code.toLowerCase()] ?? m
+  })
+
+/** 博客标题 → 版本号:只认「What's New in IntelliJ IDEA <版本>」(大版本长文,whatsnew 的
+ *  实质增量所在;2026-09-03 定案)。小版本「Is Out!」公告与 whatsnew 逐条重复、「What's
+ *  fixed」是 issue 级全量清单,均不追加;Scala Plugin 等非 IDEA 文要求「in IntelliJ IDEA
+ *  版本」结尾,天然滤除。弯/直撇号兼容。 */
+const BLOG_WHATS_NEW_RE = /^What(?:’|')s New in IntelliJ IDEA (\d+(?:\.\d+)*)$/i
+export const blogVersionOf = (title: string): string | null =>
+  title.trim().match(BLOG_WHATS_NEW_RE)?.[1] ?? null
+
+/** 行文本 → bullet(空白归一;空行丢弃):whatsnew 段与博客文段共用。 */
+const bulletLine = (s: string): string | null => {
+  const t = s.replace(/\s+/g, ' ').trim()
+  return t ? `- ${t}` : null
+}
+
+/** 博客文 HTML → bullet 流(作为版本块尾「Blog post」小节内容):h2/h3 主题分组降为
+ *  加粗 bullet(**不得落 `## `/`### `**——会击穿版本块/小节边界,同 composeReleasesMarkdown
+ *  标题降级先例);p/li → bullet(散文段也作条目,parseChangelog 只渲染条目行);
+ *  figure/iframe/img/video 及其余标签剥(截图/演示视频对文本直读无价值,同 img 由
+ *  inlineWhatsnew 递归剥同性质)。 */
+const blogHtmlToBullets = (html: string): string[] => {
+  const $ = cheerio.load(html, null, false)
+  const bullets: (string | null)[] = []
+  for (const node of $.root().children().toArray()) {
+    const $el = $(node)
+    if ($el.is('h2, h3')) {
+      const t = inlineWhatsnew($, node).replace(/\s+/g, ' ').trim()
+      if (t) bullets.push(bulletLine(`**${t}**`))
+    } else if ($el.is('ul')) {
+      for (const li of $el.children('li').toArray()) bullets.push(bulletLine(inlineWhatsnew($, li)))
+    } else if ($el.is('p')) {
+      bullets.push(bulletLine(inlineWhatsnew($, node)))
+    }
+  }
+  return bullets.filter((b) => b != null)
+}
+
 /** whatsnew 行内 HTML → markdown:实体解码随 text() 自带;a→[text](href),链接文本剥
  *  方括号(上游 YouTrack 引用是 `[IJPL-xxx]` 形态,方括号嵌进 markdown 链接文本会扰乱
  *  渲染与译文)、非 http(s) href 弃链保文(与前端 inline() 的 https 门同语义)、
@@ -181,11 +225,10 @@ const inlineWhatsnew = ($: cheerio.CheerioAPI, node: unknown): string => {
  *  hotfix 散文段)也作 bullet——parseChangelog 只渲染条目行,散文段落须落 `- ` 才可见;
  *  ④ 无 whatsnew(2018 前老版本,实测 2024+ 全有)仅输出标题行,与 codex 预发布空壳同
  *  语义。含全部正式版(块内滚动榜在前端过滤)。 */
-export function composeWhatsnewMarkdown(releases: ReadonlyArray<JetbrainsRelease>): string {
-  const bullet = (s: string): string | null => {
-    const t = s.replace(/\s+/g, ' ').trim()
-    return t ? `- ${t}` : null
-  }
+export function composeWhatsnewMarkdown(
+  releases: ReadonlyArray<JetbrainsRelease>,
+  blogByVersion?: ReadonlyMap<string, string>,
+): string {
   return releases
     .map((r) => ({
       version: r.version,
@@ -206,14 +249,21 @@ export function composeWhatsnewMarkdown(releases: ReadonlyArray<JetbrainsRelease
       for (const node of $.root().children().toArray()) {
         const $el = $(node)
         if ($el.is('ul')) {
-          for (const li of $el.children('li').toArray()) lines.push(bullet(inlineWhatsnew($, li)))
+          for (const li of $el.children('li').toArray()) lines.push(bulletLine(inlineWhatsnew($, li)))
         } else if ($el.is('p')) {
           if (firstP) {
             firstP = false
             continue
           }
-          lines.push(bullet(inlineWhatsnew($, node)))
+          lines.push(bulletLine(inlineWhatsnew($, node)))
         }
+      }
+      // 博客长文增量(2026-09-03 定案):版本块尾追加 Blog post 小节;`### ` 行使
+      // parseChangelog 切出命名小节(top 在前、小节在后,前端渲染序 = whatsnew 先博客后)
+      const blog = blogByVersion?.get(r.version)
+      if (blog) {
+        const blogBullets = blogHtmlToBullets(blog)
+        if (blogBullets.length) lines.push('### Blog post', ...blogBullets)
       }
       const content = lines.filter((l) => l != null).join('\n')
       return content ? `## ${r.version}\n${content}\n` : `## ${r.version}\n`
@@ -501,6 +551,7 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
   const rawUrl = def.changelogUrl
   const releasesApiUrl = def.githubReleasesApiUrl
   const jetbrainsApiUrl = def.jetbrainsReleasesApiUrl
+  const blogFeedUrl = def.blogFeedUrl
   /** GitHub Releases 真拉(不吞错、不缓存)。失败不回落 npm——matt 配 GitHub 正因 npm
    *  版本键错位。 */
   const fetchGithubReleases = async (): Promise<
@@ -559,6 +610,27 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
     >
     return Object.values(byCode)[0] ?? []
   }
+  /** 博客 RSS 真拉(增强臂,失败吞错降级——版本块照常无 Blog post 小节,下轮 6h 重试
+   *  自愈;区别于「一旦取到不丢」的主链数据:博客文是详情增强非必需)。RSS 深度仅最近
+   *  ~10 条,「存在才展示」天然边界。只收 What's New 长文(blogVersionOf 过滤)。 */
+  const fetchJetbrainsBlogPosts = async (): Promise<Map<string, string>> => {
+    const byVersion = new Map<string, string>()
+    try {
+      const xml = await fetchText(blogFeedUrl!, 30_000)
+      for (const m of xml.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
+        const item = m[1]!
+        const title = decodeHtmlEntities(
+          item.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/)?.[1] ?? '',
+        )
+        const content = item.match(/<content:encoded><!\[CDATA\[([\s\S]*?)\]\]><\/content:encoded>/)?.[1]
+        const v = blogVersionOf(title)
+        if (v && content) byVersion.set(v, content)
+      }
+    } catch (e) {
+      console.warn('博客 RSS 拉取失败,版本块降级为仅 whatsnew:', e)
+    }
+    return byVersion
+  }
   /** releases → 发布信息:version/date 直用(无 tag 前缀问题);latest 稳定轴取版本号
    *  最大(与列表同轴,compareVersion)——上游数组按产品分支序排,数组序/date 序都不
    *  作为轴(LTS 补丁 date 可以晚于主线,2025.3.6.2 实测 date 2026-09-03)。 */
@@ -594,7 +666,8 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
     }
     if (jetbrainsApiUrl) {
       const releases = await fetchJetbrainsReleases()
-      return { markdown: composeWhatsnewMarkdown(releases), releaseInfo: jetbrainsInfo(releases) }
+      const blogByVersion = await fetchJetbrainsBlogPosts()
+      return { markdown: composeWhatsnewMarkdown(releases, blogByVersion), releaseInfo: jetbrainsInfo(releases) }
     }
     const info = await fetchNpmReleaseInfo()
     if (!info) throw new Error(`npm packument(${def.npmPackage}) 拉取失败,无法合成版本流`)

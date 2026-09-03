@@ -27,6 +27,10 @@ export interface ChangelogSourceDef {
   /** JetBrains Data Services releases API(?code=IIU 形态);设置后版本/发布日期与
    *  原文(whatsnew 逐版摘要 HTML)同出一次调用,由后端合成版本块。 */
   jetbrainsReleasesApiUrl?: string
+  /** 博客 releases 分类 RSS:whatsnew 的长文增量源——只取「What's New in IDEA <版本>」
+   *  大版本长文合成 Blog post 小节(小版本公告与 whatsnew 重复、What's fixed 为 issue 级
+   *  清单,均不追加);失败吞错降级(增强臂非必需,不阻塞主链)。 */
+  blogFeedUrl?: string
   /** repo raw CHANGELOG.md 地址;缺省且配了 githubReleasesApiUrl 或 jetbrainsReleasesApiUrl
    *  = 合成原文源(见文件头);三地址皆缺省 = 无原文源(版本流走 npm 合成,详见文件头)。 */
   changelogUrl?: string
@@ -87,6 +91,7 @@ export const CHANGELOG_SOURCES: readonly ChangelogSourceDef[] = [
     // IIU(统一发行版)是唯一活通道:IIC(Community)停更于 2025.3。release 通道不含 EAP,
     // 版本号全数字段(2026.2 / 2026.2.0.1),现有 STABLE_VERSION_RE 判别零特判。
     jetbrainsReleasesApiUrl: 'https://data.services.jetbrains.com/products/releases?code=IIU',
+    blogFeedUrl: 'https://blog.jetbrains.com/idea/category/releases/feed/',
     ltsBranches: ['2025.3'],
   },
 ]
