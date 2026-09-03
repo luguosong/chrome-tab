@@ -9,5 +9,6 @@
 3. **上游管道**:源 = `ical.muhan.org` rest.ics(休)/ work.ics(班),单日 VEVENT(DTSTART;VALUE=DATE,SUMMARY「XX假期/补班」,2013 起全量 ~62KB+14KB)——**手写 ~40 行解析器,零新依赖**(避开 backend 加 CJS 依赖的 ESM bundle 崩溃坑);SQLite 落库快照收紧为内存 TTL 快照(cachedOrNull 原语,weather/ADR-0042 先例:失败宁旧勿空、从未成功回 null)——TTL 24h(数据一年一变,宽于 news 的 6h),62KB 重启重拉无压力,免表免迁移;独立端点 `GET /api/holidays` 全量返回(公共数据不进用户 config blob;~500 条平铺,前端自建 YYYY-MM-DD map 免按年过滤);`ical.muhan.org` 部署服务器实测直连 200/1.4s → 进 compose `NO_PROXY` + 契约测试把关(news 先例);**降级不阻塞**——上游挂/次年安排未公布(国务院惯例 10-11 月公布)时日历只显内置节日名,无休/班标,不报错。
 4. **保留的旧 nuance**:「任意日期查询」仍不做——月导航是呈现导航,不是查询入口;词条 Avoid 改指「任意日期查询/日历工具」。
 5. **明确不做**:农历格子显示(lunar-typescript 虽已在前端依赖,信息密度换辨识度,「符号轮被否」同款教训);第三方候选节假日 API(timor 等——用户指定 muhan 源);补班日铺背景色(仅角标「班」)。
+   **修订(2026-09-03 同日)**:农历一条被用户参考图推翻——月视图副行改「节日名 > 节气 > 农历日」(`getJieQi` 短路 `getDayInChinese`,休/班让位右上角标腾出副行)。grilling 定案与实机观感冲突时,用户看实物后改主意,裁决权在用户。对话框放大(3xl)、年视图(4×3 月份壁,色语经 cellBg/markTextCls 同源)、「今天」钮为同日追加迭代,不属本 ADR 定案范围。
 
 代价与取舍:单点上游(个人维护的 ics 订阅,无 SLA)——挂时降级为无休/班标,内置节日名仍在,个人产品可接受;全量落库按年过滤,前端不背历史数据。**验收 = 前后端 tsc 零错 + 全量测试绿 + vite build 过**。
