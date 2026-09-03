@@ -7,6 +7,7 @@ import { expectError, setupApp } from './testUtils'
 import {
   ChangelogService,
   composeReleasesMarkdown,
+  composeWhatsnewMarkdown,
   prodChangelogDeps,
   refreshQuietly,
   splitBlocks,
@@ -134,6 +135,95 @@ describe('composeReleasesMarkdown(GitHub Releases 正文合成,ADR-0050)', () =>
 
   it('空表 → 空串', () => {
     expect(composeReleasesMarkdown([])).toBe('')
+  })
+})
+
+describe('composeWhatsnewMarkdown(IDEA:Data Services whatsnew 摘要合成版本块;数组序≠时间序,date 倒排)', () => {
+  const WHATSNEW_HTML = [
+    '<p>IntelliJ IDEA 2026.2.2 is out with the following improvements:</p>',
+    '<ul>',
+    ' <li>Loading a remote OpenAPI specification no longer fails. [<a href="https://youtrack.jetbrains.com/issue/IJPL-63202/">IJPL-63202</a>]</li>',
+    ' <li>Markdown <em>checkboxes</em> now have <code>better</code> contrast &amp; visibility.</li>',
+    '</ul>',
+    '<p>Get more details in our <a href="https://blog.jetbrains.com/idea/2026/09/intellij-idea-2026-2-2/">blog post</a>.</p>',
+  ].join('\n')
+
+  it('li→bullet、a→markdown 链接(链接文本剥方括号)、em/code 保行内、实体解码、首段模板句剔、尾段散文段也作 bullet', () => {
+    expect(composeWhatsnewMarkdown([{ version: '2026.2.2', date: '2026-09-02', whatsnew: WHATSNEW_HTML }])).toBe(
+      '## 2026.2.2\n' +
+        '- Loading a remote OpenAPI specification no longer fails. [[IJPL-63202](https://youtrack.jetbrains.com/issue/IJPL-63202/)]\n' +
+        '- Markdown *checkboxes* now have `better` contrast & visibility.\n' +
+        '- Get more details in our [blog post](https://blog.jetbrains.com/idea/2026/09/intellij-idea-2026-2-2/).\n',
+    )
+  })
+
+  it('无 whatsnew(2018 前老版本)落空块仅版本行,与 codex 预发布空壳同语义', () => {
+    expect(composeWhatsnewMarkdown([{ version: '2018.3.2', date: '2018-12-01' }])).toBe('## 2018.3.2\n')
+    expect(composeWhatsnewMarkdown([{ version: '2026.2.1', date: '2026-08-10', whatsnew: '' }])).toBe('## 2026.2.1\n')
+  })
+
+  it('date 倒排不保 API 序(2026.1.5 数组第 2 但晚于 2026.2.1);杂项滤除(缺 version / 非版本样态)', () => {
+    const md = composeWhatsnewMarkdown([
+      { version: '2026.2', date: '2026-07-16', whatsnew: '<ul><li>big feature.</li></ul>' },
+      { date: '2026-08-12', whatsnew: '<ul><li>no version.</li></ul>' },
+      { version: 'EAP-blurb', date: '2026-09-01' },
+      { version: '2026.1.5', date: '2026-08-12', whatsnew: '<ul><li>patch fixes.</li></ul>' },
+    ])
+    expect(md).toBe('## 2026.1.5\n- patch fixes.\n## 2026.2\n- big feature.\n')
+  })
+
+  it('合成结果可被 splitBlocks 按版本切开(## 边界对齐)', () => {
+    const md = composeWhatsnewMarkdown([
+      { version: '2026.2.2', date: '2026-09-02', whatsnew: WHATSNEW_HTML },
+      { version: '2018.3.2', date: '2018-12-01' },
+    ])
+    expect(splitBlocks(md).blocks.map((b) => b.title)).toEqual(['2026.2.2', '2018.3.2'])
+  })
+})
+
+describe('idea prodChangelogDeps:fetchUpstream 走 Data Services(版本/日期/whatsnew 原文同源一次调用)', () => {
+  const realFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = realFetch
+  })
+
+  // 数组序刻意乱于时间序:2026.2.2 排最后但 date 最大(上游数组序 = 分支序,非发布序)
+  const IIU = [
+    { version: '2026.2', date: '2026-07-16', whatsnew: '<ul><li>big feature.</li></ul>' },
+    { version: '2026.1.5', date: '2026-08-12', whatsnew: '' },
+    { version: '2026.2.1', date: '2026-08-10' },
+    { version: '2026.2.2', date: '2026-09-02', whatsnew: '<ul><li>fixed A.</li></ul>' },
+  ]
+
+  it('单次调用同拿三样;latest 按 date 取最大不信数组序;时间戳无时刻(date 原样透传)', async () => {
+    let calls = 0
+    globalThis.fetch = vi.fn(async (url: unknown) => {
+      calls++
+      expect(String(url)).toBe('https://data.services.jetbrains.com/products/releases?code=IIU')
+      return new Response(JSON.stringify({ IIU }))
+    }) as typeof fetch
+    const deps = prodChangelogDeps('idea')
+
+    await expect(deps.fetchUpstream()).resolves.toEqual({
+      markdown: '## 2026.2.2\n- fixed A.\n## 2026.1.5\n## 2026.2.1\n## 2026.2\n- big feature.\n',
+      releaseInfo: {
+        latest: '2026.2.2',
+        times: {
+          '2026.2': '2026-07-16',
+          '2026.1.5': '2026-08-12',
+          '2026.2.1': '2026-08-10',
+          '2026.2.2': '2026-09-02',
+        },
+      },
+    })
+    expect(calls).toBe(1)
+  })
+
+  it('拉取失败上抛不吞(假成功会钉死空表到下个 6h 窗,同 GitHub 主链)', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('Data Services 不可达')
+    }) as typeof fetch
+    await expect(prodChangelogDeps('idea').fetchUpstream()).rejects.toThrow('Data Services 不可达')
   })
 })
 
@@ -620,7 +710,12 @@ const httpDb = openDb(':memory:').db
 const service = makeService(httpDb)
 const app = createApp({
   db: httpDb,
-  changelog: { 'claude-code': service, 'matt-skills': service, codex: makeService(httpDb, {}, 'codex') },
+  changelog: {
+    'claude-code': service,
+    'matt-skills': service,
+    codex: makeService(httpDb, {}, 'codex'),
+    idea: makeService(httpDb, {}, 'idea'),
+  },
 })
 
 let cookie = ''
@@ -662,7 +757,12 @@ describe('GET /api/changelog ?source 分流(ADR-0020)', () => {
   )
   const app2 = createApp({
     db: db2,
-    changelog: { 'claude-code': makeService(db2), 'matt-skills': svcB, codex: makeService(db2, {}, 'codex') },
+    changelog: {
+      'claude-code': makeService(db2),
+      'matt-skills': svcB,
+      codex: makeService(db2, {}, 'codex'),
+      idea: makeService(db2, {}, 'idea'),
+    },
   })
   let cookie2 = ''
   beforeAll(async () => {
@@ -741,7 +841,12 @@ describe('GET /api/changelog/translate/status(译制阶段:排队/换候选可�
     })
     const app2 = createApp({
       db,
-      changelog: { 'claude-code': svc, 'matt-skills': makeService(db), codex: makeService(db, {}, 'codex') },
+      changelog: {
+        'claude-code': svc,
+        'matt-skills': makeService(db),
+        codex: makeService(db, {}, 'codex'),
+        idea: makeService(db, {}, 'idea'),
+      },
     })
     await bootstrap(db, { username: 'admin', password: 'admin-pw' })
     const login = await app2.request('/api/login', {

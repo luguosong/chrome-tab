@@ -80,7 +80,7 @@ _Avoid_: 组件、widget、block。
 _Avoid_: 弹窗(泛称)、Drawer(2026-08-23 前的旧详情容器形态)。
 
 **外源 (Upstream)**:
-「更新日志」实例绑定的外部软件源,内置枚举(代码即配置,前后端共享):版本与发布日期默认取 npm 包,Codex 则整源走 GitHub Releases(版本、日期、正文一并,ADR-0050);若 npm 版本键与仓库日志不一致(Matt Skills),发布日期改取 GitHub Releases;版本块原文来源两形态——仓库 CHANGELOG.md 地址(直取)或 GitHub Releases 正文(合成,Codex:上游 CHANGELOG.md 是一行链接的存根,release 正文**预发布为空壳、正式版完整**,合成含预发布版本但仅正式版有条目,并剔除 commit 级 PR 清单等噪音小节),均**可空**。两地址皆空者即「无原文源」,版本流取 npm 版本表并**剔除预发布版本**,详情只给版本与仓库外链、无译制。图标 `data` 存源标识;存量 `data=null` 的旧更新日志图标读侧兜底归默认源(Claude Code)。
+「更新日志」实例绑定的外部软件源,内置枚举(代码即配置,前后端共享):版本与发布日期默认取 npm 包,Codex 则整源走 GitHub Releases(版本、日期、正文一并,ADR-0050);若 npm 版本键与仓库日志不一致(Matt Skills),发布日期改取 GitHub Releases;IDEA 非 npm 发行,整源走 JetBrains Data Services releases API(版本、日期、正文一并,且仅统一发行版 IIU 一条活通道、不含 EAP);版本块原文来源三形态——仓库 CHANGELOG.md 地址(直取)、GitHub Releases 正文(合成,Codex:上游 CHANGELOG.md 是一行链接的存根,release 正文**预发布为空壳、正式版完整**,合成含预发布版本但仅正式版有条目,并剔除 commit 级 PR 清单等噪音小节)或 JetBrains Data Services 逐版摘要(合成,IDEA:whatsnew 摘要 HTML 转 bullet,首段发布模板句剔除,YouTrack 链接保留可点;无摘要的老版本仅列版本行),均**可空**。三地址皆空者即「无原文源」,版本流取 npm 版本表并**剔除预发布版本**,详情只给版本与仓库外链、无译制。图标 `data` 存源标识;存量 `data=null` 的旧更新日志图标读侧兜底归默认源(Claude Code)。
 _Avoid_: 数据源(泛指一切取数来源,含行情/天气)、渠道。
 
 **更新日志 (Changelog)**:

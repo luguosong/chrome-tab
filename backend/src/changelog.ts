@@ -1,4 +1,5 @@
 import { schedule } from 'node-cron'
+import * as cheerio from 'cheerio'
 import { Hono, type Context } from 'hono'
 import {
   DEFAULT_CHANGELOG_SOURCE,
@@ -127,6 +128,81 @@ export function composeReleasesMarkdown(
       const content = lines.join('\n').trimEnd()
       const hasEntries = /^#{2,3}\s/m.test(content) || /^[-*]\s/m.test(content)
       return hasEntries ? `## ${r.version}\n${content}\n` : `## ${r.version}\n`
+    })
+    .join('')
+}
+
+// ---- IDEA 原文合成(Data Services whatsnew;与 composeReleasesMarkdown 并列的第四原文形态)----
+
+/** Data Services release 条目关心面:version/date/whatsnew;downloads/patches 等大字段忽略。 */
+type JetbrainsRelease = { version?: unknown; date?: unknown; whatsnew?: unknown }
+
+/** whatsnew 行内 HTML → markdown:实体解码随 text() 自带;a→[text](href),链接文本剥
+ *  方括号(上游 YouTrack 引用是 `[IJPL-xxx]` 形态,方括号嵌进 markdown 链接文本会扰乱
+ *  渲染与译文)、非 http(s) href 弃链保文(与前端 inline() 的 https 门同语义)、
+ *  em/i→*…*、strong/b→**…**、code→`…`、br→空格、其余标签递归剥。
+ *  节点经 unknown 传递:cheerio 不 re-export domhandler 节点类型,这里只走 Cheerio
+ *  方法面(is/attr/text),不裸触 DOM 字段。 */
+const inlineWhatsnew = ($: cheerio.CheerioAPI, node: unknown): string => {
+  const $el = $(node as never)
+  const children = $el.contents().toArray()
+  // 文本节点 / br:无子内容,前者取 text(实体解码自带),后者归一为空格
+  if (children.length === 0) return $el.is('br') ? ' ' : $el.text()
+  const inner = children.map((c) => inlineWhatsnew($, c)).join('')
+  if ($el.is('a')) {
+    const href = $el.attr('href') ?? ''
+    const text = inner.replace(/[[\]]/g, '')
+    return /^https?:/.test(href) ? `[${text}](${href})` : text
+  }
+  if ($el.is('em, i')) return `*${inner}*`
+  if ($el.is('strong, b')) return `**${inner}**`
+  if ($el.is('code')) return `\`${$el.text()}\``
+  return inner
+}
+
+/** 版本块原文合成(IDEA):Data Services releases 条目 → `## 版本` + whatsnew 摘要 bullet。
+ *  ① 杂项滤除(version 缺失/非版本样态);② 按 date 倒排——**不保 API 序**:数组按产品
+ *  分支序排(2026.1.5 晚于 2026.2 却排其后),时间线与 latest 判定都要真发布序;③ 首个 p
+ *  是「…is out with the following improvements:」模板句,与版本行冗余,剔(同 ADR-0050
+ *  噪音剔除取向);其余 p(尾段 blog post 链接、hotfix 散文段)也作 bullet——parseChangelog
+ *  只渲染条目行,散文段落须落 `- ` 才可见;④ 无 whatsnew(2018 前老版本,实测 2024+ 全有)
+ *  仅输出标题行,与 codex 预发布空壳同语义。含全部正式版(块内滚动榜在前端过滤)。 */
+export function composeWhatsnewMarkdown(releases: ReadonlyArray<JetbrainsRelease>): string {
+  const bullet = (s: string): string | null => {
+    const t = s.replace(/\s+/g, ' ').trim()
+    return t ? `- ${t}` : null
+  }
+  return releases
+    .map((r) => ({
+      version: r.version,
+      at: typeof r.date === 'string' ? r.date : '',
+      html: typeof r.whatsnew === 'string' ? r.whatsnew : '',
+    }))
+    .filter(
+      (r): r is { version: string; at: string; html: string } =>
+        typeof r.version === 'string' && VERSION_LIKE_RE.test(r.version),
+    )
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .map((r) => {
+      // fragment 模式(第三参 false):默认 document 模式会把顶层 p/ul 包进 <html>,
+      // $.root().children() 拿到的就是 html 元素而非顶层段落
+      const $ = cheerio.load(r.html, null, false)
+      const lines: (string | null)[] = []
+      let firstP = true
+      for (const node of $.root().children().toArray()) {
+        const $el = $(node)
+        if ($el.is('ul')) {
+          for (const li of $el.children('li').toArray()) lines.push(bullet(inlineWhatsnew($, li)))
+        } else if ($el.is('p')) {
+          if (firstP) {
+            firstP = false
+            continue
+          }
+          lines.push(bullet(inlineWhatsnew($, node)))
+        }
+      }
+      const content = lines.filter((l) => l != null).join('\n')
+      return content ? `## ${r.version}\n${content}\n` : `## ${r.version}\n`
     })
     .join('')
 }
@@ -410,6 +486,7 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
   // 解构到 const:narrowing 才能保进 fetchText 回调(属性访问的收窄不进闭包)
   const rawUrl = def.changelogUrl
   const releasesApiUrl = def.githubReleasesApiUrl
+  const jetbrainsApiUrl = def.jetbrainsReleasesApiUrl
   /** GitHub Releases 真拉(不吞错、不缓存)。失败不回落 npm——matt 配 GitHub 正因 npm
    *  版本键错位。 */
   const fetchGithubReleases = async (): Promise<
@@ -421,9 +498,15 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
         headers: githubToken ? { Authorization: `Bearer ${githubToken}` } : undefined,
       }),
     )
-  /** Releases → 发布信息:tag 去前缀、版本样态过滤;latest = 最新稳定版(与 npm
-   *  dist-tags.latest 同轴):releasedAt 供块内鲜度回退,取全量最新会把预发布时间戳
-   *  算到稳定版头上(codex alpha 日均 2-3 个)。 */
+  /** times(版本→ISO/日期)→ 最新稳定版:全量最新可能是预发布(codex alpha 日均 2-3 个),
+   *  稳定轴与 npm dist-tags.latest 同;等长 ISO/日期串字典序即时间序。GitHub(tag 去前缀)
+   *  与 Data Services(date 无时刻)两源共用。 */
+  const latestStable = (times: Record<string, string>): string | null =>
+    Object.keys(times)
+      .filter((v) => !isPrereleaseVersion(v))
+      .sort((a, b) => times[b]!.localeCompare(times[a]!))[0] ?? null
+  /** Releases → 发布信息:tag 去前缀、版本样态过滤;latest = 最新稳定版:releasedAt 供
+   *  块内鲜度回退,取全量最新会把预发布时间戳算到稳定版头上(codex alpha 日均 2-3 个)。 */
   const releasesInfo = (releases: Awaited<ReturnType<typeof fetchGithubReleases>>): ReleaseInfo => {
     const times: Record<string, string> = {}
     for (const release of releases) {
@@ -432,17 +515,17 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
         if (VERSION_LIKE_RE.test(v)) times[v] = release.published_at
       }
     }
-    const latest =
-      Object.keys(times)
-        .filter((v) => !isPrereleaseVersion(v))
-        .sort((a, b) => times[b]!.localeCompare(times[a]!))[0] ?? null
-    return { latest, times }
+    return { latest: latestStable(times), times }
   }
-  /** npm 日期源(降级语义住此):失败吞错返回 null——调用方 merge 沿用旧值,不阻塞主链路。 */
+  /** npm 日期源(降级语义住此):失败吞错返回 null——调用方 merge 沿用旧值,不阻塞主链路。
+   *  npmPackage 缺失(IDEA 非 npm 发行)是注册表配置错误,上抛不吞:该函数唯一消费方是
+   *  无原文源分支(前提 npm 源),走不到即不该被调用。 */
   const fetchNpmReleaseInfo = async (): Promise<ReleaseInfo | null> => {
+    const npmPackage = def.npmPackage
+    if (!npmPackage) throw new Error(`源 ${def.id} 缺 npmPackage 配置,无法走 npm 日期源`)
     try {
       const root = JSON.parse(
-        await fetchText(`https://registry.npmjs.org/${def.npmPackage}`, 30_000),
+        await fetchText(`https://registry.npmjs.org/${npmPackage}`, 30_000),
       ) as {
         'dist-tags'?: { latest?: string }
         time?: Record<string, string>
@@ -453,13 +536,35 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
       return null
     }
   }
-  // 取数单 adapter(ADR-0053):原文三形态(ADR-0050——changelogUrl 直取 raw CHANGELOG.md;
-  // githubReleasesApiUrl 合成 release 正文;两者皆无 = 无原文源,npm time 合成空块)一次
-  // 返回「原文 + 发布信息」。markdown 必在:拉不动作主链路失败上抛——refresh 沿用旧快照 /
-  // 冷启动 500。GitHub 主链(合成源/matt 日期)失败**上抛**不吞:假成功会钉死空表到下个
-  // 6h 窗(2026-08-31 matt 实录,81888ea 同动机的收编);npm 日期源失败降级 null。合成源
-  // 的「单次抓取两用」(~26MB 响应不拉两次,ADR-0050 §5②)原是两函数间的调用序协议
-  // (composedReleases 共享态),现为本函数内局部量。
+  /** Data Services releases 真拉(不吞错,同 GitHub 主链)。响应形如 {"IIU":[…]},单 code
+   *  键取首值(注册表 URL 均单 code,多产品不混)。响应含 downloads/patches 全量 ~MB 级,超时放 60s。 */
+  const fetchJetbrainsReleases = async (): Promise<JetbrainsRelease[]> => {
+    const byCode = JSON.parse(await fetchText(jetbrainsApiUrl!, 60_000)) as Record<
+      string,
+      JetbrainsRelease[]
+    >
+    return Object.values(byCode)[0] ?? []
+  }
+  /** releases → 发布信息:version/date 直用(无 tag 前缀问题);latest 稳定轴取 date 最大
+   *  ——**数组序≠时间序**:上游数组按产品分支序排(2026.1.5 晚于 2026.2 却排其后),
+   *  latest 判定只认 date 序(latestStable)。 */
+  const jetbrainsInfo = (releases: JetbrainsRelease[]): ReleaseInfo => {
+    const times: Record<string, string> = {}
+    for (const r of releases) {
+      if (typeof r.version === 'string' && typeof r.date === 'string' && VERSION_LIKE_RE.test(r.version)) {
+        times[r.version] = r.date
+      }
+    }
+    return { latest: latestStable(times), times }
+  }
+  // 取数单 adapter(ADR-0053):原文四形态(ADR-0050——changelogUrl 直取 raw CHANGELOG.md;
+  // githubReleasesApiUrl 合成 release 正文;jetbrainsReleasesApiUrl 合成 whatsnew 摘要;
+  // 三者皆无 = 无原文源,npm time 合成空块)一次返回「原文 + 发布信息」。markdown 必在:
+  // 拉不动作主链路失败上抛——refresh 沿用旧快照 / 冷启动 500。GitHub/Data Services 主链
+  // (合成源/matt 日期)失败**上抛**不吞:假成功会钉死空表到下个 6h 窗(2026-08-31 matt
+  // 实录,81888ea 同动机的收编);npm 日期源失败降级 null。合成源的「单次抓取两用」
+  // (~26MB 响应不拉两次,ADR-0050 §5②)原是两函数间的调用序协议(composedReleases
+  // 共享态),现为本函数内局部量。
   const fetchUpstream: ChangelogDeps['fetchUpstream'] = async () => {
     if (rawUrl) {
       const markdown = await fetchText(rawUrl, 60_000)
@@ -472,6 +577,10 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
     if (releasesApiUrl) {
       const releases = await fetchGithubReleases()
       return { markdown: composeReleasesMarkdown(releases), releaseInfo: releasesInfo(releases) }
+    }
+    if (jetbrainsApiUrl) {
+      const releases = await fetchJetbrainsReleases()
+      return { markdown: composeWhatsnewMarkdown(releases), releaseInfo: jetbrainsInfo(releases) }
     }
     const info = await fetchNpmReleaseInfo()
     if (!info) throw new Error(`npm packument(${def.npmPackage}) 拉取失败,无法合成版本流`)

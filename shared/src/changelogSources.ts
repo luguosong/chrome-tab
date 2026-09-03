@@ -1,14 +1,16 @@
 /**
  * 更新日志的外源注册表(ADR-0020):每源 = npm 包(默认版本/发布日期源,ADR-0016)+
- * 可选 GitHub Releases 源 + 版本块原文来源(译制哈希的输入)——原文两形态(ADR-0050):
- * repo raw CHANGELOG.md 直取(changelogUrl),或 GitHub Releases 正文合成(githubReleasesApiUrl,
- * 如 Codex:上游 CHANGELOG.md 是一行链接的存根,release 正文预发布为空壳、正式版完整)。
- * 两地址皆缺省即「无原文源」:版本流由后端从 npm time 表合成(剔 prerelease),
+ * 可选 GitHub Releases 源 + 版本块原文来源(译制哈希的输入)——原文三形态(ADR-0050):
+ * repo raw CHANGELOG.md 直取(changelogUrl),GitHub Releases 正文合成(githubReleasesApiUrl,
+ * 如 Codex:上游 CHANGELOG.md 是一行链接的存根,release 正文预发布为空壳、正式版完整),
+ * 或 JetBrains Data Services 合成(jetbrainsReleasesApiUrl,如 IDEA:非 npm 发行,
+ * 一次调用同拿版本/日期与 whatsnew 逐版摘要 HTML)。
+ * 前两者缺省且无 jetbrains 源即「无原文源」:版本流由后端从 npm time 表合成(剔 prerelease),
  * 无原文可译,详情只给外链。
  * 前后端共享:后端按它取数,前端按它取显示名与源下拉。代码即配置;
  * 需要自由输入源时再考虑。
  */
-export type ChangelogSourceId = 'claude-code' | 'matt-skills' | 'codex'
+export type ChangelogSourceId = 'claude-code' | 'matt-skills' | 'codex' | 'idea'
 
 export interface ChangelogSourceDef {
   id: ChangelogSourceId
@@ -16,13 +18,17 @@ export interface ChangelogSourceDef {
   label: string
   /** 外源仓库主页。 */
   repositoryUrl: string
-  /** npm 包名:默认以 packument 的 dist-tags.latest + time 作为版本发布信息。 */
-  npmPackage: string
+  /** npm 包名:默认以 packument 的 dist-tags.latest + time 作为版本发布信息。
+   *  非 npm 发行的源(IDEA)缺省——版本/日期/原文全走 jetbrainsReleasesApiUrl。 */
+  npmPackage?: string
   /** GitHub Releases API;设置后以 tag_name/published_at 作为版本日期,且兼作
    *  合成原文源(无 changelogUrl 时由后端从 release 正文合成版本块,ADR-0050)。 */
   githubReleasesApiUrl?: string
-  /** repo raw CHANGELOG.md 地址;缺省且配了 githubReleasesApiUrl = 合成原文源
-   *  (见文件头);两者皆缺省 = 无原文源(版本流走 npm 合成,详见文件头)。 */
+  /** JetBrains Data Services releases API(?code=IIU 形态);设置后版本/发布日期与
+   *  原文(whatsnew 逐版摘要 HTML)同出一次调用,由后端合成版本块。 */
+  jetbrainsReleasesApiUrl?: string
+  /** repo raw CHANGELOG.md 地址;缺省且配了 githubReleasesApiUrl 或 jetbrainsReleasesApiUrl
+   *  = 合成原文源(见文件头);三地址皆缺省 = 无原文源(版本流走 npm 合成,详见文件头)。 */
   changelogUrl?: string
   /** 无原文源的详情外链(GitHub Releases 列表页);有原文的源不设。 */
   releasesUrl?: string
@@ -40,7 +46,11 @@ export function isPrereleaseVersion(version: string): boolean {
 /** 源是否有版本块正文(直取或合成)——「有无原文」判别轴单点(ADR-0050):后端译制
  *  窗口与前端 noRaw(GitHub 外链降级臂)共用,changelogUrl 单字段不再是判别轴。 */
 export function hasChangelogRaw(def: ChangelogSourceDef): boolean {
-  return def.changelogUrl != null || def.githubReleasesApiUrl != null
+  return (
+    def.changelogUrl != null ||
+    def.githubReleasesApiUrl != null ||
+    def.jetbrainsReleasesApiUrl != null
+  )
 }
 
 export const CHANGELOG_SOURCES: readonly ChangelogSourceDef[] = [
@@ -65,6 +75,14 @@ export const CHANGELOG_SOURCES: readonly ChangelogSourceDef[] = [
     repositoryUrl: 'https://github.com/openai/codex',
     npmPackage: '@openai/codex',
     githubReleasesApiUrl: 'https://api.github.com/repos/openai/codex/releases?per_page=100',
+  },
+  {
+    id: 'idea',
+    label: 'IntelliJ IDEA',
+    repositoryUrl: 'https://www.jetbrains.com/idea/',
+    // IIU(统一发行版)是唯一活通道:IIC(Community)停更于 2025.3。release 通道不含 EAP,
+    // 版本号全数字段(2026.2 / 2026.2.0.1),现有 STABLE_VERSION_RE 判别零特判。
+    jetbrainsReleasesApiUrl: 'https://data.services.jetbrains.com/products/releases?code=IIU',
   },
 ]
 
