@@ -44,21 +44,14 @@ function toDraft(d: ImportantDate): Draft {
   return { id: d.id, name: d.name, calendar: d.calendar, repeat: d.repeat, year, month, day }
 }
 
-/** 格底色语义(月视图大格与年壁迷你点共用一套色语)。 */
+/** 格底色语义(月视图大格与年壁迷你点共用一套色语)。文字不随标记变色(用户定案
+ *  「只加背景,不要影响文字」:同色系字底相吃,markTextCls 字色轴已退役)。 */
 function cellBg(m: CellMark | undefined, weekend: boolean): string {
   if (m?.importantId) return 'bg-amber-300/15' // 重要日子:个人语义最高
   if (m?.rest) return 'bg-emerald-500/20' // 法定假日深绿
   if (m?.work) return 'bg-red-400/10' // 补班红(多落周末,盖过淡绿)
   if (weekend) return 'bg-emerald-300/10' // 普通周末淡绿
   return 'bg-white/[0.04]'
-}
-
-/** 标记日字色(月视图副行与年壁点内数字共用;小字号档统一取高对比)。 */
-function markTextCls(m: CellMark | undefined): string {
-  if (m?.work) return 'text-red-300'
-  if (m?.rest) return 'text-emerald-300'
-  if (m?.holiday || m?.importantId) return 'text-white/70'
-  return 'text-white/40'
 }
 
 /** 二选一胶囊组(触达 ≥32px,Liquid Glass 触达规范)。 */
@@ -125,9 +118,9 @@ function YearMonthCard({
           return (
             <span
               key={cell.iso}
-              className={`aspect-square rounded-[3px] text-[9px] leading-[1.4] flex items-center justify-center ${
+              className={`aspect-square rounded-[3px] text-[9px] leading-[1.4] flex items-center justify-center text-white/50 ${
                 cell.inMonth ? cellBg(m, cell.weekend) : 'opacity-0'
-              } ${cell.inMonth ? markTextCls(m) : ''} ${cell.iso === todayIso ? 'ring-1 ring-accent font-semibold' : ''}`}
+              } ${cell.iso === todayIso ? 'ring-1 ring-accent font-semibold' : ''}`}
             >
               {cell.day}
             </span>
@@ -311,11 +304,7 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
                     >
                       {cell.day}
                       {sub && (
-                        <span
-                          className={`block text-[10px] leading-tight truncate px-0.5 ${
-                            m?.holiday ? 'text-white/70' : 'text-white/40'
-                          }`}
-                        >
+                        <span className="block text-[10px] leading-tight truncate px-0.5 text-white/60">
                           {sub}
                         </span>
                       )}
