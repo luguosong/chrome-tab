@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeDays, getAllCountdowns, getCountdowns } from './countdown'
+import { buildMonthGrid, describeDays, getAllCountdowns, getCountdowns, holidaysInMonth, importantDatesInMonth, toIsoDate } from './countdown'
 import type { ImportantDate } from 'chrome-tab-shared'
 
 // 对拍基准:农历节日公历日期已用 lunar-typescript 实测核对(2026/2027 两年),
@@ -150,5 +150,44 @@ describe('describeDays 措辞映射', () => {
     expect(describeDays(1)).toBe('明天')
     expect(describeDays(24)).toBe('24 天')
     expect(describeDays(364)).toBe('364 天')
+  })
+})
+
+describe('日历月视图(ADR-0054):当月内实例化,区别于「下一次出现」口径', () => {
+  it('toIsoDate 零填充(与后端休/班 date 同形)', () => {
+    expect(toIsoDate(new Date(2026, 8, 3))).toBe('2026-09-03')
+  })
+
+  it('buildMonthGrid:周一起始、42 格固定、首尾补位 inMonth=false', () => {
+    const grid = buildMonthGrid(2026, 8) // 2026-09:1 日是周二 → 首格补 8-31(周一)
+    expect(grid).toHaveLength(42)
+    expect(grid[0]).toEqual({ iso: '2026-08-31', day: 31, inMonth: false })
+    expect(grid[1]).toEqual({ iso: '2026-09-01', day: 1, inMonth: true })
+    expect(grid[41]).toEqual({ iso: '2026-10-11', day: 11, inMonth: false })
+  })
+
+  it('holidaysInMonth:已过节日也返回(10 月中旬开日历,国庆须在格上)', () => {
+    // getAllCountdowns 在 10-08 只给 2027 国庆;月视图要的是当月已过的 10-01
+    const october = holidaysInMonth(2026, 9)
+    expect(october.find((h) => h.name === '国庆')?.date.getMonth()).toBe(9)
+    expect(toIsoDate(october.find((h) => h.name === '国庆')!.date)).toBe('2026-10-01')
+    expect(holidaysInMonth(2026, 8).map((h) => h.name)).toContain('中秋')
+    expect(holidaysInMonth(2026, 8).map((h) => h.name)).not.toContain('春节')
+  })
+
+  it('importantDatesInMonth:annual 公历/农历按该年换算,once 判当年当月', () => {
+    const dates = [
+      user({ id: 'a', name: '生日', date: '2000-05-20' }),
+      user({ id: 'b', name: '农历纪念日', date: '1990-08-15', calendar: 'lunar' }), // 2026 年换算 = 9-25(中秋同日)
+      user({ id: 'c', name: '交房', date: '2026-09-10', repeat: 'once' }),
+    ]
+    const sept = importantDatesInMonth(dates, 2026, 8)
+    expect(sept.map((i) => i.id)).toEqual(['c', 'b']) // 按日升序:9-10(once)在 9-25(农历换算)前
+  })
+
+  it('importantDatesInMonth:annual 公历 2-29 非闰年不标(进位 3-1 被月过滤排除)', () => {
+    const dates = [user({ id: 'leap', name: '闰日', date: '2000-02-29' })]
+    expect(importantDatesInMonth(dates, 2026, 1)).toEqual([]) // 2026 非闰年:2 月无标
+    expect(importantDatesInMonth(dates, 2028, 1).map((i) => i.id)).toEqual(['leap'])
   })
 })

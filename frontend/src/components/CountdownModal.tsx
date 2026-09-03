@@ -2,31 +2,24 @@ import { useMemo, useState } from 'react'
 import type { ImportantDate } from 'chrome-tab-shared'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import { useUpdateLayoutSettings } from '../api/config'
-import { describeDays, getAllCountdowns } from '../lib/countdown'
+import { useHolidays } from '../api/holidays'
+import { buildMonthGrid, holidaysInMonth, importantDatesInMonth, toIsoDate } from '../lib/countdown'
 import useNow from '../hooks/useNow'
-import type { TabItem } from '../lib/detailModalState'
 import type { Icon } from '../lib/types'
 import ConfirmButton from './ConfirmButton'
-import DetailModal from './DetailModal'
+import ModalShell from './ModalShell'
 
 /**
- * 倒计时详情 Modal(CONTEXT.md「倒计时」,双 tab):点块打开(detailEntry:'block')。
- * 「重要日子」tab(默认)可编辑——「重要日子」编辑的**全局唯一入口**(自时钟 hover
- * 弹层迁入),列表 CRUD 每动作即时整份 PUT(useUpdateLayoutSettings,与布局草稿同一
- * 持久化通道),不设草稿暂存——列表 ≤100 条,PUT 轻量,即时反馈免掉「保存/放弃」
- * 两层状态;「节假日」tab 只读——内置清单从今天起按剩余天数升序,行附当年公历
- * 日期与农历括注(农历定义的节日,如「9月25日(八月十五)」;查「春节是哪天」的
- * 主诉求),恰逢当天的条目 accent 高亮。
- * 数据寄放布局设置(ADR-0026),无独立查询,不用骨架查询状态机。
+ * 倒计时详情 Modal(CONTEXT.md「倒计时」,ADR-0054 日历化):点块打开
+ * (detailEntry:'block'),打开即当月月历(原双 tab 撤)。格内三轴标记——休/班
+ * 角标(法定安排,GET /api/holidays ics 上游;降级无标不报错)、节日名小字
+ * (内置清单,含不放假的文化节日)、重要日子琥珀底(用户条目,编辑的**全局唯一
+ * 入口**迁至格子点击;点空格不新建)。编辑表单沿用既有草稿态:每动作即时整份
+ * PUT(useUpdateLayoutSettings,ADR-0026 布局设置通道),无草稿暂存;编辑态附
+ * 删除(日历无行级 ✎,CRUD 完整性由此兜)。月视图数据是「当月内实例化」口径
+ * (含已过),与块内/弹层的「下一次出现」语义(getAllCountdowns)分立。
  */
 
-type CountdownTab = 'important' | 'holiday'
-const TABS: readonly TabItem<CountdownTab>[] = [
-  { key: 'important', label: '重要日子' },
-  { key: 'holiday', label: '节假日' },
-]
-
-/** 表单草稿:日期拆年/月/日输入(annual 年份无意义,shared 契约语义)。 */
 type Draft = {
   id: string | null // null = 新增
   name: string
@@ -39,16 +32,11 @@ type Draft = {
 
 const emptyDraft: Draft = { id: null, name: '', calendar: 'solar', repeat: 'annual', year: '', month: '', day: '' }
 
+const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'] as const
+
 function toDraft(d: ImportantDate): Draft {
   const [year, month, day] = d.date.split('-')
   return { id: d.id, name: d.name, calendar: d.calendar, repeat: d.repeat, year, month, day }
-}
-
-/** 列表行副信息:annual 忽略年份(每年循环);once 带完整日期。 */
-function describe(d: ImportantDate): string {
-  const [, m, day] = d.date.split('-')
-  if (d.repeat === 'once') return d.calendar === 'lunar' ? `${d.date}(农历)` : d.date
-  return d.calendar === 'lunar' ? `每年农历 ${m}-${day}` : `每年公历 ${m}-${day}`
 }
 
 /** 二选一胶囊组(触达 ≥32px,Liquid Glass 触达规范)。 */
@@ -85,20 +73,45 @@ function Seg<T extends string>({
 export default function CountdownModal({ onClose }: { icon: Icon; onClose: () => void }) {
   const layout = useLayoutSettings()
   const save = useUpdateLayoutSettings()
-  const [tab, setTab] = useState<CountdownTab>('important')
   const [draft, setDraft] = useState<Draft | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
-  // 节假日只读分区:从今天起升序(全量口径过滤内置源;年度滚年在全量侧已处理)。
-  // 分钟级心跳 + 按天重算(跨零点翻新,dep 是日期键——同块内/弹层惯用法)
+  // 分钟级心跳 + 按天重算(今天格跨零点翻新;视图月默认打开当月,导航不回跳)
   const now = useNow(60_000)
   const dayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`
-  const holidays = useMemo(
-    () => getAllCountdowns(now, []).filter((i) => i.source === 'holiday'),
-    [dayKey], // eslint-disable-line react-hooks/exhaustive-deps
-  )
+  const todayIso = toIsoDate(now)
+  const [view, setView] = useState(() => ({ year: now.getFullYear(), month: now.getMonth() }))
+  const holidaysQuery = useHolidays()
 
-  // Esc 关闭走 ModalShell 栈;表单态同样关——未保存即弃,无半提交状态
+  const grid = useMemo(() => buildMonthGrid(view.year, view.month), [view.year, view.month])
+
+  // 格标记合成(同 iso 三源合并):休/班(ics)打底、节日名(内置)覆盖副行、
+  // 重要日子置琥珀底(同日撞期个人优先;rest 转副行「休」提示不丢)。
+  const marks = useMemo(() => {
+    const map = new Map<string, { rest?: boolean; work?: boolean; holiday?: string; importantId?: string }>()
+    for (const d of holidaysQuery.data?.days ?? []) {
+      const m = map.get(d.date) ?? {}
+      if (d.kind === 'rest') m.rest = true
+      else m.work = true
+      map.set(d.date, m)
+    }
+    for (const h of holidaysInMonth(view.year, view.month)) {
+      const iso = toIsoDate(h.date)
+      map.set(iso, { ...map.get(iso), holiday: h.name })
+    }
+    for (const i of importantDatesInMonth(layout.importantDates, view.year, view.month)) {
+      const iso = toIsoDate(i.date)
+      map.set(iso, { ...map.get(iso), importantId: i.id })
+    }
+    return map
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view.year, view.month, dayKey, holidaysQuery.data, layout.importantDates])
+
+  const stepMonth = (delta: number) =>
+    setView((v) => {
+      const d = new Date(v.year, v.month + delta, 1)
+      return { year: d.getFullYear(), month: d.getMonth() }
+    })
 
   async function commit(next: ImportantDate[]) {
     setErr(null)
@@ -132,181 +145,195 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
   }
 
   return (
-    <DetailModal
-      onClose={onClose}
-      ariaLabel="倒计时"
-      width="sm"
-      scroll
-      className="p-5 text-sm text-white/90"
-      title="倒计时"
-      tabs={TABS}
-      tab={tab}
-      onTabChange={setTab}
-    >
-      {tab === 'important' ? (
-        draft === null ? (
-          <>
-            <div className="space-y-1">
-              {layout.importantDates.length === 0 && (
-                <p className="text-xs text-white/50 py-2">暂无重要日子,点下方「添加」新建。</p>
-              )}
-              {layout.importantDates.map((d) => (
-                <div key={d.id} className="flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate">{d.name}</div>
-                    <div className="text-xs text-white/50">{describe(d)}</div>
-                  </div>
-                  <button
-                    type="button"
-                    aria-label="编辑"
-                    title="编辑"
-                    onClick={() => { setDraft(toDraft(d)); setErr(null) }}
-                    className="shrink-0 w-8 h-8 -mr-1.5 rounded-full text-white/50 hover:bg-white/20 hover:text-white/80 flex items-center justify-center transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
-                  >
-                    ✎
-                  </button>
-                  <ConfirmButton
-                    label={`删除 ${d.name}`}
-                    title="删除"
-                    disabled={save.isPending}
-                    onConfirm={() => commit(layout.importantDates.filter((x) => x.id !== d.id))}
-                  />
-                </div>
-              ))}
+    <ModalShell onClose={onClose} ariaLabel="倒计时" width="sm" scroll className="p-5 text-sm text-white/90">
+      {draft === null ? (
+        <>
+          <div className="flex items-center justify-between gap-2 mb-3 pr-10">
+            <div className="text-sm font-semibold shrink-0">倒计时</div>
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                aria-label="上一月"
+                onClick={() => stepMonth(-1)}
+                className="w-7 h-7 rounded-full text-white/60 hover:bg-white/20 hover:text-white flex items-center justify-center transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
+              >
+                ‹
+              </button>
+              <span className="tabular-nums text-xs text-white/70 min-w-16 text-center">
+                {view.year}年{view.month + 1}月
+              </span>
+              <button
+                type="button"
+                aria-label="下一月"
+                onClick={() => stepMonth(1)}
+                className="w-7 h-7 rounded-full text-white/60 hover:bg-white/20 hover:text-white flex items-center justify-center transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
+              >
+                ›
+              </button>
             </div>
             <button
               type="button"
               onClick={() => { setDraft(emptyDraft); setErr(null) }}
-              className="mt-3 min-h-8 px-3 py-1.5 rounded-full bg-white/20 text-xs text-white/85 hover:bg-white/30 transition focus-visible:outline-2 focus-visible:outline-white/60"
+              className="min-h-8 px-3 py-1.5 rounded-full bg-white/20 text-xs text-white/85 hover:bg-white/30 transition focus-visible:outline-2 focus-visible:outline-white/60"
             >
               + 添加
             </button>
-          </>
-        ) : (
-          <>
-            <div className="text-sm font-semibold mb-3">{draft.id ? '编辑重要日子' : '添加重要日子'}</div>
-            <div className="space-y-3">
-              <input
-                autoFocus
-                type="text"
-                value={draft.name}
-                maxLength={32}
-                placeholder="名称(如:生日、纪念日)"
-                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg bg-white/20 text-white placeholder-white/50 text-sm outline-none focus:ring-2 focus:ring-accent"
-              />
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="text-xs text-white/50">历法</span>
-                <Seg
-                  value={draft.calendar}
-                  onChange={(calendar) => setDraft({ ...draft, calendar })}
-                  options={[
-                    { id: 'solar', label: '公历' },
-                    { id: 'lunar', label: '农历' },
-                  ]}
-                />
-              </div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="text-xs text-white/50">重复</span>
-                <Seg
-                  value={draft.repeat}
-                  onChange={(repeat) => setDraft({ ...draft, repeat })}
-                  options={[
-                    { id: 'annual', label: '每年' },
-                    { id: 'once', label: '仅一次' },
-                  ]}
-                />
-              </div>
-              {draft.calendar === 'solar' ? (
-                <label className="block">
-                  <span className="text-xs text-white/50">
-                    日期{draft.repeat === 'annual' && '(年份仅参考,每年按月日循环)'}
-                  </span>
-                  <input
-                    type="date"
-                    value={draft.year && draft.month && draft.day ? `${draft.year}-${draft.month}-${draft.day}` : ''}
-                    onChange={(e) => {
-                      const [y = '', m = '', d = ''] = e.target.value.split('-')
-                      setDraft({ ...draft, year: y, month: m, day: d })
-                    }}
-                    className="mt-1 w-full px-3 py-2 rounded-lg bg-white/20 text-white text-sm outline-none focus:ring-2 focus:ring-accent [color-scheme:dark]"
-                  />
-                </label>
-              ) : (
-                <div>
-                  <span className="text-xs text-white/50">
-                    农历日期{draft.repeat === 'annual' && '(每年按农历月日换算公历)'}
-                  </span>
-                  <div className="mt-1 flex gap-2">
-                    <input
-                      type="number"
-                      placeholder={draft.repeat === 'annual' ? '每年' : '年'}
-                      value={draft.year}
-                      disabled={draft.repeat === 'annual'}
-                      onChange={(e) => setDraft({ ...draft, year: e.target.value })}
-                      className="w-24 px-3 py-2 rounded-lg bg-white/20 text-white placeholder-white/50 text-sm outline-none focus:ring-2 focus:ring-accent disabled:opacity-50 [color-scheme:dark]"
-                    />
-                    <input
-                      type="number"
-                      placeholder="月(1-12)"
-                      value={draft.month}
-                      onChange={(e) => setDraft({ ...draft, month: e.target.value })}
-                      className="flex-1 px-3 py-2 rounded-lg bg-white/20 text-white placeholder-white/50 text-sm outline-none focus:ring-2 focus:ring-accent [color-scheme:dark]"
-                    />
-                    <input
-                      type="number"
-                      placeholder="日(1-30)"
-                      value={draft.day}
-                      onChange={(e) => setDraft({ ...draft, day: e.target.value })}
-                      className="flex-1 px-3 py-2 rounded-lg bg-white/20 text-white placeholder-white/50 text-sm outline-none focus:ring-2 focus:ring-accent [color-scheme:dark]"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-            {err && <p className="mt-2 text-xs text-red-300">{err}</p>}
-            <div className="mt-4 flex gap-2">
-              <button
-                type="button"
-                disabled={save.isPending}
-                onClick={submitDraft}
-                className="min-h-8 px-4 py-1.5 rounded-full bg-accent/80 text-white text-xs hover:bg-accent transition disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-white/60"
-              >
-                {save.isPending ? '保存中…' : '保存'}
-              </button>
-              <button
-                type="button"
-                onClick={() => { setDraft(null); setErr(null) }}
-                className="min-h-8 px-4 py-1.5 rounded-full bg-white/20 text-white/85 hover:bg-white/30 transition focus-visible:outline-2 focus-visible:outline-white/60"
-              >
-                取消
-              </button>
-            </div>
-          </>
-        )
+          </div>
+          <div className="grid grid-cols-7 gap-1 mb-1 text-center text-[10px] text-white/40">
+            {WEEKDAYS.map((w) => (
+              <div key={w} className="py-0.5">{w}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {grid.map((cell) => {
+              const m = marks.get(cell.iso)
+              const importantId = m?.importantId
+              const sub = m?.holiday ?? (m?.rest ? '休' : m?.work ? '班' : '')
+              return (
+                <button
+                  key={cell.iso}
+                  type="button"
+                  disabled={!importantId}
+                  title={importantId ? '编辑' : undefined}
+                  onClick={() => {
+                    const d = layout.importantDates.find((x) => x.id === importantId)
+                    if (d) { setDraft(toDraft(d)); setErr(null) }
+                  }}
+                  className={`h-9 rounded-lg text-xs transition-colors focus-visible:outline-2 focus-visible:outline-white/60 ${
+                    cell.inMonth ? '' : 'opacity-30'
+                  } ${
+                    importantId
+                      ? 'bg-amber-300/15 hover:bg-amber-300/30 cursor-pointer'
+                      : m?.rest
+                        ? 'bg-accent/15'
+                        : 'bg-white/[0.04]'
+                  } ${cell.iso === todayIso ? 'ring-1 ring-accent font-semibold' : ''}`}
+                >
+                  {cell.day}
+                  {sub && (
+                    <span
+                      className={`block text-[9px] leading-none truncate px-0.5 ${
+                        m?.holiday ? 'text-white/55' : m?.rest ? 'text-accent' : 'text-white/50'
+                      }`}
+                    >
+                      {sub}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </>
       ) : (
-        /* ── 节假日(内置,只读:从今天起升序,行附当年公历日期;当天 accent)── */
-        <div className="space-y-1">
-          {holidays.map((h) => (
-            <div
-              key={h.key}
-              className={`flex justify-between gap-x-8 text-xs rounded-lg px-3 py-2 ${
-                h.days === 0 ? 'bg-accent/15' : ''
-              }`}
-            >
-              <span className="text-white/70">
-                {h.name}
-                <span className={`ml-2 tabular-nums ${h.days === 0 ? 'text-accent' : 'text-white/40'}`}>
-                  {h.date.getMonth() + 1}月{h.date.getDate()}日{h.lunar ? `(${h.lunar})` : ''}
-                </span>
-              </span>
-              <span className={`tabular-nums ${h.days === 0 ? 'text-accent' : 'text-white/90'}`}>
-                {describeDays(h.days)}
-              </span>
+        <>
+          <div className="text-sm font-semibold mb-3 pr-10">{draft.id ? '编辑重要日子' : '添加重要日子'}</div>
+          <div className="space-y-3">
+            <input
+              autoFocus
+              type="text"
+              value={draft.name}
+              maxLength={32}
+              placeholder="名称(如:生日、纪念日)"
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+              className="w-full px-3 py-2 rounded-lg bg-white/20 text-white placeholder-white/50 text-sm outline-none focus:ring-2 focus:ring-accent"
+            />
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-xs text-white/50">历法</span>
+              <Seg
+                value={draft.calendar}
+                onChange={(calendar) => setDraft({ ...draft, calendar })}
+                options={[
+                  { id: 'solar', label: '公历' },
+                  { id: 'lunar', label: '农历' },
+                ]}
+              />
             </div>
-          ))}
-        </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-xs text-white/50">重复</span>
+              <Seg
+                value={draft.repeat}
+                onChange={(repeat) => setDraft({ ...draft, repeat })}
+                options={[
+                  { id: 'annual', label: '每年' },
+                  { id: 'once', label: '仅一次' },
+                ]}
+              />
+            </div>
+            {draft.calendar === 'solar' ? (
+              <label className="block">
+                <span className="text-xs text-white/50">
+                  日期{draft.repeat === 'annual' && '(年份仅参考,每年按月日循环)'}
+                </span>
+                <input
+                  type="date"
+                  value={draft.year && draft.month && draft.day ? `${draft.year}-${draft.month}-${draft.day}` : ''}
+                  onChange={(e) => {
+                    const [y = '', m = '', d = ''] = e.target.value.split('-')
+                    setDraft({ ...draft, year: y, month: m, day: d })
+                  }}
+                  className="mt-1 w-full px-3 py-2 rounded-lg bg-white/20 text-white text-sm outline-none focus:ring-2 focus:ring-accent [color-scheme:dark]"
+                />
+              </label>
+            ) : (
+              <div>
+                <span className="text-xs text-white/50">
+                  农历日期{draft.repeat === 'annual' && '(每年按农历月日换算公历)'}
+                </span>
+                <div className="mt-1 flex gap-2">
+                  <input
+                    type="number"
+                    placeholder={draft.repeat === 'annual' ? '每年' : '年'}
+                    value={draft.year}
+                    disabled={draft.repeat === 'annual'}
+                    onChange={(e) => setDraft({ ...draft, year: e.target.value })}
+                    className="w-24 px-3 py-2 rounded-lg bg-white/20 text-white placeholder-white/50 text-sm outline-none focus:ring-2 focus:ring-accent disabled:opacity-50 [color-scheme:dark]"
+                  />
+                  <input
+                    type="number"
+                    placeholder="月(1-12)"
+                    value={draft.month}
+                    onChange={(e) => setDraft({ ...draft, month: e.target.value })}
+                    className="flex-1 px-3 py-2 rounded-lg bg-white/20 text-white placeholder-white/50 text-sm outline-none focus:ring-2 focus:ring-accent [color-scheme:dark]"
+                  />
+                  <input
+                    type="number"
+                    placeholder="日(1-30)"
+                    value={draft.day}
+                    onChange={(e) => setDraft({ ...draft, day: e.target.value })}
+                    className="flex-1 px-3 py-2 rounded-lg bg-white/20 text-white placeholder-white/50 text-sm outline-none focus:ring-2 focus:ring-accent [color-scheme:dark]"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          {err && <p className="mt-2 text-xs text-red-300">{err}</p>}
+          <div className="mt-4 flex items-center gap-2">
+            <button
+              type="button"
+              disabled={save.isPending}
+              onClick={submitDraft}
+              className="min-h-8 px-4 py-1.5 rounded-full bg-accent/80 text-white text-xs hover:bg-accent transition disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-white/60"
+            >
+              {save.isPending ? '保存中…' : '保存'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setDraft(null); setErr(null) }}
+              className="min-h-8 px-4 py-1.5 rounded-full bg-white/20 text-white/85 hover:bg-white/30 transition focus-visible:outline-2 focus-visible:outline-white/60"
+            >
+              取消
+            </button>
+            {draft.id && (
+              <ConfirmButton
+                label={`删除 ${draft.name}`}
+                title="删除"
+                disabled={save.isPending}
+                onConfirm={() => commit(layout.importantDates.filter((x) => x.id !== draft.id))}
+              />
+            )}
+          </div>
+        </>
       )}
-    </DetailModal>
+    </ModalShell>
   )
 }

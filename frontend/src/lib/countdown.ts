@@ -190,3 +190,63 @@ export function getCountdowns(now: Date, userDates: ImportantDate[]): CountdownI
 export function describeDays(days: number): string {
   return days === 0 ? '今天' : days === 1 ? '明天' : `${days} 天`
 }
+
+// ── 日历月视图(ADR-0054):当月内实例化 ────────────────────────────────────────
+// getAllCountdowns 是「下一次出现」语义(days>=0,过期滚次期),月视图要看当月
+// **已过**的日子(10 月中旬开日历,国庆 10-1 须在格上)——此处按年实例化另立三函数。
+
+/** YYYY-MM-DD 零填充(与后端 HolidayDay.date 同形,休/班 map 键直接命中)。 */
+export const toIsoDate = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+export interface CalendarCell {
+  iso: string
+  day: number
+  inMonth: boolean
+}
+
+/** 月网格 42 格(6 周固定,月份导航高度不跳):周一起始,首尾补位。 */
+export function buildMonthGrid(year: number, month: number): CalendarCell[] {
+  const lead = (new Date(year, month, 1).getDay() + 6) % 7 // 周一=0
+  const cells: CalendarCell[] = []
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(year, month, 1 - lead + i)
+    cells.push({ iso: toIsoDate(d), day: d.getDate(), inMonth: d.getMonth() === month })
+  }
+  return cells
+}
+
+/** 当月节日(含已过;内置清单按年实例化,文化节日小字与法定节日名同源)。 */
+export function holidaysInMonth(year: number, month: number): Array<{ key: string; name: string; date: Date }> {
+  const out: Array<{ key: string; name: string; date: Date }> = []
+  for (const h of HOLIDAYS) {
+    const date = h.dateInYear(year)
+    if (date && date.getMonth() === month) out.push({ key: h.key, name: h.name, date })
+  }
+  return out.sort((a, b) => a.date.getDate() - b.date.getDate())
+}
+
+/** 当月重要日子出现:annual 取该年换算日(公历 2-29 非闰年进位 3-1,月过滤自然排除);
+ *  once 按全日期判当年当月(农历经换算;非法日期静默跳过,同 nextUserDate 口径)。 */
+export function importantDatesInMonth(
+  dates: ImportantDate[],
+  year: number,
+  month: number,
+): Array<{ id: string; name: string; date: Date }> {
+  const out: Array<{ id: string; name: string; date: Date }> = []
+  for (const d of dates) {
+    const [y, m, day] = d.date.split('-').map(Number)
+    let date: Date | null = null
+    if (d.repeat === 'annual') {
+      date = d.calendar === 'lunar' ? lunarDateInGregorianYear(m, day, year) : new Date(year, m - 1, day)
+    } else if (y === year) {
+      try {
+        date = d.calendar === 'lunar' ? solarToDate(Lunar.fromYmd(y, m, day).getSolar()) : new Date(y, m - 1, day)
+      } catch {
+        date = null
+      }
+    }
+    if (date && date.getMonth() === month) out.push({ id: d.id, name: d.name, date })
+  }
+  return out.sort((a, b) => a.date.getDate() - b.date.getDate())
+}

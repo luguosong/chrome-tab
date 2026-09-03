@@ -8,6 +8,7 @@ import { ConflictError } from './common'
 import { configRoutes } from './config'
 import type { Db } from './db'
 import { iconRoutes } from './icons'
+import { holidayRoutes } from './holidays'
 import { layoutRoutes } from './layout'
 import { pageRoutes } from './pages'
 import { createWallpaperHandler } from './wallpaper'
@@ -72,6 +73,8 @@ export function createApp({
   app.route('/', configRoutes(db))
   // weather 恒挂载:未配置 → requireConfigured 抛 → 500「服务器错误」(契约 §7,非 404)
   app.route('/', weatherRoutes(weather))
+  // 节假日休/班(CONTEXT.md「节假日」②轨,ADR-0054):ics 上游内存缓存,降级见 holidays.ts
+  app.route('/', holidayRoutes())
   // AIHOT 热点代理(单例图标「AI 热点」):无配置,失败降级见 aihot.ts
   app.route('/', aihotRoutes())
   // 滴答待办代理(单例图标「待办」,首个可写类型):未配置口令 → 400,降级见 dida.ts
