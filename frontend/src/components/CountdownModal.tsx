@@ -3,7 +3,7 @@ import type { ImportantDate } from 'chrome-tab-shared'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import { useUpdateLayoutSettings } from '../api/config'
 import { useHolidays } from '../api/holidays'
-import { buildMonthGrid, holidaysInMonth, importantDatesInMonth, toIsoDate } from '../lib/countdown'
+import { buildMonthGrid, holidaysInMonth, importantDatesInMonth, lunarDayText, toIsoDate } from '../lib/countdown'
 import useNow from '../hooks/useNow'
 import type { Icon } from '../lib/types'
 import ConfirmButton from './ConfirmButton'
@@ -51,6 +51,14 @@ function cellBg(m: CellMark | undefined, weekend: boolean): string {
   if (m?.work) return 'bg-red-400/10' // 补班红(多落周末,盖过淡绿)
   if (weekend) return 'bg-emerald-300/10' // 普通周末淡绿
   return 'bg-white/[0.04]'
+}
+
+/** 标记日字色(月视图副行与年壁点内数字共用;小字号档统一取高对比)。 */
+function markTextCls(m: CellMark | undefined): string {
+  if (m?.work) return 'text-red-300'
+  if (m?.rest) return 'text-emerald-300'
+  if (m?.holiday || m?.importantId) return 'text-white/70'
+  return 'text-white/40'
 }
 
 /** 二选一胶囊组(触达 ≥32px,Liquid Glass 触达规范)。 */
@@ -111,15 +119,20 @@ function YearMonthCard({
       <div className={`text-xs mb-1.5 ${isCurrentMonth ? 'text-accent font-semibold' : 'text-white/70'}`}>
         {CN_MONTHS[month]}月
       </div>
-      <div className="grid grid-cols-7 gap-[3px]">
-        {grid.map((cell) => (
-          <span
-            key={cell.iso}
-            className={`aspect-square rounded-[3px] ${
-              cell.inMonth ? cellBg(marks.get(cell.iso), cell.weekend) : 'opacity-0'
-            } ${cell.iso === todayIso ? 'ring-1 ring-accent' : ''}`}
-          />
-        ))}
+      <div className="grid grid-cols-7 gap-[2px]">
+        {grid.map((cell) => {
+          const m = marks.get(cell.iso)
+          return (
+            <span
+              key={cell.iso}
+              className={`aspect-square rounded-[3px] text-[9px] leading-[1.4] flex items-center justify-center ${
+                cell.inMonth ? cellBg(m, cell.weekend) : 'opacity-0'
+              } ${cell.inMonth ? markTextCls(m) : ''} ${cell.iso === todayIso ? 'ring-1 ring-accent font-semibold' : ''}`}
+            >
+              {cell.day}
+            </span>
+          )
+        })}
       </div>
     </button>
   )
@@ -179,6 +192,12 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
     setMode('month')
   }
 
+  /** 归位当月并切月视图(年视图下点「今天」= 直接跳月视图;已在当月则幂等)。 */
+  const goToday = () => {
+    setView({ year: now.getFullYear(), month: now.getMonth() })
+    setMode('month')
+  }
+
   async function commit(next: ImportantDate[]) {
     setErr(null)
     try {
@@ -211,7 +230,7 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
   }
 
   return (
-    <ModalShell onClose={onClose} ariaLabel="倒计时" width="2xl" scroll className="p-5 text-sm text-white/90">
+    <ModalShell onClose={onClose} ariaLabel="倒计时" width="3xl" scroll className="p-5 text-sm text-white/90">
       {draft === null ? (
         <>
           <div className="flex items-center justify-between gap-2 mb-4 pr-10">
@@ -234,6 +253,13 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
                 className="w-8 h-8 rounded-full text-white/60 hover:bg-white/20 hover:text-white flex items-center justify-center transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
               >
                 ›
+              </button>
+              <button
+                type="button"
+                onClick={goToday}
+                className="ml-1 min-h-8 px-3 py-1.5 rounded-full bg-white/20 text-xs text-white/85 hover:bg-white/30 transition focus-visible:outline-2 focus-visible:outline-white/60"
+              >
+                今天
               </button>
             </div>
             <div className="flex items-center gap-2">
@@ -265,7 +291,8 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
                 {grid.map((cell) => {
                   const m = marks.get(cell.iso)
                   const importantId = m?.importantId
-                  const sub = m?.holiday ?? (m?.rest ? '休' : m?.work ? '班' : '')
+                  // 副行:节日名(内置清单)> 节气/农历日;休/班让位成右上角标(农历要在副行)
+                  const sub = m?.holiday ?? lunarDayText(cell.date)
                   return (
                     <button
                       key={cell.iso}
@@ -276,7 +303,7 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
                         const d = layout.importantDates.find((x) => x.id === importantId)
                         if (d) { setDraft(toDraft(d)); setErr(null) }
                       }}
-                      className={`h-12 rounded-xl transition-colors focus-visible:outline-2 focus-visible:outline-white/60 ${
+                      className={`relative h-12 rounded-xl transition-colors focus-visible:outline-2 focus-visible:outline-white/60 ${
                         cell.inMonth ? '' : 'opacity-30'
                       } ${importantId ? `${cellBg(m, cell.weekend)} hover:bg-amber-300/30 cursor-pointer` : cellBg(m, cell.weekend)} ${
                         cell.iso === todayIso ? 'ring-1 ring-accent font-semibold' : ''
@@ -286,10 +313,19 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
                       {sub && (
                         <span
                           className={`block text-[10px] leading-tight truncate px-0.5 ${
-                            m?.holiday ? 'text-white/55' : m?.work ? 'text-red-300' : m?.rest ? 'text-emerald-300' : ''
+                            m?.holiday ? 'text-white/70' : 'text-white/40'
                           }`}
                         >
                           {sub}
+                        </span>
+                      )}
+                      {(m?.rest || m?.work) && (
+                        <span
+                          className={`absolute top-0.5 right-0.5 px-1 rounded text-[8px] leading-[1.5] text-white ${
+                            m?.rest ? 'bg-emerald-500' : 'bg-red-400'
+                          }`}
+                        >
+                          {m?.rest ? '休' : '班'}
                         </span>
                       )}
                     </button>

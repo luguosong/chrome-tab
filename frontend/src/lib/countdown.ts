@@ -205,6 +205,8 @@ export interface CalendarCell {
   inMonth: boolean
   /** 周六/日(周末淡绿泛标记用;补班红、假日深绿在优先级上盖过它)。 */
   weekend: boolean
+  /** 本地 Date(副行农历/节气换算用;从 iso 重构造会踩 UTC 解析坑,随格透传)。 */
+  date: Date
 }
 
 /** 月网格 42 格(6 周固定,月份导航高度不跳):周一起始,首尾补位。 */
@@ -213,9 +215,22 @@ export function buildMonthGrid(year: number, month: number): CalendarCell[] {
   const cells: CalendarCell[] = []
   for (let i = 0; i < 42; i++) {
     const d = new Date(year, month, 1 - lead + i)
-    cells.push({ iso: toIsoDate(d), day: d.getDate(), inMonth: d.getMonth() === month, weekend: d.getDay() === 0 || d.getDay() === 6 })
+    cells.push({
+      iso: toIsoDate(d),
+      day: d.getDate(),
+      inMonth: d.getMonth() === month,
+      weekend: d.getDay() === 0 || d.getDay() === 6,
+      date: d,
+    })
   }
   return cells
+}
+
+/** 格内副行农历文本:节气日显节气名(白露/秋分,仅当日恰逢才返回),否则农历日
+ *  (初一~三十,lunar-typescript 的「二十/廿一」形态);节日名不在此(内置清单优先)。 */
+export function lunarDayText(d: Date): string {
+  const l = Lunar.fromDate(d)
+  return l.getJieQi() || l.getDayInChinese()
 }
 
 /** 当月节日(含已过;内置清单按年实例化,文化节日小字与法定节日名同源)。 */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildMonthGrid, describeDays, getAllCountdowns, getCountdowns, holidaysInMonth, importantDatesInMonth, toIsoDate } from './countdown'
+import { buildMonthGrid, describeDays, getAllCountdowns, getCountdowns, holidaysInMonth, importantDatesInMonth, lunarDayText, toIsoDate } from './countdown'
 import type { ImportantDate } from 'chrome-tab-shared'
 
 // 对拍基准:农历节日公历日期已用 lunar-typescript 实测核对(2026/2027 两年),
@@ -161,10 +161,18 @@ describe('日历月视图(ADR-0054):当月内实例化,区别于「下一次出�
   it('buildMonthGrid:周一起始、42 格固定、首尾补位 inMonth=false、weekend 标记', () => {
     const grid = buildMonthGrid(2026, 8) // 2026-09:1 日是周二 → 首格补 8-31(周一)
     expect(grid).toHaveLength(42)
-    expect(grid[0]).toEqual({ iso: '2026-08-31', day: 31, inMonth: false, weekend: false })
-    expect(grid[1]).toEqual({ iso: '2026-09-01', day: 1, inMonth: true, weekend: false })
+    expect(grid[0]).toMatchObject({ iso: '2026-08-31', day: 31, inMonth: false, weekend: false })
+    expect(grid[1]).toMatchObject({ iso: '2026-09-01', day: 1, inMonth: true, weekend: false })
     expect(grid[5]).toMatchObject({ iso: '2026-09-05', weekend: true }) // 周六
-    expect(grid[41]).toEqual({ iso: '2026-10-11', day: 11, inMonth: false, weekend: true }) // 周日
+    expect(grid[41]).toMatchObject({ iso: '2026-10-11', day: 11, inMonth: false, weekend: true }) // 周日
+    expect(grid[1]!.date).toEqual(new Date(2026, 8, 1)) // 本地 Date 随格透传(副行农历用)
+  })
+
+  it('lunarDayText:节气日显节气名,否则农历日(「二十/廿一」形态;与参考图对拍)', () => {
+    expect(lunarDayText(new Date(2026, 8, 3))).toBe('廿二') // 2026-09-03(参考图「今」格)
+    expect(lunarDayText(new Date(2026, 8, 7))).toBe('白露') // 节气压农历日
+    expect(lunarDayText(new Date(2026, 8, 25))).toBe('十五') // 中秋当日(节日名由内置清单另管)
+    expect(lunarDayText(new Date(2026, 8, 1))).toBe('二十')
   })
 
   it('holidaysInMonth:已过节日也返回(10 月中旬开日历,国庆须在格上)', () => {
