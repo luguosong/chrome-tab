@@ -51,9 +51,19 @@ export function splitBlocks(markdown: string): Blocks {
   return { prefix: markdown.slice(0, starts[0]), blocks }
 }
 
-/** 块是否含标题行以外的内容:合成源的预发布占位块(仅 `## x.y.z` 一行)无可译内容,
- *  译窗口与按需补译都跳过(ADR-0050)。 */
-const hasEntries = (b: Block): boolean => b.raw.split('\n').slice(1).some((l) => l.trim())
+/** 空块判定 = 无条目行(小节标题或 bullet)——ADR-0050 §5⑤ 立法语义,与前端
+ *  parseChangelog 渲染对齐(只渲染 ### 与 -/* 行,纯 prose 不渲染)。全域单点:合成侧
+ *  (composeReleasesMarkdown / composeWhatsnewMarkdown)的空块决策与 Service 译窗口/
+ *  补译防呆共用同一谓词;直取源纯 prose 块因此不入译窗(译文本就无渲染位,不造死库存,
+ *  2026-09-04 自「有内容行」宽松形收紧,ADR-0050 §5⑤ 注记)。行首形态判定:标记后须
+ *  跟空白再跟内容([^\S\r\n] 挡裸 `-`/`###` 行,与前端逐行 (.+)/(.*) 对齐)、无围栏
+ *  感知——围栏内顶格 bullet 与「空标题小节」(`### ` 名为空)两处与前端 parser 同盲
+ *  区,对齐即一致。 */
+export const hasEntries = (body: string): boolean =>
+  /^#{2,3}[^\S\r\n]/m.test(body) || /^[-*][^\S\r\n]/m.test(body)
+
+/** Block 形态薄壳:剥版本标题行再判——`## v` 本身命中 ^#{2,3}\s,不剥恒 true。 */
+export const blockHasEntries = (b: Block): boolean => hasEntries(b.raw.split('\n').slice(1).join('\n'))
 
 /** 无原文源(两地址皆缺省,ADR-0050 后无实例、类别保留)的版本流合成:npm time 表 →
  *  每版本一行 `## ` 标题空块的 markdown,下游 splitBlocks / 前端 parseChangelog 照常切出
@@ -126,8 +136,7 @@ export function composeReleasesMarkdown(
         }
       }
       const content = lines.join('\n').trimEnd()
-      const hasEntries = /^#{2,3}\s/m.test(content) || /^[-*]\s/m.test(content)
-      return hasEntries ? `## ${r.version}\n${content}\n` : `## ${r.version}\n`
+      return hasEntries(content) ? `## ${r.version}\n${content}\n` : `## ${r.version}\n`
     })
     .join('')
 }
@@ -266,7 +275,7 @@ export function composeWhatsnewMarkdown(
         if (blogBullets.length) lines.push('### Blog post', ...blogBullets)
       }
       const content = lines.filter((l) => l != null).join('\n')
-      return content ? `## ${r.version}\n${content}\n` : `## ${r.version}\n`
+      return hasEntries(content) ? `## ${r.version}\n${content}\n` : `## ${r.version}\n`
     })
     .join('')
 }
@@ -406,7 +415,7 @@ export class ChangelogService {
     const blocks = splitBlocks(raw)
     const byRaw = await this.translations.load(blocks.blocks.map((b) => b.raw))
     // 只译最近 N 版中缺失的块;跳过空块(预发布占位)再取窗——否则 alpha 扎堆时窗口被占位块耗尽
-    for (const b of blocks.blocks.filter(hasEntries).slice(0, this.translateRecent)) {
+    for (const b of blocks.blocks.filter(blockHasEntries).slice(0, this.translateRecent)) {
       await this.translateIfMissing(b, byRaw)
     }
     // 发布时间 immutable:merge 落库只增不减——新拉值覆盖同键旧值,新拉缺的版本(GitHub
@@ -456,7 +465,7 @@ export class ChangelogService {
    *  不入库待下轮重试。入库经译文仓(空串守卫/onConflict 收在 store,ADR-0034)。 */
   private async translateIfMissing(block: Block, byRaw: Map<string, string>): Promise<void> {
     if (byRaw.has(block.raw)) return
-    if (!hasEntries(block)) return // 空块(直接 API 补译防呆):无可译,translateVersions 路径同守
+    if (!blockHasEntries(block)) return // 空块(直接 API 补译防呆):无可译,translateVersions 路径同守
     let translated: string | null
     try {
       translated = await this.deps.translate(block.raw, (model, attempt, total) => {

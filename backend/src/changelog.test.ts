@@ -6,9 +6,11 @@ import { bootstrap } from './seed'
 import { expectError, setupApp } from './testUtils'
 import {
   ChangelogService,
+  blockHasEntries,
   blogVersionOf,
   composeReleasesMarkdown,
   composeWhatsnewMarkdown,
+  hasEntries,
   prodChangelogDeps,
   refreshQuietly,
   splitBlocks,
@@ -71,6 +73,45 @@ describe('splitBlocks(块边界即哈希边界,错一字符即失配)', () => {
 
   it('title 去掉 ## 前缀(与前端 parseChangelog 的 h[1].trim() 同规则)', () => {
     expect(splitBlocks('## 2.0.14\n- x\n').blocks[0]!.title).toBe('2.0.14')
+  })
+})
+
+describe('hasEntries / blockHasEntries(空块判定 = 无条目行,ADR-0050 §5⑤——合成侧与译窗共用)', () => {
+  it('仅标题/空 body:无可渲染条目', () => {
+    expect(hasEntries('')).toBe(false)
+    expect(hasEntries('\n\n')).toBe(false) // 全空行不算条目
+  })
+
+  it('含 bullet 或小节标题即有条目(小节空 items 也算——前端 groups 同判)', () => {
+    expect(hasEntries('- fixed something\n')).toBe(true)
+    expect(hasEntries('* star 形态 bullet\n')).toBe(true)
+    expect(hasEntries('### Features\n')).toBe(true)
+    expect(hasEntries('\n\n- bullet 前有空行\n')).toBe(true)
+  })
+
+  it('纯 prose(无小节无 bullet)不是条目——前端 parseChangelog 不渲染 prose 行', () => {
+    expect(hasEntries('Just a prose paragraph.\nAnother line.\n')).toBe(false)
+  })
+
+  it('裸标记行(标记后无内容)不算条目——与前端逐行 (.+)/(.*) 对齐,挡死库存', () => {
+    expect(hasEntries('prose\n-\n')).toBe(false) // 裸 -(\\s 若吃换行会误判)
+    expect(hasEntries('prose\n*\n')).toBe(false)
+    expect(hasEntries('prose\n###\n')).toBe(false)
+    expect(hasEntries('prose\n##\n')).toBe(false)
+  })
+
+  it('标题层级边界:仅 2/3 级算条目,h1 与 h4+ 不算——与前端只渲染 ##/### 对齐', () => {
+    expect(hasEntries('# h1 title\n')).toBe(false)
+    expect(hasEntries('#### h4 notes\n')).toBe(false)
+    expect(hasEntries('##### h5\n')).toBe(false)
+  })
+
+  it('blockHasEntries 剥版本标题行再判:## v 本身命中 ^#{2,3}\\s,不剥恒 true', () => {
+    const blk = (raw: string) => splitBlocks(raw).blocks[0]!
+    expect(blockHasEntries(blk('## 2.0\n'))).toBe(false) // 占位块:仅标题
+    expect(blockHasEntries(blk('## 2.0\nprose only\n'))).toBe(false) // 纯 prose 块
+    expect(blockHasEntries(blk('## 2.0\n- x\n'))).toBe(true)
+    expect(blockHasEntries(blk('## 2.0\n### Blog post\n- x\n'))).toBe(true)
   })
 })
 
@@ -349,6 +390,35 @@ describe('ChangelogService 编排(ADR-0017)', () => {
     await s.get()
 
     expect(seen.map((b) => b.split('\n')[0])).toEqual(['## 0.1.0', '## 0.0.9'])
+  })
+
+  it('译窗收紧至 B 语义(2026-09-04,ADR-0050 §5⑤ 注记):直取源纯 prose 块不进译窗——前端无渲染位,译即死库存', async () => {
+    const db = openDb(':memory:').db
+    const seen: string[] = []
+    const s = makeService(db, {
+      fetchUpstream: async () => ({ markdown: '## 2.0\nJust a prose paragraph.\n\n## 1.0\n- one\n', releaseInfo: null }),
+      translate: async (b) => (seen.push(b), b),
+    })
+
+    await s.get()
+
+    expect(seen.map((b) => b.split('\n')[0])).toEqual(['## 1.0'])
+  })
+
+  it('补译防呆同守(B 语义):直接 API 对纯 prose 版本补译静默跳过,不产死库存译文', async () => {
+    const db = openDb(':memory:').db
+    const seen: string[] = []
+    const s = makeService(db, {
+      fetchUpstream: async () => ({ markdown: '## 2.0\nJust prose.\n\n## 1.0\n- one\n', releaseInfo: null }),
+      translate: async (b) => (seen.push(b), b),
+    })
+
+    await s.get() // 快照落库;译窗只触 1.0
+    seen.length = 0
+    const snap = await s.translateVersions(['2.0'])
+
+    expect(seen).toHaveLength(0) // prose 块防呆拦下,零 LLM
+    expect(snap.translatedVersions).not.toContain('2.0')
   })
 
   it('同一原文再次 refresh:块哈希全命中 → 零 LLM 调用', async () => {

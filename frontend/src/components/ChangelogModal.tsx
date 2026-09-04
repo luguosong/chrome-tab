@@ -182,7 +182,8 @@ export default function ChangelogModal({
                             </a>
                           )}
                           {/* 无可渲染条目(如合成源的预发布占位块)不给翻译按钮——可渲染性以
-                              本组件的 groups 结构为准,与后端译窗口守卫(有内容行)语义相近而非同一谓词 */}
+                              本组件的 groups 结构为准,与后端 hasEntries(有条目 = 小节标题或 bullet,
+                              ADR-0050 §5⑤)同语义,此处为结构形态 */}
                           {!noRaw && groups.length > 0 && !translated.has(v.title) && (
                             <button
                               type="button"
