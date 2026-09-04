@@ -150,7 +150,7 @@ export default function Icon({
       {/* 分组解散失败提示(容量 409「先移出部分图标」等):组图标上方小气泡,短暂显示;
           pop-in 入场同错误药丸先例(PageTabs/DashboardPage,glass-panel 走 scale-only 路线) */}
       {icon.type === 'group' && dissolve.isError && (
-        <span className="absolute -top-9 left-1/2 -translate-x-1/2 z-40 glass-panel rounded-full px-3 py-1 text-xs text-white/90 whitespace-nowrap shadow-lg pointer-events-none animate-pop-in">
+        <span className="absolute -top-9 left-1/2 -translate-x-1/2 z-40 glass-panel glass-panel-readable rounded-full px-3 py-1 text-xs text-white/90 whitespace-nowrap shadow-lg pointer-events-none animate-pop-in">
           {dissolve.error instanceof ApiError ? dissolve.error.message : '解散失败'}
         </span>
       )}

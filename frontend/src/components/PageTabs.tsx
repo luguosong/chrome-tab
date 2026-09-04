@@ -256,10 +256,10 @@ export default function PageTabs() {
       </LensBox>
 
       {/* 错误提示(删非空页 409 等):行内浮层,下一次操作清掉。
-          与 DashboardPage 容量提示同族(glass-panel rounded-full + animate-pop-in 入场
-          ——玻璃底禁 opacity 动画,同 pop-in 注释),统一提示样式。 */}
+          与 DashboardPage 容量提示同族(glass-panel·readable 实底 rounded-full +
+          animate-pop-in 入场),统一提示样式。 */}
       {error && (
-        <div className="mt-2 text-center text-xs text-white/90 glass-panel rounded-full py-1 px-3 mx-auto w-fit max-w-full animate-pop-in">
+        <div className="mt-2 text-center text-xs text-white/90 glass-panel glass-panel-readable rounded-full py-1 px-3 mx-auto w-fit max-w-full animate-pop-in">
           {error}
         </div>
       )}

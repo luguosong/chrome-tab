@@ -324,7 +324,7 @@ function Dashboard() {
         <div className="fixed bottom-8 inset-x-0 z-50 flex justify-center pointer-events-none">
           {/* animate-pop-in 入场;shadow-lg 删——glass-panel 的 unlayered box-shadow
               恒胜 Tailwind layered 工具类,该类本就无效(项目已知 CSS 层叠特性) */}
-          <span className="glass-panel animate-pop-in text-white/90 text-sm px-4 py-2 rounded-full">
+          <span className="glass-panel glass-panel-readable animate-pop-in text-white/90 text-sm px-4 py-2 rounded-full">
             {drag.notice}
           </span>
         </div>

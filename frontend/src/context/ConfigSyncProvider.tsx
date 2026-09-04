@@ -156,7 +156,7 @@ export function ConfigSyncProvider({ children }: { children: ReactNode }) {
     <Ctx.Provider value={state}>
       {children}
       {!state.online && (
-        <div className="fixed bottom-4 left-4 z-50 glass-panel text-white/85 text-xs px-3 py-1.5 rounded-full shadow">
+        <div className="fixed bottom-4 left-4 z-50 glass-panel glass-panel-readable text-white/85 text-xs px-3 py-1.5 rounded-full shadow">
           离线 · 只读(展示本地镜像,恢复网络后自动同步)
         </div>
       )}
@@ -175,7 +175,7 @@ function ConflictToast({ uid, onDismiss }: { uid: number; onDismiss: () => void 
   }, [uid])
   return (
     <div className="fixed bottom-4 inset-x-0 z-50 flex justify-center px-4 pointer-events-none">
-      <div className="glass-panel pointer-events-auto text-white/90 text-sm px-4 py-2.5 rounded-xl shadow-lg flex items-center gap-3 max-w-md">
+      <div className="glass-panel glass-panel-readable pointer-events-auto text-white/90 text-sm px-4 py-2.5 rounded-xl shadow-lg flex items-center gap-3 max-w-md">
         <span>检测到冲突,本地版本已保留。</span>
         <button
           type="button"

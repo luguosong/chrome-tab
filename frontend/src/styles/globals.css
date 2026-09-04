@@ -62,13 +62,20 @@ code {
   box-shadow: var(--l1-shadow);
 }
 
-/* L1 可读性兜底:文本密集面板在 L1 玻璃底上再垫 white·20 / black·20
-   (单层等效合成:亮 = 白 0.55 over 白 0.2 → 0.64;暗 = zinc-900/50 over 黑 0.2) */
+/* L1 可读性兜底 → 不透明实底(2026-09-03 用户裁决:浮层文字穿透壁纸影响阅读,
+   详见 ADR-0055):文本密集浮层(十家详情 Modal / 抽屉 / 下拉 / 快览卡 / Clock
+   弹层 / toast)转不透明深实底。backdrop-filter 显式 none——不透明底下模糊
+   不可见,留着纯烧 GPU,且顺带消灭 pop-in「opacity 瞬态切断 backdrop 采样」
+   坑在本档面板上的适用面;border/阴影由 .glass-panel 保留,浮起立体感不变。
+   亮分支 #f2f2f7 仅是 ADR-0012 的主题化留量(全库浮层文字为白系假设、.dark
+   写死 index.html),真启用亮色主题时浮层文字须同步翻深。 */
 .glass-panel-readable {
-  background: rgba(255, 255, 255, 0.64);
+  background: #f2f2f7;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 .dark .glass-panel-readable {
-  background: rgba(16, 16, 18, 0.6);
+  background: #1c1c1e;
 }
 
 /* 图标层 soft 档(ADR-0012):坐 L0 页板上的图标/小组件底板——比 L1 regular 轻、

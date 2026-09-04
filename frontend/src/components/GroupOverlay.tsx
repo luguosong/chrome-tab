@@ -147,7 +147,7 @@ export default function GroupOverlay({
         ref={panelRef}
         role="dialog"
         aria-label={`分组 ${name}`}
-        className={`relative glass-panel pointer-events-auto rounded-3xl p-5 w-[min(92vw,380px)] shadow-2xl ${
+        className={`relative glass-panel glass-panel-readable pointer-events-auto rounded-3xl p-5 w-[min(92vw,380px)] shadow-2xl ${
           closing ? 'animate-pop-out' : 'animate-pop-in'
         }`}
       >

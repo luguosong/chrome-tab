@@ -1,5 +1,7 @@
 # Liquid Glass 三档材质体系
 
+> **注记(2026-09-03)**:文本密集浮层(详情 Modal / 抽屉 / 下拉 / 快览卡 / toast)的 L1 材质经用户裁决转不透明实底——`.glass-panel-readable` 由「玻璃垫底」改义为「实底浮层」并 `backdrop-filter: none`,玻璃保留在 chrome/控件/页板层;见 [ADR-0055](0055-readable-overlay-opaque-solid.md)。L0/L2 与控件侧玻璃不变。
+
 > **注记(2026-08-20)**:本文「图标层 nav 用 squircle soft 档」及方向 C 裁决中 nav 图标着玻璃底板的部分,已被 [ADR-0013](0013-nav-bare-favicon.md) 取代(nav 改裸 favicon 直出,前提:L0 页板雾化已兜底可读性);L0/L1/L2 三档、分组底板与小组件玻璃卡仍有效。
 
 > **注记(2026-09-02)**:实机验证原型资产(/prototype/liquid-glass 免登录路由 + PrototypeLiquidGlassPage / prototype-lens / prototype-liquid-glass.css 三文件)当日定夺后退役删除——方向裁决已履行完毕(本文「方向 C 裁决」即其产物,生产 LensBox 为折射基建的正式形态);一次性原型不再随 dist 出货,资产 git 历史可考。
