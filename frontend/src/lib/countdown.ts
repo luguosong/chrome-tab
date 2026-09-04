@@ -226,6 +226,16 @@ export function buildMonthGrid(year: number, month: number): CalendarCell[] {
   return cells
 }
 
+/** ISO 8601 周数(周一始、周四定年,与月视图周一起始同口径):边界行为是特性——
+ *  1-1 可属上年 W52/53、12 月末可已属下年 W1;Modal 顶部「第 N 周」年刻度用。 */
+export function isoWeekNumber(d: Date): number {
+  const t = new Date(d.getFullYear(), d.getMonth(), d.getDate()) // 去时成分,免 DST/时刻漂移
+  t.setDate(t.getDate() - ((t.getDay() + 6) % 7) + 3) // 移到本周周四:周四的年份即周的归属年
+  const first = new Date(t.getFullYear(), 0, 4) // 1-4 必在 W1(W1 是含首个周四的一周)
+  first.setDate(first.getDate() - ((first.getDay() + 6) % 7) + 3) // W1 的周四
+  return 1 + Math.round((t.getTime() - first.getTime()) / (7 * 86_400_000))
+}
+
 /** 格内副行农历文本:节气日显节气名(白露/秋分,仅当日恰逢才返回),否则农历日
  *  (初一~三十,lunar-typescript 的「二十/廿一」形态);节日名不在此(内置清单优先)。 */
 export function lunarDayText(d: Date): string {

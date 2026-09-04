@@ -357,6 +357,15 @@ code {
   .animate-pane-in {
     animation: pane-in 0.15s ease-out;
   }
+  /* 日历翻页方向入场(CountdownModal ‹ ›):pane-in 的方向变体——24px 横移读方向
+     + 淡入柔化换血(旧态瞬消,不叠双曝);不叠 pane-in 的 blur,位移即柔化,
+     保持纯 transform+opacity。切视图/钻取/归位无空间语义,落 pane-in */
+  .animate-page-next {
+    animation: page-next 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+  .animate-page-prev {
+    animation: page-prev 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
   /* ── 退场族(对称路径:从哪进就从哪出,2026-08-31 补)───────────────────
      与上列入场一一镜像,曲线取时间反演;时长统一 0.2s(按钮档)——退场快于
      入场是 iOS 惯例。消费方:ModalShell / GroupOverlay(pop-out)、ControlDrawer
@@ -385,6 +394,26 @@ code {
   to {
     opacity: 1;
     filter: blur(0);
+  }
+}
+@keyframes page-next {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes page-prev {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
   }
 }
 @keyframes jiggle {

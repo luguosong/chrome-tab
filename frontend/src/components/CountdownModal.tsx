@@ -3,7 +3,7 @@ import type { ImportantDate } from 'chrome-tab-shared'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import { useUpdateLayoutSettings } from '../api/config'
 import { useHolidays } from '../api/holidays'
-import { buildMonthGrid, holidaysInMonth, importantDatesInMonth, lunarDayText, toIsoDate } from '../lib/countdown'
+import { buildMonthGrid, holidaysInMonth, importantDatesInMonth, isoWeekNumber, lunarDayText, toIsoDate } from '../lib/countdown'
 import useNow from '../hooks/useNow'
 import type { Icon } from '../lib/types'
 import ConfirmButton from './ConfirmButton'
@@ -75,7 +75,7 @@ function Seg<T extends string>({
             'min-h-8 px-3 py-1.5 rounded-full text-xs transition-colors focus-visible:outline-2 focus-visible:outline-white/60 ' +
             (value === o.id
               ? 'bg-white/30 font-medium text-white'
-              : 'bg-white/20 text-white/70 hover:bg-white/30')
+              : 'bg-white/20 text-white/70 hover:bg-white/30 active:bg-white/40')
           }
         >
           {o.label}
@@ -107,7 +107,7 @@ function YearMonthCard({
       type="button"
       onClick={onPick}
       aria-label={`${month + 1}月`}
-      className="rounded-xl p-2 text-left bg-white/[0.03] hover:bg-white/[0.07] transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
+      className="rounded-xl p-2 text-left bg-white/[0.03] hover:bg-white/[0.07] active:bg-white/10 transition-colors focus-visible:outline-2 focus-visible:outline-white/60"
     >
       <div className={`text-xs mb-1.5 ${isCurrentMonth ? 'text-accent font-semibold' : 'text-white/70'}`}>
         {CN_MONTHS[month]}月
@@ -143,9 +143,19 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
   const todayIso = toIsoDate(now)
   const [mode, setMode] = useState<'month' | 'year'>('month')
   const [view, setView] = useState(() => ({ year: now.getFullYear(), month: now.getMonth() }))
+  // 翻页方向:只由 ‹ ›(step)设向;切视图/钻取/归位/编辑进出均无空间语义,
+  // 一律清零落回 pane-in(残留方向会在无关重挂载时朝错误方向误播)
+  const [dir, setDir] = useState<-1 | 0 | 1>(0)
+  const dirAnim = dir === 1 ? 'animate-page-next' : dir === -1 ? 'animate-page-prev' : 'animate-pane-in'
   const holidaysQuery = useHolidays()
 
   const grid = useMemo(() => buildMonthGrid(view.year, view.month), [view.year, view.month])
+
+  // 年刻度(顶部进度行):全年真实毫秒口径(闰年自动);round 后字/条同源一致
+  const yearPct = Math.round(
+    ((now.getTime() - new Date(now.getFullYear(), 0, 1).getTime()) /
+      (new Date(now.getFullYear() + 1, 0, 1).getTime() - new Date(now.getFullYear(), 0, 1).getTime())) * 100,
+  )
 
   // 格标记合成(同 iso 三源合并):休/班(ics)打底、节日名(内置)覆盖副行、
   // 重要日子置琥珀底(同日撞期个人优先;rest 转副行「休」提示不丢)。
@@ -173,20 +183,24 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, view.year, view.month, dayKey, holidaysQuery.data, layout.importantDates])
 
-  const step = (delta: number) =>
+  const step = (delta: -1 | 1) => {
+    setDir(delta)
     setView((v) => {
       if (mode === 'year') return { year: v.year + delta, month: v.month }
       const d = new Date(v.year, v.month + delta, 1)
       return { year: d.getFullYear(), month: d.getMonth() }
     })
+  }
 
   const pickMonth = (mo: number) => {
+    setDir(0)
     setView((v) => ({ ...v, month: mo }))
     setMode('month')
   }
 
   /** 归位当月并切月视图(年视图下点「今天」= 直接跳月视图;已在当月则幂等)。 */
   const goToday = () => {
+    setDir(0)
     setView({ year: now.getFullYear(), month: now.getMonth() })
     setMode('month')
   }
@@ -195,6 +209,7 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
     setErr(null)
     try {
       await save.mutateAsync({ ...layout, importantDates: next })
+      setDir(0)
       setDraft(null)
     } catch {
       setErr('保存失败,请重试')
@@ -250,7 +265,7 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
               <button
                 type="button"
                 onClick={goToday}
-                className="ml-1 min-h-8 px-3 py-1.5 rounded-full bg-white/20 text-xs text-white/85 hover:bg-white/30 transition focus-visible:outline-2 focus-visible:outline-white/60"
+                className="ml-1 min-h-8 px-3 py-1.5 rounded-full bg-white/20 text-xs text-white/85 hover:bg-white/30 active:bg-white/40 transition focus-visible:outline-2 focus-visible:outline-white/60"
               >
                 今天
               </button>
@@ -258,7 +273,7 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
             <div className="flex items-center gap-2">
               <Seg
                 value={mode}
-                onChange={(m) => setMode(m)}
+                onChange={(m) => { setDir(0); setMode(m) }}
                 options={[
                   { id: 'month', label: '月' },
                   { id: 'year', label: '年' },
@@ -267,14 +282,25 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
               <button
                 type="button"
                 onClick={() => { setDraft(emptyDraft); setErr(null) }}
-                className="min-h-8 px-3 py-1.5 rounded-full bg-white/20 text-xs text-white/85 hover:bg-white/30 transition focus-visible:outline-2 focus-visible:outline-white/60"
+                className="min-h-8 px-3 py-1.5 rounded-full bg-white/20 text-xs text-white/85 hover:bg-white/30 active:bg-white/40 transition focus-visible:outline-2 focus-visible:outline-white/60"
               >
                 + 添加
               </button>
             </div>
           </div>
+          {/* 年刻度行(年层标尺,不随 ‹ › 翻页滑):ISO 周数 + 年进度;中性白透明阶,
+              不借休/班绿红与琥珀(色语义专职);分钟心跳已驱动,跨周/跨年自翻 */}
+          <div className="flex items-center gap-3 mb-2 text-[11px] text-white/45">
+            <span className="shrink-0 tabular-nums">第 {isoWeekNumber(now)} 周</span>
+            <div className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
+              <div className="h-full rounded-full bg-white/25" style={{ width: `${yearPct}%` }} />
+            </div>
+            <span className="shrink-0 tabular-nums">已过 {yearPct}%</span>
+          </div>
+          {/* ‹ › 翻页按 dir 方向滑动,切视图/钻取/归位落 pane-in(key 变重挂载
+              重播;旧态瞬消新态淡入,连点不叠双曝) */}
           {mode === 'month' ? (
-            <>
+            <div key={`m${view.year}-${view.month}`} className={dirAnim}>
               <div className="grid grid-cols-7 gap-1 mb-1 text-center text-[11px] text-white/40">
                 {WEEKDAYS.map((w) => (
                   <div key={w} className="py-1">{w}</div>
@@ -298,7 +324,7 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
                       }}
                       className={`relative h-12 rounded-xl transition-colors focus-visible:outline-2 focus-visible:outline-white/60 ${
                         cell.inMonth ? '' : 'opacity-30'
-                      } ${importantId ? `${cellBg(m, cell.weekend)} hover:bg-amber-300/30 cursor-pointer` : cellBg(m, cell.weekend)} ${
+                      } ${importantId ? `${cellBg(m, cell.weekend)} hover:bg-amber-300/30 active:bg-amber-300/40 cursor-pointer` : cellBg(m, cell.weekend)} ${
                         cell.iso === todayIso ? 'ring-1 ring-accent font-semibold' : ''
                       }`}
                     >
@@ -321,9 +347,9 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
                   )
                 })}
               </div>
-            </>
+            </div>
           ) : (
-            <div className="grid grid-cols-4 gap-2">
+            <div key={`y${view.year}`} className={`${dirAnim} grid grid-cols-4 gap-2`}>
               {Array.from({ length: 12 }, (_, mo) => (
                 <YearMonthCard
                   key={mo}
@@ -339,7 +365,7 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
           )}
         </>
       ) : (
-        <div className="max-w-sm mx-auto">
+        <div className="animate-pane-in max-w-sm mx-auto">
           <div className="text-sm font-semibold mb-3 pr-10">{draft.id ? '编辑重要日子' : '添加重要日子'}</div>
           <div className="space-y-3">
             <input
@@ -432,8 +458,8 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
             </button>
             <button
               type="button"
-              onClick={() => { setDraft(null); setErr(null) }}
-              className="min-h-8 px-4 py-1.5 rounded-full bg-white/20 text-white/85 hover:bg-white/30 transition focus-visible:outline-2 focus-visible:outline-white/60"
+              onClick={() => { setDir(0); setDraft(null); setErr(null) }}
+              className="min-h-8 px-4 py-1.5 rounded-full bg-white/20 text-white/85 hover:bg-white/30 active:bg-white/40 transition focus-visible:outline-2 focus-visible:outline-white/60"
             >
               取消
             </button>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildMonthGrid, describeDays, getAllCountdowns, getCountdowns, holidaysInMonth, importantDatesInMonth, lunarDayText, toIsoDate } from './countdown'
+import { buildMonthGrid, describeDays, getAllCountdowns, getCountdowns, holidaysInMonth, importantDatesInMonth, isoWeekNumber, lunarDayText, toIsoDate } from './countdown'
 import type { ImportantDate } from 'chrome-tab-shared'
 
 // 对拍基准:农历节日公历日期已用 lunar-typescript 实测核对(2026/2027 两年),
@@ -166,6 +166,13 @@ describe('日历月视图(ADR-0054):当月内实例化,区别于「下一次出�
     expect(grid[5]).toMatchObject({ iso: '2026-09-05', weekend: true }) // 周六
     expect(grid[41]).toMatchObject({ iso: '2026-10-11', day: 11, inMonth: false, weekend: true }) // 周日
     expect(grid[1]!.date).toEqual(new Date(2026, 8, 1)) // 本地 Date 随格透传(副行农历用)
+  })
+
+  it('isoWeekNumber:周四定年,跨年归属按 ISO(1-1 属上年初、12 月末可属下年 W1)', () => {
+    expect(isoWeekNumber(new Date(2026, 0, 1))).toBe(1) // 1-1 恰周四 = W1 起点日
+    expect(isoWeekNumber(new Date(2026, 8, 3))).toBe(36) // 当日(2026-09-03,周四)
+    expect(isoWeekNumber(new Date(2026, 11, 31))).toBe(53) // 1-1 是周四的年有 53 个 ISO 周
+    expect(isoWeekNumber(new Date(2024, 11, 30))).toBe(1) // 2024-12-30(周一)已属 2025 W1
   })
 
   it('lunarDayText:节气日显节气名,否则农历日(「二十/廿一」形态;与参考图对拍)', () => {
