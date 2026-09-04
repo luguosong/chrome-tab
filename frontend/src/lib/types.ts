@@ -1,24 +1,10 @@
 export type Me = { id: number; username: string }
 
 // ── 新模型（Icon/Page,见 CONTEXT.md / ADR-0001）──────────────────────────
-/**
- * 图标类型 id,对齐后端 IconType 枚举(小写串)。后端 Jackson 默认序列化为大写
- * ("NAV"/"STOCK"/"CHANGELOG"),前端在 config.ts 解析时归一化为小写,使注册表查询干净。
- */
-export type IconTypeId =
-  | 'nav'
-  | 'stock'
-  | 'changelog'
-  | 'weather'
-  | 'aihot'
-  | 'todo'
-  | 'video'
-  | 'model'
-  | 'news'
-  | 'trending'
-  | 'servers'
-  | 'countdown'
-  | 'group'
+// 图标类型身份(IconTypeId/IconWireType)与跨度(IconSpan)移驻 shared 单源(ADR-0057),
+// 此处 re-export 保住既有引用方;wire 大写→小写归一化见 config.ts fromWireType。
+import type { IconSpan, IconTypeId, IconWireType, LayoutSettings, SearchEngineId } from 'chrome-tab-shared'
+export type { IconSpan, IconTypeId, IconWireType, LayoutSettings, SearchEngineId }
 
 /** 走马灯一屏:图标的容器(见 CONTEXT.md「页面」)。 */
 export type Page = { id: number; name: string; sortOrder: number }
@@ -33,10 +19,6 @@ export type Icon = {
   sortOrder: number
   data: Record<string, unknown> | null
 }
-
-// 双端契约类型移驻 shared(workspace 包,直引 TS 源零构建);此处 re-export 保住既有引用方。
-import type { LayoutSettings, SearchEngineId } from 'chrome-tab-shared'
-export type { LayoutSettings, SearchEngineId }
 
 /** GET /api/config 聚合响应。03 ticket 后:旧字段 navLinks/stockWatches/setting 已删除;
  *  新模型为 pages/icons,布局设置经 layoutSettings 下发。updatedAt 为整体配置版本(ADR-0006),

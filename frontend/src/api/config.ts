@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from './client'
+import { fromWireType, toWireType } from 'chrome-tab-shared'
 import type { Config, Icon, IconTypeId, LayoutSettings, Page } from '../lib/types'
 import { moveIcon, type MoveAction } from '../lib/iconReducer'
 import { dissolveGroup, mergeIcons, moveIntoGroup, type MergeAction } from '../lib/groupReducer'
@@ -28,7 +29,7 @@ type RawConfig = Omit<Config, 'icons'> & {
 function normalizeIcon(i: RawConfig['icons'][number]): Icon {
   return {
     ...i,
-    type: i.type.toLowerCase() as IconTypeId,
+    type: fromWireType(i.type),
   }
 }
 
@@ -239,7 +240,7 @@ export function useCreateIcon() {
         method: 'POST',
         body: JSON.stringify({
           pageId: body.pageId,
-          type: body.type.toUpperCase(),
+          type: toWireType(body.type),
           data: body.data,
         }),
       }),

@@ -15,7 +15,7 @@ describe('内置类型登记', () => {
   it('trending 登记为中文词条「GitHub 趋势」的单例 3×2(CONTEXT.md 词条;_Avoid_: trending 上游端点名)', () => {
     expect(get('trending')?.label).toBe('GitHub 趋势')
     expect(get('trending')?.singleton).toBe(true)
-    expect(get('trending')?.size).toEqual({ w: 3, h: 2 })
+    expect(get('trending')?.span).toEqual({ w: 3, h: 2 })
   })
 
   it('nav editor:url 先行(自动加载触发器)+ name + 可选 icon 覆盖', () => {
@@ -92,11 +92,11 @@ describe('AI 热点类型 aihot(单例,CONTEXT.md「AI 热点」)', () => {
   })
 
   it('声明跨格 size(ADR-0021):aihot/changelog/todo 3×2,其余不声明(weather 曾 3×1,2026-09-01 收回 1×1)', () => {
-    expect(get('aihot')?.size).toEqual({ w: 3, h: 2 })
-    expect(get('changelog')?.size).toEqual({ w: 3, h: 2 })
-    expect(get('todo')?.size).toEqual({ w: 3, h: 2 })
+    expect(get('aihot')?.span).toEqual({ w: 3, h: 2 })
+    expect(get('changelog')?.span).toEqual({ w: 3, h: 2 })
+    expect(get('todo')?.span).toEqual({ w: 3, h: 2 })
     for (const t of ['nav', 'stock', 'weather', 'group'] as const) {
-      expect(get(t)?.size).toBeUndefined()
+      expect(get(t)?.span).toBeUndefined()
     }
   })
 
@@ -123,7 +123,7 @@ describe('模型追踪类型 model(单例,issues/01;CONTEXT.md「模型追踪」
   })
 
   it('固定占 3×2 跨格(ADR-0021);无实例参数(单例,data 无字段)', () => {
-    expect(get('model')?.size).toEqual({ w: 3, h: 2 })
+    expect(get('model')?.span).toEqual({ w: 3, h: 2 })
     expect(iconCells('model')).toBe(6)
     expect(get('model')?.editor).toEqual([])
   })
@@ -142,7 +142,7 @@ describe('新闻类型 news(单例;CONTEXT.md「新闻」,ADR-0027)', () => {
   })
 
   it('固定占 3×2 跨格(ADR-0021);无实例参数(勾选是账号级后端数据,不进 data)', () => {
-    expect(get('news')?.size).toEqual({ w: 3, h: 2 })
+    expect(get('news')?.span).toEqual({ w: 3, h: 2 })
     expect(iconCells('news')).toBe(6)
     expect(get('news')?.editor).toEqual([])
   })
@@ -161,7 +161,7 @@ describe('倒计时类型 countdown(单例;CONTEXT.md「倒计时」)', () => {
   })
 
   it('1×1 不声明 size;无实例参数(重要日子寄放布局设置,ADR-0026,不进 data)', () => {
-    expect(get('countdown')?.size).toBeUndefined()
+    expect(get('countdown')?.span).toBeUndefined()
     expect(iconCells('countdown')).toBe(1)
     expect(get('countdown')?.editor).toEqual([])
   })

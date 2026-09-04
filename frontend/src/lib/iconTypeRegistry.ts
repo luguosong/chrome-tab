@@ -1,19 +1,18 @@
-import { DEFAULT_CHANGELOG_SOURCE } from 'chrome-tab-shared'
-import type { IconTypeId } from './types'
+import { DEFAULT_CHANGELOG_SOURCE, ICON_TYPE_META } from 'chrome-tab-shared'
+import type { IconSpan, IconTypeId } from './types'
 
 /**
  * 图标类型元数据表(见 CONTEXT.md「图标类型」/ ADR-0001)。
  *
- * 本模块只存 DOM-free 静态元数据(label/kind/singleton/editor/size)与纯查询函数,
- * 可 Vitest 纯函数测试;图标块/详情 renderer 与详情入口策略由静态全覆盖 UI adapter
+ * 本模块只存前端专属 DOM-free 静态元数据(label/kind/editor)与纯查询函数,
+ * 可 Vitest 纯函数测试;span/singleton 单源自 shared ICON_TYPE_META 展开至此
+ * (ADR-0057,条目 `...ICON_TYPE_META.<id>` spread,双份手写漂移源已消灭);
+ * 图标块/详情 renderer 与详情入口策略由静态全覆盖 UI adapter
  * (components/iconTypeUi.tsx)持有,两模块分工见 ADR-0001 注记。表为
  * `Record<IconTypeId, …>` 静态全覆盖——新增类型漏登记时类型检查即失败(同 adapter)。
- * 图标默认占 1 格;类型可声明 size 跨格(ADR-0021,渲染层 CSS grid span,位置仍是纯顺序流)。
+ * 图标默认占 1 格;类型可声明 span 跨格(ADR-0021,渲染层 CSS grid span,位置仍是纯顺序流)。
  */
 export type IconTypeKind = 'base' | 'extension' | 'group'
-
-/** 画格跨度(ADR-0021):w 列 × h 行,缺省 1×1。渲染层据此 span,容量按 w×h 计。 */
-export type IconSpan = { w: number; h: number }
 
 /** 配置表单字段声明(新增抽屉用,09 ticket 实现表单本身)。 */
 export type EditorField =
@@ -33,7 +32,7 @@ export interface IconTypeDefinition {
   singleton: boolean
   editor: EditorField[]
   /** 画格跨度(ADR-0021):缺省(不声明)= 1×1。跨格类型的位置仍是顺序流,CSS span 排布。 */
-  size?: IconSpan
+  span?: IconSpan
 }
 
 // ── 类型表(键序 = 新增抽屉分区渲染顺序:基础先于扩展,内置 nav/stock/changelog 稳定)──
@@ -45,7 +44,7 @@ const REGISTRY: Record<IconTypeId, IconTypeDefinition> = {
     id: 'nav',
     label: '网站链接',
     kind: 'base',
-    singleton: false,
+    ...ICON_TYPE_META.nav,
     editor: [
       { name: 'url', label: '网址', placeholder: 'https://…' },
       { name: 'name', label: '名称', placeholder: '名称' },
@@ -58,7 +57,7 @@ const REGISTRY: Record<IconTypeId, IconTypeDefinition> = {
     id: 'stock',
     label: '自选股',
     kind: 'extension',
-    singleton: false,
+    ...ICON_TYPE_META.stock,
     editor: [
       { name: 'symbol', label: '符号', placeholder: '搜索或输代码,如 茅台 / usAAPL' },
       { name: 'name', label: '名称', placeholder: '名称' },
@@ -72,8 +71,7 @@ const REGISTRY: Record<IconTypeId, IconTypeDefinition> = {
     id: 'changelog',
     label: '更新日志',
     kind: 'extension',
-    singleton: false,
-    size: { w: 3, h: 2 },
+    ...ICON_TYPE_META.changelog,
     editor: [
       {
         name: 'source',
@@ -92,7 +90,7 @@ const REGISTRY: Record<IconTypeId, IconTypeDefinition> = {
     id: 'weather',
     label: '天气',
     kind: 'extension',
-    singleton: false,
+    ...ICON_TYPE_META.weather,
     editor: [{ name: 'location', label: '城市', placeholder: '搜索城市' }],
   },
 
@@ -103,8 +101,7 @@ const REGISTRY: Record<IconTypeId, IconTypeDefinition> = {
     id: 'aihot',
     label: 'AI 热点',
     kind: 'extension',
-    singleton: true,
-    size: { w: 3, h: 2 },
+    ...ICON_TYPE_META.aihot,
     editor: [{ name: 'name', label: '名称', placeholder: '名称(默认 AI 热点)' }],
   },
 
@@ -116,8 +113,7 @@ const REGISTRY: Record<IconTypeId, IconTypeDefinition> = {
     id: 'todo',
     label: '待办',
     kind: 'extension',
-    singleton: true,
-    size: { w: 3, h: 2 },
+    ...ICON_TYPE_META.todo,
     editor: [],
   },
 
@@ -130,8 +126,7 @@ const REGISTRY: Record<IconTypeId, IconTypeDefinition> = {
     id: 'video',
     label: '视频更新',
     kind: 'extension',
-    singleton: true,
-    size: { w: 3, h: 2 },
+    ...ICON_TYPE_META.video,
     editor: [],
   },
 
@@ -144,8 +139,7 @@ const REGISTRY: Record<IconTypeId, IconTypeDefinition> = {
     id: 'model',
     label: '模型追踪',
     kind: 'extension',
-    singleton: true,
-    size: { w: 3, h: 2 },
+    ...ICON_TYPE_META.model,
     editor: [],
   },
 
@@ -159,8 +153,7 @@ const REGISTRY: Record<IconTypeId, IconTypeDefinition> = {
     id: 'news',
     label: '新闻',
     kind: 'extension',
-    singleton: true,
-    size: { w: 3, h: 2 },
+    ...ICON_TYPE_META.news,
     editor: [],
   },
 
@@ -174,8 +167,7 @@ const REGISTRY: Record<IconTypeId, IconTypeDefinition> = {
     id: 'trending',
     label: 'GitHub 趋势',
     kind: 'extension',
-    singleton: true,
-    size: { w: 3, h: 2 },
+    ...ICON_TYPE_META.trending,
     editor: [],
   },
 
@@ -189,8 +181,7 @@ const REGISTRY: Record<IconTypeId, IconTypeDefinition> = {
     id: 'servers',
     label: '服务器',
     kind: 'extension',
-    singleton: true,
-    size: { w: 3, h: 2 },
+    ...ICON_TYPE_META.servers,
     editor: [],
   },
 
@@ -203,7 +194,7 @@ const REGISTRY: Record<IconTypeId, IconTypeDefinition> = {
     id: 'countdown',
     label: '倒计时',
     kind: 'extension',
-    singleton: true,
+    ...ICON_TYPE_META.countdown,
     editor: [],
   },
 
@@ -216,7 +207,7 @@ const REGISTRY: Record<IconTypeId, IconTypeDefinition> = {
     id: 'group',
     label: '分组',
     kind: 'group',
-    singleton: false,
+    ...ICON_TYPE_META.group,
     editor: [],
   },
 }
@@ -229,12 +220,12 @@ export function get(typeId: IconTypeId): IconTypeDefinition | undefined {
 }
 
 /**
- * 图标占用的画格数(ADR-0021):声明 size 的类型 = w×h,其余 1(undefined = 最小调用
+ * 图标占用的画格数(ADR-0021):声明 span 的类型 = w×h,其余 1(undefined = 最小调用
  * 形态无 type,按 1 格)。容量计算(iconCapacity.cellsUsed / 后端 requireCapacity)
  * 与拖拽预校验共用本口径。纯函数 —— 直接 Vitest 断言。
  */
 export function iconCells(typeId: IconTypeId | undefined): number {
-  const s = typeId === undefined ? undefined : REGISTRY[typeId]?.size
+  const s = typeId === undefined ? undefined : REGISTRY[typeId]?.span
   return s ? s.w * s.h : 1
 }
 

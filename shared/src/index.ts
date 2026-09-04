@@ -209,6 +209,7 @@ export type ModelPendingClue = {
   url: string
 }
 
+export * from './iconTypes'
 export * from './changelogSources'
 export * from './newsSources'
 export * from './trending'

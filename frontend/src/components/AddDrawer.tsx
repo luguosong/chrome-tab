@@ -138,7 +138,7 @@ function TypeCard({
   const noPage = pageId === undefined
   const missing = missingRequiredText(def.editor, values)
   // 格数徽标取真实画格跨度(ADR-0021:缺省 1×1)——加块前告知占地
-  const span = def.size ?? { w: 1, h: 1 }
+  const span = def.span ?? { w: 1, h: 1 }
   return (
     <form onSubmit={submit} className="glass-soft rounded-2xl p-4 space-y-3">
       <div className="flex items-center justify-between">

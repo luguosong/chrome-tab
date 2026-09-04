@@ -1,3 +1,4 @@
+import { toWireType, type IconWireType } from 'chrome-tab-shared'
 import type { Config, LayoutSettings } from '../types'
 
 /**
@@ -41,7 +42,7 @@ export function toWireConfig(c: Config): WireConfig {
       id: i.id,
       pageId: i.pageId,
       parentId: i.parentId,
-      type: i.type.toUpperCase(),
+      type: toWireType(i.type),
       sortOrder: i.sortOrder,
       data: i.data,
     })),
@@ -109,7 +110,7 @@ export function mergeBlobs(current: Config, imported: WireConfig): WireConfig {
     id: i.id,
     pageId: i.pageId,
     parentId: i.parentId,
-    type: i.type.toUpperCase(),
+    type: toWireType(i.type),
     sortOrder: i.sortOrder,
     data: i.data,
   }))
@@ -132,7 +133,10 @@ export function mergeBlobs(current: Config, imported: WireConfig): WireConfig {
       id: iconRemap.get(i.id)!,
       pageId: pid,
       parentId: newParent,
-      type: i.type.toUpperCase(),
+      // 导入行 type 已是 wire 大写(string,未经白名单校验);toUpperCase 是防御性
+      // 透传(旧备份小写也能救),非 toWireType 的「小写 id → 大写」转换,故不换。
+      // as 与 fromWireType 同哲学:导入文件是外部数据,编译器信 wire 契约、后端白名单兜底。
+      type: i.type.toUpperCase() as IconWireType,
       sortOrder: i.sortOrder,
       data: i.data,
     })

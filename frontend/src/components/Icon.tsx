@@ -89,8 +89,8 @@ export default function Icon({
       : null),
     // 跨格尺寸(ADR-0021):声明 size 的类型 span 多列/行,位置仍是顺序流——CSS grid
     // 自动把后续图标排到跨格块之后。overlay 幽灵在画格外,不 span。
-    ...(!overlay && def?.size
-      ? { gridColumn: `span ${def.size.w}`, gridRow: `span ${def.size.h}` }
+    ...(!overlay && def?.span
+      ? { gridColumn: `span ${def.span.w}`, gridRow: `span ${def.span.h}` }
       : null),
   }
 

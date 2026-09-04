@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { ICON_TYPE_META, toWireType, type IconTypeId, type IconWireType } from 'chrome-tab-shared'
 import type { AuthEnv } from './auth'
 import { asRec, BadRequest, ConflictError, field, numericParam, optInt, optNullableInt, reqInt, jsonBody, touchVersion } from './common'
 import type { Db } from './db'
@@ -14,12 +15,25 @@ import type { Db } from './db'
 /** 页面容量 = 每页顶层格数上限(ADR-0002/0016;9×9=81,ADR-0021;config 全量替换校验复用)。 */
 export const CAPACITY_CELLS = 81
 
+/** icon type 大写枚举 wire(config 全量替换校验复用);单源自 shared 派生(ADR-0057)。 */
+type IconType = IconWireType
+
+const META_IDS = Object.keys(ICON_TYPE_META) as IconTypeId[]
+
+export const ICON_TYPES: readonly IconType[] = META_IDS.map(toWireType)
+
 /**
- * 跨格类型格数(ADR-0021,对齐前端注册表 size):AIHOT/CHANGELOG/TODO 3×2=6 格,
- * WEATHER 3×1=3 格(首个非 3×2 跨格),其余缺省 1 格。
+ * 跨格类型格数(ADR-0021)——自 shared ICON_TYPE_META 的 span 派生(ADR-0057):
+ * 容量口径只看格数(w×h,有意丢弃方向——1×6 与 6×1 同占 6 格),缺 span = 1 格。
+ * weather 随前端 2026-09-01 收回 1×1 同步回落(此前手写表按 3 格误收,失步实证见 ADR)。
  * 容量口径唯一来源——requireCapacity/dissolve/POST/move/blob 全量替换共用。
  */
-export const TYPE_SPANS: Partial<Record<IconType, number>> = { AIHOT: 6, CHANGELOG: 6, TODO: 6, VIDEO: 6, MODEL: 6, NEWS: 6, TRENDING: 6, SERVERS: 6, WEATHER: 3 }
+export const TYPE_SPANS: Partial<Record<IconType, number>> = Object.fromEntries(
+  META_IDS.flatMap((id) => {
+    const { span } = ICON_TYPE_META[id]
+    return span ? ([[toWireType(id), span.w * span.h]] as const) : []
+  }),
+)
 
 /** 类型格数:未声明 = 1。 */
 export const spanOf = (type: string): number =>
@@ -31,12 +45,12 @@ const cellsOf = (rows: ReadonlyArray<{ type: string }>): number => {
   for (const r of rows) sum += spanOf(r.type)
   return sum
 }
-/** icon type 大写枚举 wire(config 全量替换校验复用)。 */
-export const ICON_TYPES = ['NAV', 'STOCK', 'CHANGELOG', 'WEATHER', 'AIHOT', 'TODO', 'VIDEO', 'MODEL', 'NEWS', 'TRENDING', 'SERVERS', 'COUNTDOWN', 'GROUP'] as const
-type IconType = (typeof ICON_TYPES)[number]
 
-/** 单例类型(见 CONTEXT.md「单例类型」):全局仅一个实例,新增/全量替换两入口同校验。 */
-export const SINGLETON_TYPES: readonly IconType[] = ['AIHOT', 'TODO', 'VIDEO', 'MODEL', 'NEWS', 'TRENDING', 'SERVERS', 'COUNTDOWN']
+/** 单例类型(见 CONTEXT.md「单例类型」)——自 shared 派生(ADR-0057):全局仅一个实例,
+ *  新增/全量替换两入口同校验。 */
+export const SINGLETON_TYPES: readonly IconType[] = META_IDS.filter(
+  (id) => ICON_TYPE_META[id].singleton,
+).map(toWireType)
 
 type IconRow = {
   id: number
