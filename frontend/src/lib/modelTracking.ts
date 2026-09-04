@@ -323,3 +323,24 @@ export function codingLeaderboard(models: TrackedModel[]): LeaderboardRow[] {
     .sort((a, b) => b.codingIndex - a.codingIndex || a.model.id - b.model.id)
     .map((row, i) => ({ ...row, rank: i + 1 }))
 }
+
+/**
+ * 跑分榜行内明细行(ADR-0035):明细 benchmark 按 LEADERBOARD_DETAIL_BENCHMARKS 固定
+ * 顺序拼一行(标签 + 分数,缺评测显「-」,不参与排序),以「 · 」连接;**全部缺失返回
+ * null**(整行明细不显)——显隐决策与拼装同居 lib 可直测(2026-09-04 评审候选 4 前
+ * 住组件未测层)。分数格式沿用 formatEvaluationScore 三态,与排序键 codingLeaderboard
+ * 同文件(「跑分榜一行怎么拼出来」单文件可读)。
+ */
+export function leaderboardDetailLine(model: TrackedModel): string | null {
+  const details = LEADERBOARD_DETAIL_BENCHMARKS.map((b) => ({
+    benchmark: b,
+    hit: model.evaluations.find((e) => e.benchmark === b),
+  }))
+  if (!details.some((d) => d.hit !== undefined)) return null
+  return details
+    .map(
+      (d) =>
+        `${benchmarkLabel(d.benchmark)} ${d.hit ? formatEvaluationScore(d.benchmark, d.hit.score) : '-'}`,
+    )
+    .join(' · ')
+}

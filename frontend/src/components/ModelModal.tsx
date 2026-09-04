@@ -9,27 +9,22 @@ import { useModelArchive } from '../hooks/useModelArchive'
 import { paneState } from '../lib/detailModalState'
 import { timeAgo } from '../lib/timeAgo'
 import DetailModal, { Chip, QueryPane } from './DetailModal'
+import LeaderboardPanel from './LeaderboardPanel'
 import {
   AVAILABILITY_LABELS,
-  CODING_INDEX_BENCHMARK,
   EVALUATION_ATTRIBUTION,
   EVENT_KIND_LABELS,
-  LEADERBOARD_DETAIL_BENCHMARKS,
   MODEL_KIND_COLOR_CLASSES,
   MODEL_KIND_LABELS,
   PROVIDER_LABELS,
   STAGE_LABELS,
   benchmarkLabel,
-  codingLeaderboard,
   compareModelsByRelease,
   formatReleaseBrief,
   formatModelPricing,
   formatEvaluationScore,
   isFreshModelEvent,
-  PROVIDER_ACCENT_COLORS,
-  PROVIDER_LOGO_DOMAINS,
 } from '../lib/modelTracking'
-import { faviconUrl } from '../lib/iconData'
 
 /**
  * 模型追踪详情 Modal(见 CONTEXT.md「模型追踪」,ADR-0022「更多」标头唯一入口):
@@ -442,113 +437,6 @@ function EvaluationCard({
           </li>
         ))}
       </ul>
-    </div>
-  )
-}
-
-/**
- * 跑分榜(ADR-0035,CONTEXT.md「评测结果」边界):档案内带 AA 编程指数的模型按该
- * 原生指数降序——评测方自己的聚合,我方只做已存分数的原样排序视图,非自制综合分;
- * 全量列出不截 top-N(截断线会随 AA 覆盖漂移)。行内跟编程类明细 benchmark(固定
- * 顺序,缺评测显「-」,不参与排序);归因链接卡头挂一次(AA 免费 API 使用条款);
- * 只读——不展开模型行、无种类过滤,数据与厂家 tab 同源(同一份 archive 快照)。
- */
-function LeaderboardPanel({
-  models,
-  status,
-}: {
-  models: TrackedModel[]
-  status: ModelEvaluationsStatus
-}) {
-  if (!status.configured) {
-    return (
-      <div className="text-meta text-white/50 py-6 text-center">
-        评测:未配置({EVALUATION_ATTRIBUTION.label} Key)
-      </div>
-    )
-  }
-  const rows = codingLeaderboard(models)
-  if (rows.length === 0) {
-    return <div className="text-meta text-white/50 py-6 text-center">暂无跑分数据</div>
-  }
-  const presentProviders = [...new Set(models.map((m) => m.provider))]
-  return (
-    <div>
-      {/* 厂家识别图例:logo + 着色厂名建立「颜色↔厂商」字典(色即分组轴,数值列一律中性白)。 */}
-      <div className="text-meta flex items-center gap-x-3 gap-y-1 flex-wrap pb-1.5">
-        {presentProviders.map((p) => (
-          <span key={p} className="flex items-center gap-1.5">
-            <img
-              src={faviconUrl(`https://${PROVIDER_LOGO_DOMAINS[p]}`)}
-              alt=""
-              loading="lazy"
-              onError={(e) => (e.currentTarget.style.visibility = 'hidden')}
-              className="w-3.5 h-3.5 shrink-0 rounded-[4px] ring-1 ring-white/15"
-            />
-            <span style={{ color: PROVIDER_ACCENT_COLORS[p] }}>{PROVIDER_LABELS[p]}</span>
-          </span>
-        ))}
-      </div>
-      <div className="text-meta text-white/45 flex items-baseline gap-2 flex-wrap pb-1.5">
-        <span>{rows.length} 个模型</span>
-        <span>· 按{benchmarkLabel(CODING_INDEX_BENCHMARK)}降序</span>
-        <a
-          href={EVALUATION_ATTRIBUTION.url}
-          target="_blank"
-          rel="noreferrer"
-          className="underline underline-offset-2 hover:text-accent"
-        >
-          {EVALUATION_ATTRIBUTION.label}
-        </a>
-        {status.stale && <span className="text-white/40">(同步失败,展示最近快照)</span>}
-      </div>
-      <ol className="space-y-1">
-        {rows.map(({ model, rank, codingIndex }) => {
-          const details = LEADERBOARD_DETAIL_BENCHMARKS.map((b) => ({
-            benchmark: b,
-            hit: model.evaluations.find((e) => e.benchmark === b),
-          }))
-          return (
-            <li key={model.id} className="rounded-xl px-3 py-2.5 hover:bg-white/10 active:bg-white/20 transition">
-              <div className="flex items-baseline gap-2 min-w-0">
-                <span className="w-6 shrink-0 text-right font-mono text-accent text-sm">{rank}</span>
-                <span
-                  className="min-w-0 flex-1 flex items-center gap-1.5 text-sm"
-                  style={{ color: PROVIDER_ACCENT_COLORS[model.provider] }}
-                >
-                  <img
-                    src={faviconUrl(`https://${PROVIDER_LOGO_DOMAINS[model.provider]}`)}
-                    alt=""
-                    loading="lazy"
-                    onError={(e) => (e.currentTarget.style.visibility = 'hidden')}
-                    className="w-4 h-4 shrink-0 rounded-[4px] ring-1 ring-white/15"
-                  />
-                  <span className="truncate">{model.name}</span>
-                </span>
-                <span
-                  className="shrink-0 text-meta"
-                  style={{ color: `${PROVIDER_ACCENT_COLORS[model.provider]}88` }}
-                >
-                  {PROVIDER_LABELS[model.provider]}
-                </span>
-                <span className="w-12 shrink-0 text-right font-mono text-white/95">
-                  {formatEvaluationScore(CODING_INDEX_BENCHMARK, codingIndex)}
-                </span>
-              </div>
-              {details.some((d) => d.hit !== undefined) && (
-                <div className="pl-8 mt-0.5 text-meta text-white/45 truncate">
-                  {details
-                    .map(
-                      (d) =>
-                        `${benchmarkLabel(d.benchmark)} ${d.hit ? formatEvaluationScore(d.benchmark, d.hit.score) : '-'}`,
-                    )
-                    .join(' · ')}
-                </div>
-              )}
-            </li>
-          )
-        })}
-      </ol>
     </div>
   )
 }

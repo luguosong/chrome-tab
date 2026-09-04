@@ -16,6 +16,7 @@ import {
   formatLatestEventBrief,
   formatReleaseBrief,
   isFreshModelEvent,
+  leaderboardDetailLine,
   modelEventAnchorMs,
 } from './modelTracking'
 
@@ -298,5 +299,34 @@ describe('模型追踪:跑分榜派生(ADR-0035)', () => {
       mkModel(i + 1, { evaluations: [ev(CODING_INDEX_BENCHMARK, 50 - i)] }),
     )
     expect(codingLeaderboard(models)).toHaveLength(25)
+  })
+
+  it('明细行:固定顺序、缺评测显「-」;全部缺失返回 null(「整行不显」的显隐决策,此前住组件未测层)', () => {
+    // 部分缺:顺序恒为 LEADERBOARD_DETAIL_BENCHMARKS 定义序,缺位「-」
+    const partial = mkModel(1, {
+      evaluations: [ev('livecodebench', 0.72), ev('terminalbench_v2_1', 0.55)],
+    })
+    expect(leaderboardDetailLine(partial)).toBe(
+      'Terminal-Bench v2.1 55.0% · Terminal-Bench Hard - · LiveCodeBench 72.0%',
+    )
+    // 无任何评测 → null
+    expect(leaderboardDetailLine(mkModel(2))).toBeNull()
+    // 有评测但明细位全不命中(仅编程指数)→ 同样 null,不产全「-」行
+    expect(
+      leaderboardDetailLine(mkModel(3, { evaluations: [ev(CODING_INDEX_BENCHMARK, 60)] })),
+    ).toBeNull()
+  })
+
+  it('明细分数格式随基准类型(比例型转百分比一位小数),整行强钉防格式漂移', () => {
+    const full = mkModel(1, {
+      evaluations: [
+        ev('terminalbench_v2_1', 0.987),
+        ev('terminalbench_hard', 0.812),
+        ev('livecodebench', 0.703),
+      ],
+    })
+    expect(leaderboardDetailLine(full)).toBe(
+      'Terminal-Bench v2.1 98.7% · Terminal-Bench Hard 81.2% · LiveCodeBench 70.3%',
+    )
   })
 })
