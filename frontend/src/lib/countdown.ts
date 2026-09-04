@@ -277,3 +277,109 @@ export function importantDatesInMonth(
   }
   return out.sort((a, b) => a.date.getDate() - b.date.getDate())
 }
+
+// ── 日历格语义(ADR-0056):三源合并与逐格决策单点,组件只做渲染映射 ────────────
+
+/** 格标记:三源(ics 休/班、内置节日、重要日子)按 iso 合并的中间形态。同格撞期
+ *  三字段共存、互不覆盖——谁赢由 cellModel 的优先级定,合并不预判。 */
+export type CellMark = {
+  /** 法定休(ics 上游)。 */
+  rest?: boolean
+  /** 法定补班(ics 上游,多落周末)。 */
+  work?: boolean
+  /** 内置节日名(副行最高优先)。 */
+  holiday?: string
+  /** 重要日子 id(琥珀底 + 可点编辑的判据)。 */
+  importantId?: string
+}
+
+/** 三源格标记:ics 全量平铺直接入 map(~500 条),内置节日与重要日子按 months
+ *  铺开当月实例化(月视图 [当月]、年视图 0..11)。 */
+export function buildCellMarks(
+  icsDays: ReadonlyArray<{ date: string; kind: 'rest' | 'work' }>,
+  year: number,
+  months: number[],
+  importantDates: ImportantDate[],
+): Map<string, CellMark> {
+  const map = new Map<string, CellMark>()
+  for (const d of icsDays) {
+    const m = map.get(d.date) ?? {}
+    if (d.kind === 'rest') m.rest = true
+    else m.work = true
+    map.set(d.date, m)
+  }
+  for (const mo of months) {
+    for (const h of holidaysInMonth(year, mo)) {
+      const iso = toIsoDate(h.date)
+      map.set(iso, { ...map.get(iso), holiday: h.name })
+    }
+    for (const i of importantDatesInMonth(importantDates, year, mo)) {
+      const iso = toIsoDate(i.date)
+      map.set(iso, { ...map.get(iso), importantId: i.id })
+    }
+  }
+  return map
+}
+
+/** 日历格渲染语义(对齐 klineChartModel 先例:lib 出模型、组件映射)。底色四层链
+ *  与副行/角标优先级是 2026-09-03 用户三轮定案的载体——回归护栏打在此处。 */
+export interface CellView {
+  /** 格底色 tailwind class:重要日子琥珀 > 法定休深绿 > 补班红 > 周末淡绿 > 常规。 */
+  bg: string
+  /** 副行文本:节日名 > 节气/农历日(与 lunarDayText 同源)。 */
+  subline: string
+  /** 右上角标(法定安排):休/班/无。 */
+  corner: 'rest' | 'work' | null
+  /** 可点性 = 有重要日子(编辑入口全局唯一在格点击,ADR-0043)。 */
+  clickable: boolean
+}
+
+export function cellModel(cell: CalendarCell, mark: CellMark | undefined): CellView {
+  return {
+    bg: mark?.importantId
+      ? 'bg-amber-300/15'
+      : mark?.rest
+        ? 'bg-emerald-500/20'
+        : mark?.work
+          ? 'bg-red-400/10'
+          : cell.weekend
+            ? 'bg-emerald-300/10'
+            : 'bg-white/[0.04]',
+    // 惰性:年壁迷你点只取 bg,12 卡 × 42 点不推农历(月历大格读时才算)
+    get subline() {
+      return mark?.holiday ?? lunarDayText(cell.date)
+    },
+    corner: mark?.rest ? 'rest' : mark?.work ? 'work' : null,
+    clickable: !!mark?.importantId,
+  }
+}
+
+/** 重要日子编辑草稿(倒计时 Modal 表单态;id null = 新增)。 */
+export type ImportantDateDraft = {
+  id: string | null
+  name: string
+  calendar: 'solar' | 'lunar'
+  repeat: 'annual' | 'once'
+  year: string
+  month: string
+  day: string
+}
+
+/** 草稿校验与成形:错误文案与表单直显一致。annual 年份占位 2000(解析忽略);农历
+ *  月日不查历表——非法组合在倒计时侧静默跳过(同 nextUserDate 口径)。 */
+export function draftToImportantDate(
+  draft: ImportantDateDraft,
+): { ok: true; item: ImportantDate } | { ok: false; error: string } {
+  const name = draft.name.trim()
+  const m = Number(draft.month)
+  const day = Number(draft.day)
+  if (!name) return { ok: false, error: '名称不能为空' }
+  if (!Number.isInteger(m) || m < 1 || m > 12 || !Number.isInteger(day) || day < 1 || day > 31)
+    return { ok: false, error: '日期不完整' }
+  if (draft.repeat === 'once' && !/^\d{4}$/.test(draft.year)) return { ok: false, error: '仅一次的日期需要年份' }
+  const date = `${draft.year || '2000'}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  return {
+    ok: true,
+    item: { id: draft.id ?? crypto.randomUUID(), name, date, calendar: draft.calendar, repeat: draft.repeat },
+  }
+}

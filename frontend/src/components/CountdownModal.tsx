@@ -3,7 +3,16 @@ import type { ImportantDate } from 'chrome-tab-shared'
 import { useLayoutSettings } from '../context/LayoutSettingsContext'
 import { useUpdateLayoutSettings } from '../api/config'
 import { useHolidays } from '../api/holidays'
-import { buildMonthGrid, holidaysInMonth, importantDatesInMonth, isoWeekNumber, lunarDayText, toIsoDate } from '../lib/countdown'
+import {
+  buildCellMarks,
+  buildMonthGrid,
+  cellModel,
+  draftToImportantDate,
+  isoWeekNumber,
+  toIsoDate,
+  type CellMark,
+  type ImportantDateDraft,
+} from '../lib/countdown'
 import useNow from '../hooks/useNow'
 import type { Icon } from '../lib/types'
 import ConfirmButton from './ConfirmButton'
@@ -22,36 +31,20 @@ import ModalShell from './ModalShell'
  * (getAllCountdowns)分立。
  */
 
-type Draft = {
-  id: string | null // null = 新增
-  name: string
-  calendar: 'solar' | 'lunar'
-  repeat: 'annual' | 'once'
-  year: string
-  month: string
-  day: string
-}
-
-type CellMark = { rest?: boolean; work?: boolean; holiday?: string; importantId?: string }
+/** 表单草稿类型随格语义同居 lib/countdown.ts(ADR-0056),import 别名保持本文件
+ *  既有 Draft 引用零改动。 */
+type Draft = ImportantDateDraft
 
 const emptyDraft: Draft = { id: null, name: '', calendar: 'solar', repeat: 'annual', year: '', month: '', day: '' }
 
 const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'] as const
 const CN_MONTHS = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二'] as const
+/** 年视图铺开范围(buildCellMarks months 参数)。 */
+const ALL_MONTHS = Array.from({ length: 12 }, (_, i) => i)
 
 function toDraft(d: ImportantDate): Draft {
   const [year, month, day] = d.date.split('-')
   return { id: d.id, name: d.name, calendar: d.calendar, repeat: d.repeat, year, month, day }
-}
-
-/** 格底色语义(月视图大格与年壁迷你点共用一套色语)。文字不随标记变色(用户定案
- *  「只加背景,不要影响文字」:同色系字底相吃,markTextCls 字色轴已退役)。 */
-function cellBg(m: CellMark | undefined, weekend: boolean): string {
-  if (m?.importantId) return 'bg-amber-300/15' // 重要日子:个人语义最高
-  if (m?.rest) return 'bg-emerald-500/20' // 法定假日深绿
-  if (m?.work) return 'bg-red-400/10' // 补班红(多落周末,盖过淡绿)
-  if (weekend) return 'bg-emerald-300/10' // 普通周末淡绿
-  return 'bg-white/[0.04]'
 }
 
 /** 二选一胶囊组(触达 ≥32px,Liquid Glass 触达规范)。 */
@@ -85,7 +78,7 @@ function Seg<T extends string>({
   )
 }
 
-/** 年壁月卡:整卡可点钻取进月;迷你点阵复用 cellBg 色语,仅当月内着色。 */
+/** 年壁月卡:整卡可点钻取进月;迷你点阵复用 cellModel 色语(仅取 bg),仅当月内着色。 */
 function YearMonthCard({
   year,
   month,
@@ -119,7 +112,7 @@ function YearMonthCard({
             <span
               key={cell.iso}
               className={`aspect-square rounded-[3px] text-[9px] leading-[1.4] flex items-center justify-center text-white/50 ${
-                cell.inMonth ? cellBg(m, cell.weekend) : 'opacity-0'
+                cell.inMonth ? cellModel(cell, m).bg : 'opacity-0'
               } ${cell.iso === todayIso ? 'ring-1 ring-accent font-semibold' : ''}`}
             >
               {cell.day}
@@ -137,9 +130,8 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
   const [draft, setDraft] = useState<Draft | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
-  // 分钟级心跳 + 按天重算(今天格跨零点翻新;视图月默认打开当月,导航不回跳)
+  // 分钟级心跳:todayIso(今天格 ring)跨零点翻新;视图月默认打开当月,导航不回跳
   const now = useNow(60_000)
-  const dayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`
   const todayIso = toIsoDate(now)
   const [mode, setMode] = useState<'month' | 'year'>('month')
   const [view, setView] = useState(() => ({ year: now.getFullYear(), month: now.getMonth() }))
@@ -157,31 +149,18 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
       (new Date(now.getFullYear() + 1, 0, 1).getTime() - new Date(now.getFullYear(), 0, 1).getTime())) * 100,
   )
 
-  // 格标记合成(同 iso 三源合并):休/班(ics)打底、节日名(内置)覆盖副行、
-  // 重要日子置琥珀底(同日撞期个人优先;rest 转副行「休」提示不丢)。
-  // 年视图范围 = 全年 12 月;ics 全量平铺直接入 map(~500 条,月视图只查当月 iso)。
-  const marks = useMemo(() => {
-    const map = new Map<string, CellMark>()
-    for (const d of holidaysQuery.data?.days ?? []) {
-      const m = map.get(d.date) ?? {}
-      if (d.kind === 'rest') m.rest = true
-      else m.work = true
-      map.set(d.date, m)
-    }
-    const months = mode === 'year' ? Array.from({ length: 12 }, (_, i) => i) : [view.month]
-    for (const mo of months) {
-      for (const h of holidaysInMonth(view.year, mo)) {
-        const iso = toIsoDate(h.date)
-        map.set(iso, { ...map.get(iso), holiday: h.name })
-      }
-      for (const i of importantDatesInMonth(layout.importantDates, view.year, mo)) {
-        const iso = toIsoDate(i.date)
-        map.set(iso, { ...map.get(iso), importantId: i.id })
-      }
-    }
-    return map
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, view.year, view.month, dayKey, holidaysQuery.data, layout.importantDates])
+  // 格标记合成单点于 lib/buildCellMarks(ADR-0056):同日撞期三源共存,谁赢由
+  // cellModel 优先级定;年视图铺开全年 12 月,ics 全量平铺直接入 map(~500 条)。
+  const marks = useMemo(
+    () =>
+      buildCellMarks(
+        holidaysQuery.data?.days ?? [],
+        view.year,
+        mode === 'year' ? ALL_MONTHS : [view.month],
+        layout.importantDates,
+      ),
+    [mode, view.year, view.month, holidaysQuery.data, layout.importantDates],
+  )
 
   const step = (delta: -1 | 1) => {
     setDir(delta)
@@ -218,23 +197,9 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
 
   function submitDraft() {
     if (!draft) return
-    const name = draft.name.trim()
-    const m = Number(draft.month)
-    const day = Number(draft.day)
-    if (!name) return setErr('名称不能为空')
-    if (!Number.isInteger(m) || m < 1 || m > 12 || !Number.isInteger(day) || day < 1 || day > 31)
-      return setErr('日期不完整')
-    if (draft.repeat === 'once' && !/^\d{4}$/.test(draft.year)) return setErr('仅一次的日期需要年份')
-    // annual 年份占位 2000(解析忽略);农历月日不查历表——非法组合在倒计时侧静默跳过
-    const date = `${draft.year || '2000'}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-    const item: ImportantDate = {
-      id: draft.id ?? crypto.randomUUID(),
-      name,
-      date,
-      calendar: draft.calendar,
-      repeat: draft.repeat,
-    }
-    commit([...layout.importantDates.filter((x) => x.id !== item.id), item])
+    const r = draftToImportantDate(draft)
+    if (!r.ok) return setErr(r.error)
+    commit([...layout.importantDates.filter((x) => x.id !== r.item.id), r.item])
   }
 
   return (
@@ -309,22 +274,23 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
               <div className="grid grid-cols-7 gap-1.5">
                 {grid.map((cell) => {
                   const m = marks.get(cell.iso)
+                  const v = cellModel(cell, m)
                   const importantId = m?.importantId
-                  // 副行:节日名(内置清单)> 节气/农历日;休/班让位成右上角标(农历要在副行)
-                  const sub = m?.holiday ?? lunarDayText(cell.date)
+                  // subline 是惰性 getter,局部化一次读取(渲染两用会各触发一次农历推算)
+                  const sub = v.subline
                   return (
                     <button
                       key={cell.iso}
                       type="button"
-                      disabled={!importantId}
-                      title={importantId ? '编辑' : undefined}
+                      disabled={!v.clickable}
+                      title={v.clickable ? '编辑' : undefined}
                       onClick={() => {
                         const d = layout.importantDates.find((x) => x.id === importantId)
                         if (d) { setDraft(toDraft(d)); setErr(null) }
                       }}
                       className={`relative h-12 rounded-xl transition-colors focus-visible:outline-2 focus-visible:outline-white/60 ${
                         cell.inMonth ? '' : 'opacity-30'
-                      } ${importantId ? `${cellBg(m, cell.weekend)} hover:bg-amber-300/30 active:bg-amber-300/40 cursor-pointer` : cellBg(m, cell.weekend)} ${
+                      } ${v.clickable ? `${v.bg} hover:bg-amber-300/30 active:bg-amber-300/40 cursor-pointer` : v.bg} ${
                         cell.iso === todayIso ? 'ring-1 ring-accent font-semibold' : ''
                       }`}
                     >
@@ -334,13 +300,13 @@ export default function CountdownModal({ onClose }: { icon: Icon; onClose: () =>
                           {sub}
                         </span>
                       )}
-                      {(m?.rest || m?.work) && (
+                      {v.corner && (
                         <span
                           className={`absolute top-0.5 right-0.5 px-1 rounded text-[8px] leading-[1.5] text-white ${
-                            m?.rest ? 'bg-emerald-500' : 'bg-red-400'
+                            v.corner === 'rest' ? 'bg-emerald-500' : 'bg-red-400'
                           }`}
                         >
-                          {m?.rest ? '休' : '班'}
+                          {v.corner === 'rest' ? '休' : '班'}
                         </span>
                       )}
                     </button>

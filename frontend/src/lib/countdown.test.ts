@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { buildMonthGrid, describeDays, getAllCountdowns, getCountdowns, holidaysInMonth, importantDatesInMonth, isoWeekNumber, lunarDayText, toIsoDate } from './countdown'
+import {
+  buildCellMarks,
+  buildMonthGrid,
+  cellModel,
+  describeDays,
+  draftToImportantDate,
+  getAllCountdowns,
+  getCountdowns,
+  holidaysInMonth,
+  importantDatesInMonth,
+  isoWeekNumber,
+  lunarDayText,
+  toIsoDate,
+  type ImportantDateDraft,
+} from './countdown'
 import type { ImportantDate } from 'chrome-tab-shared'
 
 // 对拍基准:农历节日公历日期已用 lunar-typescript 实测核对(2026/2027 两年),
@@ -205,5 +219,86 @@ describe('日历月视图(ADR-0054):当月内实例化,区别于「下一次出�
     const dates = [user({ id: 'leap', name: '闰日', date: '2000-02-29' })]
     expect(importantDatesInMonth(dates, 2026, 1)).toEqual([]) // 2026 非闰年:2 月无标
     expect(importantDatesInMonth(dates, 2028, 1).map((i) => i.id)).toEqual(['leap'])
+  })
+})
+
+describe('日历格语义(ADR-0056):三源合并与逐格决策单点,组件只做渲染映射', () => {
+  // 2026-10:1 日周四、3/4 周末、11 周日(与上文 buildMonthGrid/isoWeekNumber 锚点同源)
+  const grid = buildMonthGrid(2026, 9)
+  const cell = (iso: string) => grid.find((c) => c.iso === iso)!
+
+  it('buildCellMarks:同 iso 三源共存(撞期个人/节日名/休互不覆盖,由渲染层各取所司)', () => {
+    const marks = buildCellMarks(
+      [
+        { date: '2026-10-01', kind: 'rest' },
+        { date: '2026-10-11', kind: 'work' },
+      ],
+      2026,
+      [9],
+      [user({ id: 'a', name: '纪念日', date: '1990-10-01' })],
+    )
+    expect(marks.get('2026-10-01')).toEqual({ rest: true, holiday: '国庆', importantId: 'a' })
+    expect(marks.get('2026-10-11')).toEqual({ work: true }) // 周日补班格(九月初二),无内置节日
+    expect(marks.get('2026-10-18')?.holiday).toBe('重阳') // 农历换算:2026 九月初九
+    expect(marks.get('2026-10-31')?.holiday).toBe('万圣节') // 文化节日同入 map
+  })
+
+  it('buildCellMarks:months 决定铺开范围(月视图单月/年视图全年 12 月)', () => {
+    expect(buildCellMarks([], 2026, [8], []).get('2026-10-01')).toBeUndefined()
+    const wholeYear = buildCellMarks([], 2026, Array.from({ length: 12 }, (_, i) => i), [])
+    expect(wholeYear.get('2026-09-25')?.holiday).toBe('中秋') // 9 月节日进入年视图铺开
+  })
+
+  it('cellModel:底色四层优先级 重要日子 > 休 > 班 > 周末 > 常规(上层赢,2026-09-03 用户定案)', () => {
+    const oct1 = cell('2026-10-01') // 周四平日
+    expect(cellModel(oct1, { importantId: 'a', rest: true, holiday: '国庆' }).bg).toBe('bg-amber-300/15')
+    expect(cellModel(oct1, { rest: true }).bg).toBe('bg-emerald-500/20')
+    expect(cellModel(oct1, { work: true }).bg).toBe('bg-red-400/10')
+    const saturday = grid.find((c) => c.weekend && c.inMonth)! // 10-03 周六
+    expect(cellModel(saturday, undefined).bg).toBe('bg-emerald-300/10')
+    expect(cellModel(saturday, { work: true }).bg).toBe('bg-red-400/10') // 补班红盖周末淡绿
+    expect(cellModel(oct1, undefined).bg).toBe('bg-white/[0.04]')
+  })
+
+  it('cellModel:副行节日名优先,无节日走节气/农历;角标与可点性随源', () => {
+    const full = cellModel(cell('2026-10-01'), { rest: true, holiday: '国庆', importantId: 'a' })
+    expect(full.subline).toBe('国庆')
+    expect(full.corner).toBe('rest')
+    expect(full.clickable).toBe(true)
+    // 10-02 无内置节日:中秋 9-25(八月十五)后 7 天 = 八月廿二(与 lunarDayText 同源)
+    expect(cellModel(cell('2026-10-02'), undefined).subline).toBe('廿二')
+    expect(cellModel(cell('2026-10-11'), { work: true }).corner).toBe('work')
+    expect(cellModel(cell('2026-10-01'), undefined).corner).toBeNull()
+    expect(cellModel(cell('2026-10-01'), undefined).clickable).toBe(false)
+  })
+})
+
+describe('draftToImportantDate(ADR-0056):表单校验与成形,文案与表单直显一致', () => {
+  const draft = (over: Partial<ImportantDateDraft>): ImportantDateDraft => ({
+    id: null,
+    name: '生日',
+    calendar: 'solar',
+    repeat: 'annual',
+    year: '',
+    month: '10',
+    day: '1',
+    ...over,
+  })
+
+  it('校验三关:名称空白/月日越界/once 无年份', () => {
+    expect(draftToImportantDate(draft({ name: '  ' }))).toEqual({ ok: false, error: '名称不能为空' })
+    expect(draftToImportantDate(draft({ month: '13' }))).toEqual({ ok: false, error: '日期不完整' })
+    expect(draftToImportantDate(draft({ day: '0' }))).toEqual({ ok: false, error: '日期不完整' })
+    expect(draftToImportantDate(draft({ repeat: 'once' }))).toEqual({ ok: false, error: '仅一次的日期需要年份' })
+  })
+
+  it('annual 年份占位 2000;名称 trim;id 复用草稿携带、新增生成 uuid', () => {
+    const fresh = draftToImportantDate(draft({ name: ' 生日 ' }))
+    expect(fresh).toMatchObject({
+      ok: true,
+      item: { name: '生日', date: '2000-10-01', calendar: 'solar', repeat: 'annual' },
+    })
+    expect(fresh.ok && fresh.item.id).toMatch(/^[\da-f-]{36}$/) // crypto.randomUUID
+    expect(draftToImportantDate(draft({ id: 'u1' }))).toMatchObject({ ok: true, item: { id: 'u1' } })
   })
 })
