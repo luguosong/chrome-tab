@@ -12,3 +12,5 @@
    **修订(2026-09-03 同日)**:农历一条被用户参考图推翻——月视图副行改「节日名 > 节气 > 农历日」(`getJieQi` 短路 `getDayInChinese`,休/班让位右上角标腾出副行)。grilling 定案与实机观感冲突时,用户看实物后改主意,裁决权在用户。对话框放大(3xl)、年视图(4×3 月份壁,色语经 cellBg/markTextCls 同源)、「今天」钮为同日追加迭代,不属本 ADR 定案范围。
 
 代价与取舍:单点上游(个人维护的 ics 订阅,无 SLA)——挂时降级为无休/班标,内置节日名仍在,个人产品可接受;全量落库按年过滤,前端不背历史数据。**验收 = 前后端 tsc 零错 + 全量测试绿 + vite build 过**。
+
+**装配注记(2026-09-04,架构评审候选 3)**:「启动预热住路由工厂」是落地装配瑕疵,非本 ADR 定案——holidayRoutes() 曾在工厂内自建 service 并 fire-and-forget 预热,而路由不经 createApp 参数、无条件挂载,导致每次 createApp()(含测试 14 处)都真外呼 ical.muhan.org 两发,被 `catch(()=>{})` 静默吞。已归 Service 注入轨(与 trending/servermon 同款):service 由 index.ts 构造(`createHolidayService(prodHolidayDeps())`)、预热随装配侧(serve 后 fire-and-forget,cachedOrNull 记因)、`holidayRoutes(svc)` 纯路由零外呼、createApp 参数表可注入(生产恒传,可选参数仅测试 seam,缺省不挂)。方向性约束:新上游域装配抄此模板(Service 构造 → createApp 参数 → 装配侧预热/调度),不把预热写进路由工厂;既有另两轨不动——config 对象注入(weather/dida)、路由工厂自建(aihot/wallpaper/siteInfo,纯惰性无预热)。

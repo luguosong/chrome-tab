@@ -70,14 +70,16 @@ export function createHolidayService(deps: HolidayDeps) {
   return { days: () => source.get(KEY) }
 }
 
+export type HolidayService = ReturnType<typeof createHolidayService>
+
 /**
  * GET /api/holidays(须在 requireAuth 之后挂载)→ { days: HolidayDay[] } 全量
  * (2013 起平铺,~500 条;前端自建 YYYY-MM-DD map,免按年过滤逻辑)。降级:上游
- * 从未成功 → days 空数组(200,非 500——日历无休/班标是合法形态)。
+ * 从未成功 → days 空数组(200,非 500——日历无休/班标是合法形态)。纯路由:service
+ * 与启动预热均在装配侧(index.ts,ADR-0054 注记)——路由工厂零外呼,每次 createApp
+ * 不再真外呼上游。
  */
-export function holidayRoutes(deps = prodHolidayDeps()): Hono {
-  const svc = createHolidayService(deps)
-  void svc.days().catch(() => {}) // 启动预热(fire-and-forget;失败由 cachedOrNull 记因,首请求重试)
+export function holidayRoutes(svc: HolidayService): Hono {
   return new Hono().get('/api/holidays', async (c) => {
     const days = await svc.days()
     return c.json({ days: days ?? [] })

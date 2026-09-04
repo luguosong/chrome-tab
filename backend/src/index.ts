@@ -7,6 +7,7 @@ import { createApp } from './app'
 import { dailyBackup } from './backup'
 import { ChangelogService, prodChangelogDeps, startChangelogScheduler, type ChangelogServices } from './changelog'
 import { openDb } from './db'
+import { createHolidayService, prodHolidayDeps } from './holidays'
 import { bootstrap } from './seed'
 import { ModelTrackingService, prodModelDeps, startModelTrackingScheduler } from './modelTracking'
 import { NewsService, prodNewsDeps, startNewsScheduler } from './news/news'
@@ -64,6 +65,9 @@ const servermonMachines: ServerMonMachine[] = (
   .filter(([, url]) => url && url.trim() !== '')
   .map(([machine, url]) => ({ machine, url: url! }))
 const servermonService = new ServerMonService(db, prodServerMonDeps(), servermonMachines)
+// 节假日休/班(CONTEXT.md「节假日」②轨,ADR-0054):无凭据无配置,构造即装配
+// (Service 注入轨,与 trending/servermon 同款;预热见 serve 之后,ADR-0054 注记)
+const holidayService = createHolidayService(prodHolidayDeps())
 // mimosa-ignore 单运维部署:env 派生配置( key/cookieSecure 等)非攻击者可控;库写路径全参数化
 const app = createApp({
   db,
@@ -84,6 +88,8 @@ const app = createApp({
   trending: trendingService,
   // 服务器状态(CONTEXT.md「服务器状态」):exporter 快照 + 采样曲线
   servers: servermonService,
+  // 节假日休/班(同上注释):恒传,createApp 可选参数仅测试 seam
+  holidays: holidayService,
 })
 
 const port = Number(process.env.PORT ?? 8080)
@@ -100,6 +106,9 @@ startNewsScheduler(newsService)
 startTrendingScheduler(trendingService)
 // 服务器状态 10min 采样(3-53/10 错开整点;启动即采样,重启不空窗)
 startServerMonScheduler(servermonService)
+// 节假日休/班(ADR-0054):启动预热 fire-and-forget——失败由 cachedOrNull 记因
+// (console.warn),首请求重试;预热住装配侧,路由工厂零外呼
+void holidayService.days().catch(() => {})
 
 // 每日 03:17(UTC):WAL checkpoint + 过期 session 清理 + VACUUM INTO 备份(票 09;恢复 = 拷回文件)
 schedule('17 3 * * *', async () => {

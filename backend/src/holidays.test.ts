@@ -1,6 +1,9 @@
 import { Hono } from 'hono'
 import { describe, expect, it, vi } from 'vitest'
-import { createHolidayService, holidayRoutes, parseIcs, REST_ICS_URL } from './holidays'
+import { createApp } from './app'
+import { openDb } from './db'
+import { bootstrap } from './seed'
+import { createHolidayService, holidayRoutes, parseIcs, REST_ICS_URL, type HolidayService } from './holidays'
 
 /**
  * 节假日休/班上游测试(ADR-0054):解析器直测(CRLF 真实形态)+ 服务降级语义
@@ -100,7 +103,7 @@ describe('GET /api/holidays', () => {
   const app = (fetchText: (url: string) => Promise<string>) => {
     const routes = new Hono()
     // 401 横切由契约测试统一覆盖,此处直挂路由(weather.test 同口径)
-    routes.route('/', holidayRoutes({ fetchText }))
+    routes.route('/', holidayRoutes(createHolidayService({ fetchText })))
     return routes
   }
 
@@ -120,5 +123,32 @@ describe('GET /api/holidays', () => {
     const res = await app(() => Promise.reject(new Error('down'))).request('/api/holidays')
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ days: [] })
+  })
+})
+
+describe('createApp 装配 seam(ADR-0054 注记)', () => {
+  it('注入桩 service → 200 桩数据;缺省不挂 → 404', async () => {
+    const { db } = openDb(':memory:')
+    await bootstrap(db, { username: 'admin', password: 'admin-pw' })
+    const stub: HolidayService = {
+      days: async () => [{ date: '2026-10-01', kind: 'rest', name: '国庆节' }],
+    }
+    const withHolidays = createApp({ db, holidays: stub })
+    // login 取 cookie 过 requireAuth 横切(未认证 401 会盖住挂载差异,须认证后断言)
+    const login = await withHolidays.request('/api/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin-pw' }),
+    })
+    const cookie = login.headers.getSetCookie()[0]!.split(';')[0]!
+    const res = await withHolidays.request('/api/holidays', { headers: { cookie } })
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toEqual({
+      days: [{ date: '2026-10-01', kind: 'rest', name: '国庆节' }],
+    })
+    // 同 db 有效 session 下缺省不挂 → 404:「可选参数仅测试 seam」的挂载护栏
+    const bare = createApp({ db })
+    const res404 = await bare.request('/api/holidays', { headers: { cookie } })
+    expect(res404.status).toBe(404)
   })
 })
