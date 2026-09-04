@@ -20,6 +20,9 @@ describe('ICON_TYPE_META 单源清单', () => {
       'changelog', 'aihot', 'todo', 'video', 'model', 'news', 'trending', 'servers',
     ])
     for (const [, m] of spanned) expect(m.span).toEqual({ w: 3, h: 2 })
+    // 显式反向钉(集合补集之外的独立断言):无 span 的 5 个——weather 在列即本次容量修正的核心钉
+    expect(entries.filter(([, m]) => m.span === undefined).map(([id]) => id))
+      .toEqual(['nav', 'stock', 'weather', 'countdown', 'group'])
   })
 
   it('单例类型恰为 8 个(与 CONTEXT.md「单例类型」词条一致;group 恒非单例)', () => {

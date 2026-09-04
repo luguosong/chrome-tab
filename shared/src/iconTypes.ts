@@ -60,7 +60,8 @@ export function toWireType(id: IconTypeId): IconWireType {
   return id.toUpperCase() as IconWireType
 }
 
-/** wire/DB 大写 → 前端小写 id;未知值原样保留(扩展点:未来新增类型先这样降级)。 */
+/** wire/DB 大写 → 前端小写 id。不校验合法性:未知值同样小写化透传(类型断言,
+ *  未知类型的容错归渲染层,与旧 config.ts 内联归一化同语义)。 */
 export function fromWireType(wire: string): IconTypeId {
   return wire.toLowerCase() as IconTypeId
 }
