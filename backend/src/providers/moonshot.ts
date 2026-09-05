@@ -1,6 +1,5 @@
 import type { ModelEvent } from 'chrome-tab-shared'
-import { KIMI_BASELINE } from '../kimiBaseline'
-import { aliasIn, clipFragment, isRealIsoDate, type ParseResult, type ProviderDef } from './def'
+import { type BaselineRow, aliasIn, clipFragment, isRealIsoDate, type ParseResult, type ProviderDef } from './def'
 
 // ---- 月之暗面资讯/Blog(研究 §3:商业模型用资讯、研究/开放权重用 Blog,两页
 //  均无文档化 RSS——按文章 URL 去重,研究 §6.6;页面为同构 Next.js 卡片列表)----
@@ -59,9 +58,9 @@ export function parseKimiArticles(html: string): ParseResult<KimiArticle> {
  * 「Kimi K2 Thinking」,取更长(更具体)的归属。kind 恒 'updated',与基线事件同
  * (模型,日期,信源) 的文章由 poll 跳过——基线事件的信源即官方文章 URL。
  */
-export function matchKimiEvent(a: KimiArticle): { officialId: string; event: Omit<ModelEvent, 'id'> } | null {
+export function matchKimiEvent(a: KimiArticle, rows: readonly BaselineRow[]): { officialId: string; event: Omit<ModelEvent, 'id'> } | null {
   let best: { officialId: string; alias: string } | null = null
-  for (const b of KIMI_BASELINE) {
+  for (const b of rows) {
     for (const alias of b.matchAliases) {
       if (aliasIn(alias, a.title) && (best === null || alias.length > best.alias.length)) {
         best = { officialId: b.officialId, alias }
@@ -90,8 +89,8 @@ export const MOONSHOT_DEF: ProviderDef<KimiArticle> = {
   label: '月之暗面',
   urls: [KIMI_NEWS_URL, KIMI_BLOG_URL],
   parse: parseKimiArticles,
-  matchEntry(a) {
-    const hit = matchKimiEvent(a)
+  matchEntry(a, rows) {
+    const hit = matchKimiEvent(a, rows)
     return { hits: hit !== null ? [hit] : [], clues: [] }
   },
 }

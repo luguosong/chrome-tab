@@ -107,7 +107,7 @@ describe('parse 共享小件', () => {
         domains.add(m[1]!)
     }
     // 各域 fetch 上游 URL 常量所在文件(issues/08 后纳入;解析器/匹配器与 URL 同文件)
-    for (const f of ['../modelTracking.ts', '../aaEvaluations.ts', '../deepseekBaseline.ts', '../qwenBaseline.ts', '../openaiBaseline.ts', '../holidays.ts']) {
+    for (const f of ['../modelTracking.ts', '../aaEvaluations.ts', '../providers/deepseek.ts', '../providers/alibaba.ts', '../providers/openai.ts', '../holidays.ts']) {
       for (const m of readFileSync(join(here, f), 'utf8').matchAll(/https?:\/\/([a-z0-9.-]+)[/'"]/g))
         domains.add(m[1]!)
     }

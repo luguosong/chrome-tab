@@ -103,6 +103,7 @@ const mkModel = (id: number, over: Partial<TrackedModel> = {}): TrackedModel => 
   provider: 'zhipu',
   officialId: `m${id}`,
   name: `M${id}`,
+  verified: 'manual',
   kind: 'text',
   stage: 'ga',
   availability: ['api'],

@@ -48,6 +48,7 @@ export default function ModelIconBody({
       title="模型追踪"
       fresh={fresh}
       freshLabel="动态"
+      alert={data && data.pendingClues.length > 0 ? `${data.pendingClues.length} 待核验` : null}
       onOpenDetail={onOpenDetail}
       moreTitle="查看全部模型与动态"
       overlay={overlay}

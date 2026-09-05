@@ -124,10 +124,12 @@ CREATE TABLE IF NOT EXISTS videos (
     FOREIGN KEY (blogger_id) REFERENCES video_bloggers(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_videos_blogger_pub ON videos (blogger_id, published_at DESC);
--- 模型追踪(CONTEXT.md「模型追踪/模型档案」;ADR-0025):三表全为**全局**数据,无 user_id——
--- 档案对所有用户共享(区别于 video_* 的账号级)。模型档案行来自代码内人工核验基线
--- (idempotent upsert,部署即刷新 profile 字段);模型动态来自厂家发布页确定性解析
--- (去重键 = 模型 + 类型 + 日期 + 信源,ON CONFLICT 幂等);occurred_on 为日期文本。
+-- 模型追踪(CONTEXT.md「模型追踪/模型档案」;ADR-0025 起,ADR-0058 修订):表全为**全局**
+-- 数据,无 user_id——档案对所有用户共享(区别于 video_* 的账号级)。model_archive 即核验
+-- 基线唯一真相(ADR-0058:基线 DB 化):verified 区分 manual(人工核验存量/修订)与
+-- auto(LLM 自动核验入库);match_aliases/match_slugs 是发布源块归属判定输入。模型动态来自
+-- 厂家发布页确定性解析(去重键 = 模型 + 类型 + 日期 + 信源,ON CONFLICT 幂等);
+-- occurred_on 为日期文本。
 CREATE TABLE IF NOT EXISTS model_archive (
     id           INTEGER PRIMARY KEY,
     provider     TEXT NOT NULL,
@@ -141,9 +143,23 @@ CREATE TABLE IF NOT EXISTS model_archive (
     pricing      TEXT,
     limits       TEXT,
     training_params TEXT,
+    match_aliases TEXT NOT NULL DEFAULT '[]',
+    match_slugs   TEXT NOT NULL DEFAULT '[]',
+    verified      TEXT NOT NULL DEFAULT 'manual',
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL,
     UNIQUE (provider, official_id)
+);
+-- AA slug → 跟踪模型映射(ADR-0058:AA_MODEL_MAP 代码常量 DB 化;同名自动映射 upsert
+-- verified='auto',人工修订改表)。slug 主键:一 slug 一目标,值 (provider, official_id)
+-- 指向 model_archive 行。
+CREATE TABLE IF NOT EXISTS model_aa_mapping (
+    slug        TEXT PRIMARY KEY NOT NULL,
+    provider    TEXT NOT NULL,
+    official_id TEXT NOT NULL,
+    verified    TEXT NOT NULL DEFAULT 'manual',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS model_events (
     id          INTEGER PRIMARY KEY,
@@ -194,6 +210,7 @@ CREATE TABLE IF NOT EXISTS model_pending_clues (
     model_key     TEXT NOT NULL, -- 条目最强标识(千问=模型ID串、智谱=文档链接),provider 内唯一
     title         TEXT NOT NULL,
     source_url    TEXT NOT NULL,
+    verify_state  TEXT, -- ADR-0058 auto 核验状态:NULL=未核验/失败待重试,'accepted'=已入档,'rejected'=噪音/低置信(留表触人)
     first_seen_at TEXT NOT NULL,
     last_seen_at  TEXT NOT NULL,
     UNIQUE (provider, model_key)
@@ -275,7 +292,13 @@ export function migrate(sqlite: SqliteConnection) {
     pricing: 'TEXT',
     limits: 'TEXT',
     training_params: 'TEXT',
+    // ADR-0058 基线 DB 化:存量库补归属判定列与核验标记(aliases 由种子回填)。
+    match_aliases: "TEXT NOT NULL DEFAULT '[]'",
+    match_slugs: "TEXT NOT NULL DEFAULT '[]'",
+    verified: "TEXT NOT NULL DEFAULT 'manual'",
   })
+  // ADR-0058 auto 核验:存量线索表补状态列(NULL = 未核验)。
+  addMissingColumns(sqlite, 'model_pending_clues', { verify_state: 'TEXT' })
   // 「重要日子」寄放布局设置(ADR-0026):存量行 NULL,读侧兜底 []。
   addMissingColumns(sqlite, 'layout_settings', { important_dates: 'TEXT' })
   // releaseTimes 落库(81888ea 曾以「迁移重」不动,2026-08-31 二次线上消失推翻):JSON
@@ -431,6 +454,22 @@ export interface ModelArchiveTable {
   limits: string | null
   /** 官方披露的训练参数量原文;null = 未披露。 */
   training_params: string | null
+  /** JSON 数组文本(matchAliases,发布源块归属判定;auto 行 = [officialId])。 */
+  match_aliases: string
+  /** JSON 数组文本(matchSlugs,智谱/Anthropic 双条件的链接半边)。 */
+  match_slugs: string
+  /** 'manual' | 'auto'(ADR-0058:人工核验 / LLM 自动核验)。 */
+  verified: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ModelAaMappingTable {
+  slug: string
+  provider: string
+  official_id: string
+  /** 'manual' | 'auto'(人工核验映射存量 / 同名自动映射)。 */
+  verified: string
   created_at: string
   updated_at: string
 }
@@ -477,6 +516,8 @@ export interface ModelPendingCluesTable {
   model_key: string
   title: string
   source_url: string
+  /** ADR-0058 auto 核验状态;null = 未核验/失败待重试。 */
+  verify_state: string | null
   first_seen_at: string
   last_seen_at: string
 }
@@ -550,6 +591,7 @@ export interface SchemaDatabase {
   model_evaluations: ModelEvaluationsTable
   model_evaluation_status: ModelEvaluationStatusTable
   model_pending_clues: ModelPendingCluesTable
+  model_aa_mapping: ModelAaMappingTable
   news_sources: NewsSourcesTable
   news_items: NewsItemsTable
   news_translations: NewsTranslationsTable

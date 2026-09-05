@@ -1,6 +1,5 @@
 import type { ModelProviderId } from 'chrome-tab-shared'
-import { asRec, str, type Rec } from './common'
-import type { PendingClue } from './providers/def'
+import { asRec, str } from './common'
 
 /**
  * Artificial Analysis 评测接入(issues/08,CONTEXT.md「评测结果」;研究 evaluations.md):
@@ -8,11 +7,24 @@ import type { PendingClue } from './providers/def'
  * ——每轮成功取数整表替换,漂移不产生动态,仅运行期「首次进入评测」产一条 evaluated
  * 动态(首配接入静默:真实首入日不可考,见 modelTracking.replaceEvaluationSnapshot)
  * (Benchmark 方法/版本变化免费 API 不暴露,不可检测——已知上限,注释即档)。
- * 归属只认映射表内 slug 精确相等(不猜):映射以 2026-08-25 站点 sitemap 的公开模型页
- * slug 人工核验;AA 文档推荐 UUID 但需 Key 才能取得,slug 失败模式安全(漂移即该模型
- * 评测静默消失=「留空」,不误归属)。effort 变体(-high/-low/-non-reasoning…)与日期
- * 快照 slug 不映射——同模型多份评测会撞 (模型,评测方,Benchmark) 唯一键。
+ * 归属只认映射内 slug 精确相等(不猜):人工核验存量(2026-08-25 sitemap)2026-09-05 起
+ * 随 ADR-0058 迁入 model_aa_mapping 表;此后新模型由 aaAutoMappings 同名自动映射补表
+ * (slug 归一与基线行精确相等 + creator 拦跨家,确定性规则非猜测)。AA 文档推荐 UUID
+ * 但需 Key 才能取得,slug 失败模式安全(漂移即该模型评测静默消失=「留空」,不误归属)。
+ * effort 变体(-high/-low/-non-reasoning…)与日期快照 slug 不映射——同模型多份评测
+ * 会撞 (模型,评测方,Benchmark) 唯一键。
  */
+
+/** AA 映射行(model_aa_mapping 表的运行时形态;runPoll 每轮从 DB 读出传入)。 */
+export interface AaMappingRow {
+  slug: string
+  provider: ModelProviderId
+  officialId: string
+}
+
+/** 映射查询表(行集 → Map,poll 每轮构建一次)。 */
+export const aaMappingIndex = (rows: readonly AaMappingRow[]): ReadonlyMap<string, { provider: ModelProviderId; officialId: string }> =>
+  new Map(rows.map((r) => [r.slug, { provider: r.provider, officialId: r.officialId }]))
 
 /** 评测方标识(库内 evaluator 列值)与展示名。 */
 export const AA_EVALUATOR = 'artificial_analysis'
@@ -32,144 +44,6 @@ export const AA_MEDIA_ENDPOINTS = [
 
 /** 模型页链接(评测行原始链接,全端点统一;slug 即映射键)。 */
 export const aaModelUrl = (slug: string) => `https://artificialanalysis.ai/models/${slug}`
-
-/**
- * AA slug → 跟踪模型(代码即配置,同 ADR-0025 基线口径;issues/08 人工核验:
- * 2026-08-25 sitemap,基线内有对应公开模型页者才收录)。键为 AA slug(圆点作连字符,
- * 如 glm-4-7 = GLM-4.7;Anthropic 新序 claude-4-5-haiku = Claude Haiku 4.5、
- * claude-4-1-opus = Claude Opus 4.1;xAI 语音 speech-to-text = grok-stt、
- * text-to-speech = xai-text-to-speech;图像编辑页 gpt_image_1-5 = GPT-Image-1.5)。
- * 未收录 = AA 无该模型页或无法精确对应(留空);新模型上线 AA 后随此表人工纳入。
- */
-export const AA_MODEL_MAP: Record<string, { provider: ModelProviderId; officialId: string }> = {
-  // 智谱
-  'glm-5-3': { provider: 'zhipu', officialId: 'glm-5.3' },
-  'glm-5-3-flash': { provider: 'zhipu', officialId: 'glm-5.3-flash' }, // 2026-08-27 sitemap 核验(08-25 发布、08-26 AA 收录)
-  'glm-5-2': { provider: 'zhipu', officialId: 'glm-5.2' },
-  'glm-5-1': { provider: 'zhipu', officialId: 'glm-5.1' },
-  'glm-5': { provider: 'zhipu', officialId: 'glm-5' },
-  'glm-4-7': { provider: 'zhipu', officialId: 'glm-4.7' },
-  'glm-4-7-flash': { provider: 'zhipu', officialId: 'glm-4.7-flash' },
-  'glm-4-6': { provider: 'zhipu', officialId: 'glm-4.6' },
-  'glm-4-5-air': { provider: 'zhipu', officialId: 'glm-4.5-air' },
-  'glm-4-6v': { provider: 'zhipu', officialId: 'glm-4.6v' },
-  // OpenAI(LLM)
-  'gpt-5-6-sol': { provider: 'openai', officialId: 'gpt-5.6-sol' },
-  'gpt-5-6-terra': { provider: 'openai', officialId: 'gpt-5.6-terra' },
-  'gpt-5-6-luna': { provider: 'openai', officialId: 'gpt-5.6-luna' },
-  'gpt-5-5': { provider: 'openai', officialId: 'gpt-5.5' },
-  'gpt-5-4': { provider: 'openai', officialId: 'gpt-5.4' },
-  'gpt-5-4-pro': { provider: 'openai', officialId: 'gpt-5.4-pro' },
-  'gpt-5-4-mini': { provider: 'openai', officialId: 'gpt-5.4-mini' },
-  'gpt-5-4-nano': { provider: 'openai', officialId: 'gpt-5.4-nano' },
-  'gpt-5-3-codex': { provider: 'openai', officialId: 'gpt-5.3-codex' },
-  'gpt-5-2': { provider: 'openai', officialId: 'gpt-5.2' },
-  'gpt-5-2-codex': { provider: 'openai', officialId: 'gpt-5.2-codex' },
-  'gpt-5-1': { provider: 'openai', officialId: 'gpt-5.1' },
-  'gpt-5-1-codex': { provider: 'openai', officialId: 'gpt-5.1-codex' },
-  'gpt-5-1-codex-mini': { provider: 'openai', officialId: 'gpt-5.1-codex-mini' },
-  'gpt-5': { provider: 'openai', officialId: 'gpt-5' },
-  'gpt-5-mini': { provider: 'openai', officialId: 'gpt-5-mini' },
-  'gpt-5-nano': { provider: 'openai', officialId: 'gpt-5-nano' },
-  'gpt-5-codex': { provider: 'openai', officialId: 'gpt-5-codex' },
-  'gpt-4-1': { provider: 'openai', officialId: 'gpt-4.1' },
-  'gpt-4-1-mini': { provider: 'openai', officialId: 'gpt-4.1-mini' },
-  'gpt-4-1-nano': { provider: 'openai', officialId: 'gpt-4.1-nano' },
-  'gpt-4o': { provider: 'openai', officialId: 'gpt-4o' },
-  'gpt-4o-mini': { provider: 'openai', officialId: 'gpt-4o-mini' },
-  'gpt-4': { provider: 'openai', officialId: 'gpt-4' },
-  'gpt-4-turbo': { provider: 'openai', officialId: 'gpt-4-turbo' },
-  'gpt-35-turbo': { provider: 'openai', officialId: 'gpt-3.5-turbo' },
-  o1: { provider: 'openai', officialId: 'o1' },
-  'o1-preview': { provider: 'openai', officialId: 'o1-preview' },
-  'o1-pro': { provider: 'openai', officialId: 'o1-pro' },
-  o3: { provider: 'openai', officialId: 'o3' },
-  'o3-mini': { provider: 'openai', officialId: 'o3-mini' },
-  'o3-pro': { provider: 'openai', officialId: 'o3-pro' },
-  'o4-mini': { provider: 'openai', officialId: 'o4-mini' },
-  'gpt-oss-120b': { provider: 'openai', officialId: 'gpt-oss-120b' },
-  'gpt-oss-20b': { provider: 'openai', officialId: 'gpt-oss-20b' },
-  // OpenAI(媒体榜单;whisper/gpt-realtime-whisper 属 STT 榜,免费 API 暂无该端点,映射先入档)
-  'gpt-image-2': { provider: 'openai', officialId: 'gpt-image-2' },
-  'openai-gpt_image-1-5': { provider: 'openai', officialId: 'gpt-image-1.5' },
-  'sora-2-pro': { provider: 'openai', officialId: 'sora-2-pro' },
-  'gpt-realtime-2': { provider: 'openai', officialId: 'gpt-realtime-2' },
-  'openai-gpt-realtime-whisper': { provider: 'openai', officialId: 'gpt-realtime-whisper' },
-  whisper: { provider: 'openai', officialId: 'whisper-1' },
-  'tts-1': { provider: 'openai', officialId: 'tts-1' },
-  'tts-1-hd': { provider: 'openai', officialId: 'tts-1-hd' },
-  // Anthropic
-  'claude-fable-5': { provider: 'anthropic', officialId: 'claude-fable-5' },
-  'claude-fable-5-1': { provider: 'anthropic', officialId: 'claude-fable-5-1' },
-  'claude-opus-5': { provider: 'anthropic', officialId: 'claude-opus-5' },
-  'claude-sonnet-5': { provider: 'anthropic', officialId: 'claude-sonnet-5' },
-  'claude-4-5-haiku': { provider: 'anthropic', officialId: 'claude-haiku-4-5' },
-  'claude-opus-4-8': { provider: 'anthropic', officialId: 'claude-opus-4-8' },
-  'claude-opus-4-7': { provider: 'anthropic', officialId: 'claude-opus-4-7' },
-  'claude-opus-4-6': { provider: 'anthropic', officialId: 'claude-opus-4-6' },
-  'claude-opus-4-5': { provider: 'anthropic', officialId: 'claude-opus-4-5' },
-  'claude-sonnet-4-6': { provider: 'anthropic', officialId: 'claude-sonnet-4-6' },
-  'claude-4-5-sonnet': { provider: 'anthropic', officialId: 'claude-sonnet-4-5' },
-  'claude-4-1-opus': { provider: 'anthropic', officialId: 'claude-opus-4-1' },
-  'claude-4-opus': { provider: 'anthropic', officialId: 'claude-opus-4' },
-  'claude-4-sonnet': { provider: 'anthropic', officialId: 'claude-sonnet-4' },
-  'claude-3-7-sonnet': { provider: 'anthropic', officialId: 'claude-3-7-sonnet' },
-  'claude-3-haiku': { provider: 'anthropic', officialId: 'claude-3-haiku' },
-  // xAI(grok-build-0-1-06-16 = Grok Build 0.1 的 06-16 固定形态;-0309 系同理双形态各归各行)
-  'grok-4-6': { provider: 'xai', officialId: 'grok-4.6' },
-  'grok-4-5': { provider: 'xai', officialId: 'grok-4.5' },
-  'grok-4-3': { provider: 'xai', officialId: 'grok-4.3' },
-  'grok-build-0-1-06-16': { provider: 'xai', officialId: 'grok-build-0.1' },
-  'grok-4-20-0309': { provider: 'xai', officialId: 'grok-4.20-0309-reasoning' },
-  'grok-4-20-0309-non-reasoning': { provider: 'xai', officialId: 'grok-4.20-0309-non-reasoning' },
-  'grok-imagine-video': { provider: 'xai', officialId: 'grok-imagine-video' },
-  'grok-stt': { provider: 'xai', officialId: 'speech-to-text' },
-  'xai-text-to-speech': { provider: 'xai', officialId: 'text-to-speech' },
-  // 月之暗面(kimi-k2-0905 等日期快照不映射)
-  'kimi-k3': { provider: 'moonshot', officialId: 'kimi-k3' },
-  'kimi-k2-7-code': { provider: 'moonshot', officialId: 'kimi-k2.7-code' },
-  'kimi-k2-6': { provider: 'moonshot', officialId: 'kimi-k2.6' },
-  'kimi-k2-5': { provider: 'moonshot', officialId: 'kimi-k2.5' },
-  'kimi-k2': { provider: 'moonshot', officialId: 'kimi-k2' },
-  'kimi-k2-thinking': { provider: 'moonshot', officialId: 'kimi-k2-thinking' },
-  // DeepSeek(-0324/-0120/-0925/-0420/-0424 日期快照与 -terminus 固定形态不映射,归并家族行)
-  'deepseek-v4-pro': { provider: 'deepseek', officialId: 'deepseek-v4-pro' },
-  'deepseek-v4-flash': { provider: 'deepseek', officialId: 'deepseek-v4-flash' },
-  'deepseek-v3-2': { provider: 'deepseek', officialId: 'deepseek-v3.2' },
-  'deepseek-v3-1': { provider: 'deepseek', officialId: 'deepseek-v3.1' },
-  'deepseek-r1': { provider: 'deepseek', officialId: 'deepseek-r1' },
-  'deepseek-v3': { provider: 'deepseek', officialId: 'deepseek-v3' },
-  // 阿里通义(2026-08-26 sitemap 核验)。无版本别名(qwen-turbo 等)与 reasoning/
-  // non-reasoning/effort 分档页不映射;qwen3-6-27b 按官方目录序作 3.6 开源代代表;
-  // qwq-32b 为 QwQ 线唯一公开页;qwen3-coder-480b/30b 与 qwen3-omni-30b 是基线行
-  // 所认领的开源对应版,随行映射;媒体模型 AA 站带路径前缀(image/models/…),API slug
-  // 取尾段(wan-2-2-a14b 归 2.2 代级行,同代 5b 页不映射防撞键)
-  'qwen3-8-max': { provider: 'alibaba', officialId: 'qwen3.8-max' },
-  'qwen3-7-max': { provider: 'alibaba', officialId: 'qwen3.7-max' },
-  'qwen3-6-max': { provider: 'alibaba', officialId: 'qwen3.6-max-preview' },
-  'qwen3-max': { provider: 'alibaba', officialId: 'qwen3-max' },
-  'qwen3-7-plus': { provider: 'alibaba', officialId: 'qwen3.7-plus' },
-  'qwen3-6-plus': { provider: 'alibaba', officialId: 'qwen3.6-plus' },
-  'qwen3-8-2-4t-a95b': { provider: 'alibaba', officialId: 'qwen3.8-2.4t-a95b' },
-  'qwen3-8-27b': { provider: 'alibaba', officialId: 'qwen3.8-27b' },
-  'qwen3-6-27b': { provider: 'alibaba', officialId: 'qwen3.6-open' },
-  'qwen3-5-397b-a17b': { provider: 'alibaba', officialId: 'qwen3.5-open' },
-  'qwen3-235b-a22b-instruct': { provider: 'alibaba', officialId: 'qwen3-open' },
-  'qwen3-next-80b-a3b-instruct': { provider: 'alibaba', officialId: 'qwen3-next-80b-a3b' },
-  'qwq-32b': { provider: 'alibaba', officialId: 'qwq-plus' },
-  'qwen3-coder-next': { provider: 'alibaba', officialId: 'qwen3-coder-next' },
-  'qwen3-coder-480b-a35b-instruct': { provider: 'alibaba', officialId: 'qwen3-coder-plus' },
-  'qwen3-coder-30b-a3b-instruct': { provider: 'alibaba', officialId: 'qwen3-coder-flash' },
-  'qwen3-vl-235b-a22b-instruct': { provider: 'alibaba', officialId: 'qwen3-vl-open' },
-  'qwen3-omni-30b-a3b-instruct': { provider: 'alibaba', officialId: 'qwen3-omni-flash' },
-  'qwen-image': { provider: 'alibaba', officialId: 'qwen-image' },
-  'qwen-audio-3-0-tts-plus': { provider: 'alibaba', officialId: 'qwen-audio-3.0-tts-plus' },
-  'qwen3-tts-flash': { provider: 'alibaba', officialId: 'qwen3-tts-flash' },
-  'qwen3-asr': { provider: 'alibaba', officialId: 'qwen3-asr-flash' },
-  'wan-2-5-preview': { provider: 'alibaba', officialId: 'wan2.5-video-preview' },
-  'wan-2-2-a14b': { provider: 'alibaba', officialId: 'wan2.2-video' },
-  'wan-2-1-14b': { provider: 'alibaba', officialId: 'wanx2.1-video' },
-}
 
 // ---- 纯函数(解析与匹配;防御式读取沿用 common 的 asRec/str 先例)----
 
@@ -225,23 +99,27 @@ export interface AaEvalRow {
  * LLM 端点条目 → 评测行。仅映射表内 slug 产生行(evaluations 键集不设白名单——AA
  * 基准集随方法演进,数值项原样透传,前端映射展示名);零模型条目 = 上游改版,抛错。
  */
-export function aaRowsFromLlms(json: string): AaEvalRow[] {
+export function aaRowsFromLlms(json: string, mapping: ReadonlyMap<string, { provider: ModelProviderId; officialId: string }>): AaEvalRow[] {
   const entries = parseAaEntries(json)
   if (entries.length === 0) throw new Error('AA LLM 端点零模型(疑似上游改版)')
-  return matchEntries(entries, (e) =>
+  return matchEntries(entries, mapping, (e) =>
     Object.entries(e.evaluations).map(([benchmark, score]) => ({ benchmark, score })),
   )
 }
 
 /** 媒体端点条目 → 评测行(benchmark = 端点对应 key,如 text_to_image_elo)。空榜为合法态(只返在榜模型)。 */
-export function aaRowsFromMedia(json: string, benchmark: string): AaEvalRow[] {
-  return matchEntries(parseAaEntries(json), (e) => (e.elo === null ? [] : [{ benchmark, score: e.elo }]))
+export function aaRowsFromMedia(json: string, benchmark: string, mapping: ReadonlyMap<string, { provider: ModelProviderId; officialId: string }>): AaEvalRow[] {
+  return matchEntries(parseAaEntries(json), mapping, (e) => (e.elo === null ? [] : [{ benchmark, score: e.elo }]))
 }
 
-function matchEntries(entries: AaEntry[], scoresOf: (e: AaEntry) => Array<{ benchmark: string; score: number }>): AaEvalRow[] {
+function matchEntries(
+  entries: AaEntry[],
+  mapping: ReadonlyMap<string, { provider: ModelProviderId; officialId: string }>,
+  scoresOf: (e: AaEntry) => Array<{ benchmark: string; score: number }>,
+): AaEvalRow[] {
   const rows: AaEvalRow[] = []
   for (const e of entries) {
-    const m = AA_MODEL_MAP[e.slug]
+    const m = mapping.get(e.slug)
     if (m === undefined) continue
     for (const { benchmark, score } of scoresOf(e)) {
       rows.push({ ...m, benchmark, score, version: e.name, url: aaModelUrl(e.slug) })
@@ -250,7 +128,7 @@ function matchEntries(entries: AaEntry[], scoresOf: (e: AaEntry) => Array<{ benc
   return rows
 }
 
-// ---- 未映射线索(「AA 已收录、基线有同名行、映射缺」的可见形态)----
+// ---- 同名自动映射(ADR-0058:「AA 已收录、基线有同名行、映射缺」从落线索升级为直接补表)----
 
 /**
  * AA model_creator.slug → 跟踪厂家(代码即配置;2026-09-01 线上 LLM 端点实测核验
@@ -274,51 +152,51 @@ const AA_CREATOR_MAP: Partial<Record<string, ModelProviderId>> = {
  * 每扩一种就多一类误撞面)。 */
 const aaSlugNorm = (s: string): string => s.toLowerCase().replaceAll('.', '-')
 
-/** aaUnmappedClues 的基线入参(officialId + matchAliases 都参与同名判定)。 */
+/**
+ * 端点响应 → 同名自动映射(ADR-0058):AA 条目 slug 归一后与**同厂家基线行**
+ * (officialId/matchAliases)精确相等、但不在现有映射 → 直接产出映射行(调用方
+ * upsert 进 model_aa_mapping,verified='auto')。同名确定性规则非猜测:归属来自基线
+ * 行;条目带 creator 且与行厂家不一致 → 跳过(防跨家撞名);未知值放行——同名本身
+ * 即归属证据。**唯一目标守卫**:一行基线只允许一个映射 slug——行已被某 slug 映射时
+ * 其余别名 slug 不再补(同模型双 slug 会撞 model_evaluations 的
+ * UNIQUE(model_id, evaluator, benchmark),快照事务崩、评测永久陈旧)。变体/快照/
+ * 基线外新模型与基线行不同名,天然不落(由厂家信源的残余 ID 线索→auto 核验链覆盖)。
+ * formerly aaUnmappedClues(落线索人工补映射,2026-09-05「当天时效」grill 定案翻转
+ * 为自动补表)。
+ */
+export function aaAutoMappings(
+  json: string,
+  baselines: readonly AaBaselineRef[],
+  /** 现有映射:slug → 目标(provider|officialId)。 */
+  existing: ReadonlyMap<string, string>,
+): AaMappingRow[] {
+  const known = new Map(
+    baselines.flatMap((b) =>
+      [b.officialId, ...b.matchAliases].map((id) => [aaSlugNorm(id), { provider: b.provider, officialId: b.officialId }] as const),
+    ),
+  )
+  const mappedTargets = new Set(existing.values())
+  const out: AaMappingRow[] = []
+  for (const e of parseAaEntries(json)) {
+    if (existing.has(e.slug)) continue
+    const hit = known.get(aaSlugNorm(e.slug))
+    if (hit === undefined) continue
+    // creator 已知且指向**别家**才拦(防跨家撞名);未知值放行——同名本身即归属证据,
+    // 未知值跳过会让 creator slug 漂移(如旧口径 'zhipu')静默失能整个信号
+    const creatorProvider = e.creator !== null ? AA_CREATOR_MAP[e.creator] : undefined
+    if (creatorProvider !== undefined && creatorProvider !== hit.provider) continue
+    // 唯一目标守卫:该基线行已有别的 slug 映射 → 不补(评测唯一键)
+    if (mappedTargets.has(`${hit.provider}|${hit.officialId}`)) continue
+    out.push({ slug: e.slug, provider: hit.provider, officialId: hit.officialId })
+  }
+  return out
+}
+
+/** aaAutoMappings 的基线入参(officialId + matchAliases 都参与同名判定;DB 行含 provider)。 */
 export interface AaBaselineRef {
   provider: ModelProviderId
   officialId: string
   matchAliases: readonly string[]
-}
-
-/**
- * 端点响应 → 「同名未映射」待核验线索:AA 条目 slug 归一后与**同厂家基线行**
- * (officialId/matchAliases)精确相等、但不在 AA_MODEL_MAP → 线索(键 `aa:<slug>`,
- * 与厂家残余 ID 裸键不撞)。归属来自基线行;条目带 creator 且与行厂家不一致 → 跳过
- * (防跨家撞名)。变体/快照/基线外新模型与基线行不同名,天然不落——口径窄而零猜测,
- * 量级 = 真·映射缺口(2026-09-01 线上实测 23 条存量,人工补映射后自愈);AA 收录了
- * 基线完全没有的新模型不在此信号内(由厂家信源的残余 ID 线索覆盖)。
- */
-export function aaUnmappedClues(
-  json: string,
-  baselines: readonly AaBaselineRef[],
-  today: string,
-): Array<{ provider: ModelProviderId; clue: PendingClue }> {
-  const known = new Map(
-    baselines.flatMap((b) =>
-      [b.officialId, ...b.matchAliases].map((id) => [aaSlugNorm(id), b.provider] as const),
-    ),
-  )
-  const out: Array<{ provider: ModelProviderId; clue: PendingClue }> = []
-  for (const e of parseAaEntries(json)) {
-    if (AA_MODEL_MAP[e.slug] !== undefined) continue
-    const provider = known.get(aaSlugNorm(e.slug))
-    if (provider === undefined) continue
-    // creator 已知且指向**别家**才拦(防跨家撞名);未知值放行——同名本身即归属证据,
-    // 未知值跳过会让 creator slug 漂移(如旧口径 'zhipu')静默失能整个信号
-    const creatorProvider = e.creator !== null ? AA_CREATOR_MAP[e.creator] : undefined
-    if (creatorProvider !== undefined && creatorProvider !== provider) continue
-    out.push({
-      provider,
-      clue: {
-        occurredOn: today,
-        title: `AA 已收录未映射:${e.name}`,
-        sourceUrl: aaModelUrl(e.slug),
-        modelKey: `aa:${e.slug}`,
-      },
-    })
-  }
-  return out
 }
 
 /** 快照日期(YYYY-MM-DD,北京时间)——与前端 24h 红点的北京时间锚点同口径。 */

@@ -1,5 +1,4 @@
-import { XAI_BASELINE } from '../xaiBaseline'
-import { aliasIn, clipFragment, MONTHS, type MatchedHit, type ParseResult, type ProviderDef } from './def'
+import { type BaselineRow, aliasIn, clipFragment, MONTHS, type MatchedHit, type ParseResult, type ProviderDef } from './def'
 
 // ---- xAI 发布流(研究 §3:主发布源;`## 月份` 标题仅月份粒度,条目 `### ` 自带标题)----
 
@@ -79,9 +78,9 @@ export function parseXaiReleaseNotes(
  * 不能作 slug 证据)。kind 恒 'updated',occurredOn 锚定当月 1 日(信源月份粒度);
  * 与基线事件同 (模型,日期,信源) 的条目由 poll 跳过。
  */
-export function matchXaiEvent(e: XaiReleaseEntry): Array<MatchedHit> {
+export function matchXaiEvent(e: XaiReleaseEntry, rows: readonly BaselineRow[]): Array<MatchedHit> {
   const out: Array<MatchedHit> = []
-  for (const b of XAI_BASELINE) {
+  for (const b of rows) {
     if (!b.matchAliases.some((a) => aliasIn(a, e.title))) continue
     out.push({
       officialId: b.officialId,
@@ -100,8 +99,8 @@ export const XAI_DEF: ProviderDef<XaiReleaseEntry> = {
   label: 'xAI',
   urls: [XAI_RELEASES_URL],
   parse: parseXaiReleaseNotes,
-  matchEntry(e) {
-    const matched = matchXaiEvent(e)
+  matchEntry(e, rows) {
+    const matched = matchXaiEvent(e, rows)
     if (matched.length > 0) return { hits: matched, clues: [] }
     return {
       hits: [],

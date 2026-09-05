@@ -1,6 +1,5 @@
 import type { ModelEvent } from 'chrome-tab-shared'
-import { ANTHROPIC_BASELINE } from '../anthropicBaseline'
-import { aliasIn, clipFragment, MONTHS, type ParseResult, type ProviderDef, slugIn } from './def'
+import { type BaselineRow, aliasIn, clipFragment, MONTHS, type ParseResult, type ProviderDef, slugIn } from './def'
 
 // ---- Anthropic release notes(研究 §3:主发布源;页面混有 SDK/平台功能条目,
 //  须按明确模型名/ID 过滤——与智谱同用双条件归属)----
@@ -63,10 +62,10 @@ function anthropicNoteTitle(text: string): string {
  * 存在链接命中基线 slug(路径尾边界)——SDK/平台功能条目与基线外型号(Mythos 等)因此
  * 天然跳过。kind 恒 'updated',与基线事件同 (模型,日期,信源) 的条目由 poll 跳过。
  */
-export function matchAnthropicEvent(n: AnthropicNote): { officialId: string; event: Omit<ModelEvent, 'id'> } | null {
-  for (const b of ANTHROPIC_BASELINE) {
+export function matchAnthropicEvent(n: AnthropicNote, rows: readonly BaselineRow[]): { officialId: string; event: Omit<ModelEvent, 'id'> } | null {
+  for (const b of rows) {
     const aliasHit = b.matchAliases.some((a) => aliasIn(a, n.text))
-    const link = n.links.find((u) => (b.matchSlugs ?? []).some((s) => slugIn(s, u)))
+    const link = n.links.find((u) => b.matchSlugs.some((s) => slugIn(s, u)))
     if (aliasHit && link) {
       return {
         officialId: b.officialId,
@@ -86,8 +85,8 @@ export const ANTHROPIC_DEF: ProviderDef<AnthropicNote> = {
   label: 'Anthropic',
   urls: [ANTHROPIC_RELEASES_URL],
   parse: parseAnthropicReleases,
-  matchEntry(n) {
-    const hit = matchAnthropicEvent(n)
+  matchEntry(n, rows) {
+    const hit = matchAnthropicEvent(n, rows)
     if (hit !== null) return { hits: [hit], clues: [] }
     return {
       hits: [],

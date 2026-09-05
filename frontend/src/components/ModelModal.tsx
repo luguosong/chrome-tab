@@ -216,6 +216,14 @@ function ModelList({
                     <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" aria-hidden="true" />
                   )}
                   <span className="truncate text-sm text-white/90">{m.name}</span>
+                  {m.verified === 'auto' && (
+                    <span
+                      className="shrink-0 rounded-full bg-amber-400/20 px-1.5 py-0.5 text-meta text-amber-200"
+                      title="LLM 自动核验入档(ADR-0058),字段以厂家一手信源为准;有误可人工修订"
+                    >
+                      自动核验
+                    </span>
+                  )}
                   {m.stage === 'retired' && (
                     <span className="shrink-0 rounded-full bg-white/15 px-1.5 py-0.5 text-meta text-white/55">
                       已退役

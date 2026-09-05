@@ -1,5 +1,7 @@
-import { DEEPSEEK_BASELINE, DEEPSEEK_UPDATES_URL } from '../deepseekBaseline'
-import { aliasIn, clipFragment, isRealIsoDate, type MatchedHit, type ParseResult, type ProviderDef } from './def'
+import { type BaselineRow, aliasIn, clipFragment, isRealIsoDate, type MatchedHit, type ParseResult, type ProviderDef } from './def'
+
+/** DeepSeek API Change Log(主发布源,研究 §3;ADR-0058 起常量自基线文件迁入本体)。 */
+export const DEEPSEEK_UPDATES_URL = 'https://api-docs.deepseek.com/updates/'
 
 // ---- DeepSeek API Change Log(研究 §3:主发布源 HTML 无 RSS。解析器与匹配器随
 //  厂家 provider 文件走——issues/07 期间「随基线文件走」是并行接入防撞车的临时
@@ -62,9 +64,9 @@ export function parseDeepSeekUpdates(html: string): ParseResult<DeepSeekSection>
  * 技术、API 功能)无 alias 命中 → 待核验线索跳过,该史实由基线事件承载。kind 恒
  * 'updated',与基线事件同 (模型,日期,信源) 的小节由 poll 跳过。
  */
-export function matchDeepSeekEvent(s: DeepSeekSection): Array<MatchedHit> {
+export function matchDeepSeekEvent(s: DeepSeekSection, rows: readonly BaselineRow[]): Array<MatchedHit> {
   const out: Array<MatchedHit> = []
-  for (const b of DEEPSEEK_BASELINE) {
+  for (const b of rows) {
     if (!b.matchAliases.some((a) => aliasIn(a, s.title))) continue
     out.push({
       officialId: b.officialId,
@@ -80,8 +82,8 @@ export const DEEPSEEK_DEF: ProviderDef<DeepSeekSection> = {
   label: 'DeepSeek',
   urls: [DEEPSEEK_UPDATES_URL],
   parse: parseDeepSeekUpdates,
-  matchEntry(s) {
-    const matched = matchDeepSeekEvent(s)
+  matchEntry(s, rows) {
+    const matched = matchDeepSeekEvent(s, rows)
     if (matched.length > 0) return { hits: matched, clues: [] }
     return {
       hits: [],

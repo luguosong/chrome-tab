@@ -1,6 +1,5 @@
 import type { ModelEvent } from 'chrome-tab-shared'
-import { ZHIPU_BASELINE } from '../zhipuBaseline'
-import { aliasIn, clipFragment, normalizeIsoDate, type ParseResult, type ProviderDef, slugIn } from './def'
+import { type BaselineRow, aliasIn, clipFragment, normalizeIsoDate, type ParseResult, type ProviderDef, slugIn } from './def'
 
 // ---- 智谱新品发布页(研究 §3:主发布源;发布页 Markdown 的 `<Update>` 块)----
 
@@ -53,12 +52,12 @@ export function parseZhipuReleases(md: string): ParseResult<ZhipuUpdate> {
  * (自动解析不猜语义化事件类型;api_available 等语义类型只出自人工核验基线 events)。
  * 与基线事件同 (模型,日期,信源) 的块由轮询入库(runPoll → ingest 的 seen 过滤)跳过,不产重复动态。
  */
-export function matchZhipuEvent(u: ZhipuUpdate): { officialId: string; event: Omit<ModelEvent, 'id'> } | null {
+export function matchZhipuEvent(u: ZhipuUpdate, rows: readonly BaselineRow[]): { officialId: string; event: Omit<ModelEvent, 'id'> } | null {
   const docUrl = u.docUrl
   if (docUrl === null) return null // 无链接无法核验归属 → 待核验线索,不生成动态
-  for (const b of ZHIPU_BASELINE) {
+  for (const b of rows) {
     const aliasHit = b.matchAliases.some((a) => aliasIn(a, u.description))
-    const slugHit = (b.matchSlugs ?? []).some((s) => slugIn(s, docUrl))
+    const slugHit = b.matchSlugs.some((s) => slugIn(s, docUrl))
     if (aliasHit && slugHit) {
       const event: Omit<ModelEvent, 'id'> = {
         kind: 'updated',
@@ -81,8 +80,8 @@ export const ZHIPU_DEF: ProviderDef<ZhipuUpdate> = {
   label: '智谱',
   urls: [ZHIPU_RELEASES_URL],
   parse: parseZhipuReleases,
-  matchEntry(u) {
-    const hit = matchZhipuEvent(u)
+  matchEntry(u, rows) {
+    const hit = matchZhipuEvent(u, rows)
     if (hit !== null) return { hits: [hit], clues: [] }
     return {
       hits: [],

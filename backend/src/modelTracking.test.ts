@@ -4,13 +4,9 @@ import { SINGLETON_TYPES, TYPE_SPANS } from './icons'
 import { createApp } from './app'
 import { bootstrap } from './seed'
 import { openDb, type Db } from './db'
-import { ModelTrackingService, type ModelTrackingDeps } from './modelTracking'
-import { ZHIPU_BASELINE } from './zhipuBaseline'
-import { ANTHROPIC_BASELINE } from './anthropicBaseline'
-import { XAI_BASELINE } from './xaiBaseline'
-import { KIMI_BASELINE } from './kimiBaseline'
-import { OPENAI_BASELINE } from './openaiBaseline'
-import { normalizeIsoDate } from './providers/def'
+import { ModelTrackingService, type BaselineModel, type ModelTrackingDeps } from './modelTracking'
+import { makeIdResolver, normalizeIsoDate, type BaselineRow } from './providers/def'
+import seedJson from './modelBaselineSeed.json'
 import {
   ANTHROPIC_RELEASES_URL,
   matchAnthropicEvent,
@@ -18,13 +14,28 @@ import {
   parseAnthropicReleases,
 } from './providers/anthropic'
 import { KIMI_BLOG_URL, KIMI_NEWS_URL, matchKimiEvent, parseKimiArticles } from './providers/moonshot'
-import { matchOpenAIEvents, OPENAI_CHANGELOG_URL, OPENAI_DEF, parseOpenAIChangelog, resolveOpenAIModelId, type OpenAIChangelogEntry } from './providers/openai'
+import { matchOpenAIEvents, OPENAI_CHANGELOG_URL, OPENAI_DEF, parseOpenAIChangelog, type OpenAIChangelogEntry } from './providers/openai'
 import { matchXaiEvent, parseXaiReleaseNotes, XAI_RELEASES_URL } from './providers/xai'
 import { matchZhipuEvent, parseZhipuReleases, ZHIPU_RELEASES_URL } from './providers/zhipu'
-import { DEEPSEEK_BASELINE, DEEPSEEK_UPDATES_URL } from './deepseekBaseline'
-import { matchDeepSeekEvent, parseDeepSeekUpdates } from './providers/deepseek'
-import { QWEN_BASELINE, QWEN_RELEASES_URL } from './qwenBaseline'
-import { ALIBABA_DEF, matchQwenEvents, parseBailianReleases, resolveQwenModelId } from './providers/alibaba'
+import { DEEPSEEK_UPDATES_URL, matchDeepSeekEvent, parseDeepSeekUpdates } from './providers/deepseek'
+import { ALIBABA_DEF, matchQwenEvents, parseBailianReleases, QWEN_RELEASES_URL } from './providers/alibaba'
+
+// ADR-0058 基线 DB 化:测试的「基线行集」从种子快照派生(生产路径 = bootstrap 灌进
+// model_archive 后读出;测试直接消费种子,形态等价——种子的 models 即 BaselineModel[])。
+const SEED_MODELS = (seedJson as { models: BaselineModel[] }).models
+const seeded = (provider: string): BaselineModel[] => SEED_MODELS.filter((b) => b.provider === provider)
+const asRows = (models: readonly BaselineModel[]): BaselineRow[] =>
+  models.map((b) => ({ officialId: b.officialId, matchAliases: b.matchAliases, matchSlugs: b.matchSlugs ?? [] }))
+const ZHIPU_BASELINE = seeded('zhipu')
+const ANTHROPIC_BASELINE = seeded('anthropic')
+const XAI_BASELINE = seeded('xai')
+const KIMI_BASELINE = seeded('moonshot')
+const OPENAI_BASELINE = seeded('openai')
+const DEEPSEEK_BASELINE = seeded('deepseek')
+const QWEN_BASELINE = seeded('alibaba')
+/** 原 resolveOpenAIModelId/resolveQwenModelId(makeIdResolver 绑定代码基线的常量)的等价物。 */
+const resolveOpenAIModelId = makeIdResolver(asRows(OPENAI_BASELINE))
+const resolveQwenModelId = makeIdResolver(asRows(QWEN_BASELINE))
 
 /**
  * 模型追踪自动检查(issues/01:单例/占格、持久化、陈旧降级 + 鉴权;issues/02:八类
@@ -340,7 +351,7 @@ describe('模型追踪:智谱发布页解析(纯函数)', () => {
 
   it('基线双条件匹配:GLM-5.3/GLM-5.2 块产事件;基线外型号(GLM-9.9)与非模型块跳过', () => {
     const updates = parseZhipuReleases(ZHIPU_MD).entries
-    expect(matchZhipuEvent(updates[0]!)).toEqual({
+    expect(matchZhipuEvent(updates[0]!, asRows(ZHIPU_BASELINE))).toEqual({
       officialId: 'glm-5.3',
       event: {
         kind: 'updated',
@@ -349,9 +360,9 @@ describe('模型追踪:智谱发布页解析(纯函数)', () => {
         sourceUrl: 'https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3',
       },
     })
-    expect(matchZhipuEvent(updates[1]!)!.officialId).toBe('glm-5.2')
-    expect(matchZhipuEvent(updates[2]!)).toBeNull() // GLM Coding Plan(非模型)
-    expect(matchZhipuEvent(updates[3]!)).toBeNull() // GLM-9.9(基线外,待核验)
+    expect(matchZhipuEvent(updates[1]!, asRows(ZHIPU_BASELINE))!.officialId).toBe('glm-5.2')
+    expect(matchZhipuEvent(updates[2]!, asRows(ZHIPU_BASELINE))).toBeNull() // GLM Coding Plan(非模型)
+    expect(matchZhipuEvent(updates[3]!, asRows(ZHIPU_BASELINE))).toBeNull() // GLM-9.9(基线外,待核验)
   })
 
   it('家族 Flash 变体独立认领:GLM-5.3-Flash 块归 glm-5.3-flash 而非家族行 glm-5.3', () => {
@@ -361,7 +372,7 @@ describe('模型追踪:智谱发布页解析(纯函数)', () => {
     const [u] = parseZhipuReleases(
       '<Update label="2026-08-26" description="GLM-5.3-Flash 原生多模态模型上线">\n  👀 [**GLM-5.3-Flash**](/cn/guide/models/vlm/glm-5.3-flash)\n</Update>',
     ).entries
-    expect(matchZhipuEvent(u!)).toEqual({
+    expect(matchZhipuEvent(u!, asRows(ZHIPU_BASELINE))).toEqual({
       officialId: 'glm-5.3-flash',
       event: {
         kind: 'updated',
@@ -377,25 +388,25 @@ describe('模型追踪:智谱发布页解析(纯函数)', () => {
     const [u] = parseZhipuReleases(
       '<Update label="2026-01-14" description="GLM-Image 图像生成模型上线">\n[**GLM-Image**](/cn/guide/models/text/glm-4.7)\n</Update>',
     ).entries
-    expect(matchZhipuEvent(u!)).toBeNull()
+    expect(matchZhipuEvent(u!, asRows(ZHIPU_BASELINE))).toBeNull()
   })
 
   it('厂家归属:平台托管的第三方模型(Vidu)不进基线、其发布块不产智谱动态', () => {
     // 研究研究 §5:智谱目录的 Vidu 只是平台接入,不是智谱自研——基线不含、块不匹配
     expect(ZHIPU_BASELINE.some((b) => b.officialId.includes('vidu'))).toBe(false)
     const updates = parseZhipuReleases(ZHIPU_MD).entries
-    expect(matchZhipuEvent(updates[4]!)).toBeNull()
+    expect(matchZhipuEvent(updates[4]!, asRows(ZHIPU_BASELINE))).toBeNull()
   })
 
   it('alias/slug 词边界:「GLM-4.7」不认领「GLM-4.7-Flash」的块,「…/glm-4」不认领「…/glm-4-long」', () => {
     const [flash] = parseZhipuReleases(
       '<Update label="2026-01-19" description="GLM-4.7-Flash 免费模型上线">\n[**GLM-4.7-Flash**](/cn/guide/models/free/glm-4.7-flash)\n</Update>',
     ).entries
-    expect(matchZhipuEvent(flash!)!.officialId).toBe('glm-4.7-flash') // 归 Flash 自己,非 glm-4.7
+    expect(matchZhipuEvent(flash!, asRows(ZHIPU_BASELINE))!.officialId).toBe('glm-4.7-flash') // 归 Flash 自己,非 glm-4.7
     const [long] = parseZhipuReleases(
       '<Update label="2026-01-01" description="GLM-4-Long 长文本模型上线">\n[**GLM-4-Long**](/cn/guide/models/text/glm-4-long)\n</Update>',
     ).entries
-    expect(matchZhipuEvent(long!)!.officialId).toBe('glm-4-long') // 非 glm-4-flash(其 slug 为 /text/glm-4 前缀)
+    expect(matchZhipuEvent(long!, asRows(ZHIPU_BASELINE))!.officialId).toBe('glm-4-long') // 非 glm-4-flash(其 slug 为 /text/glm-4 前缀)
   })
 })
 
@@ -530,9 +541,8 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
     expect(glm52!.events[0]!.kind).toBe('api_available')
   })
 
-  it('issues/01 旧库的 updated 同键事件被基线语义化事件取代(升级清理)', async () => {
+  it('ADR-0058:init 不再每启重放基线事件——重启幂等,库内同键 updated 与种子语义事件并存(DB 是唯一真相)', async () => {
     const { db } = openDb(':memory:')
-    // 模拟 01 时期库:直接落一条自动解析口径的 updated(同键于 02 基线事件)
     const svc = new ModelTrackingService(db, makeDeps(''))
     await svc.init()
     const modelId = (await byId(svc, 'glm-5.3'))!.id
@@ -547,12 +557,13 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
         created_at: new Date().toISOString(),
       })
       .execute()
-    // 升级重启:新基线 init 清理旧 updated,同公告只剩 api_available
-    const upgraded = new ModelTrackingService(db, makeDeps(''))
-    await upgraded.init()
-    const after = await byId(upgraded, 'glm-5.3')
-    expect(after!.events).toHaveLength(1)
-    expect(after!.events[0]!.kind).toBe('api_available')
+    // 重启:既不清理也不重复——原「升级清理」机制随代码基线 upsert 一起退役
+    // (2026-08-27 前的存量库早已在旧机制时代清理完毕,迁移无遗留)
+    const restarted = new ModelTrackingService(db, makeDeps(''))
+    await restarted.init()
+    const after = await byId(restarted, 'glm-5.3')
+    expect(after!.events).toHaveLength(2)
+    expect(after!.events.map((e) => e.kind).sort()).toEqual(['api_available', 'updated'])
   })
 
   it('自动解析仍能捕获基线未覆盖的新公告(kind=updated)', async () => {
@@ -767,14 +778,14 @@ describe('模型追踪:Anthropic release notes 解析(纯函数)', () => {
   it('双条件归属:9-01/Opus 5/Fable 5 发布条目产事件;SDK、平台条目、弃用公告条目跳过', () => {
     const notes = parseAnthropicReleases(ANTHROPIC_MD).entries
     // 9-01 Fable 5.1 发布条目:alias+模型专属 whats-new 链接双命中,归 fable-5-1 而非 fable-5
-    const fable51 = matchAnthropicEvent(notes[0]!)!
+    const fable51 = matchAnthropicEvent(notes[0]!, asRows(ANTHROPIC_BASELINE))!
     expect(fable51.officialId).toBe('claude-fable-5-1')
     expect(fable51.event).toMatchObject({
       kind: 'updated',
       occurredOn: '2026-09-01',
       sourceUrl: 'https://platform.claude.com/docs/en/models/fable-5-1/whats-new-fable-5-1',
     })
-    const opus5 = matchAnthropicEvent(notes[3]!)!
+    const opus5 = matchAnthropicEvent(notes[3]!, asRows(ANTHROPIC_BASELINE))!
     expect(opus5.officialId).toBe('claude-opus-5')
     expect(opus5.event).toMatchObject({
       kind: 'updated',
@@ -783,17 +794,17 @@ describe('模型追踪:Anthropic release notes 解析(纯函数)', () => {
     })
     expect(opus5.event.title).toContain("We've launched **Claude Opus 5**")
     // 平台条目(链接无模型 slug)不认领——即使文本同时提及 Fable 5.1 与 Fable 5(词边界不误领)
-    expect(matchAnthropicEvent(notes[1]!)).toBeNull()
-    expect(matchAnthropicEvent(notes[2]!)).toBeNull() // Python SDK(平台功能)
-    expect(matchAnthropicEvent(notes[4]!)).toBeNull() // fast mode 移除(链接不含 opus-4-7 slug)
-    expect(matchAnthropicEvent(notes[6]!)).toBeNull() // Opus 4.1 弃用公告(链接为弃用表,退役口径归基线)
-    expect(matchAnthropicEvent(notes[7]!)).toBeNull() // Haiku 3.5 产品页链接无本型号 slug
+    expect(matchAnthropicEvent(notes[1]!, asRows(ANTHROPIC_BASELINE))).toBeNull()
+    expect(matchAnthropicEvent(notes[2]!, asRows(ANTHROPIC_BASELINE))).toBeNull() // Python SDK(平台功能)
+    expect(matchAnthropicEvent(notes[4]!, asRows(ANTHROPIC_BASELINE))).toBeNull() // fast mode 移除(链接不含 opus-4-7 slug)
+    expect(matchAnthropicEvent(notes[6]!, asRows(ANTHROPIC_BASELINE))).toBeNull() // Opus 4.1 弃用公告(链接为弃用表,退役口径归基线)
+    expect(matchAnthropicEvent(notes[7]!, asRows(ANTHROPIC_BASELINE))).toBeNull() // Haiku 3.5 产品页链接无本型号 slug
   })
 
   it('共同公告条目归主模型:Mythos 已入档,6-09 发布条目仍归 Fable 5(基线行序:主模型在前)', () => {
     const notes = parseAnthropicReleases(ANTHROPIC_MD).entries
     // Fable 5 与 Mythos 5 同条目:两行都双命中,数组顺序(Fable 5 在 Mythos 5 前)定归属
-    expect(matchAnthropicEvent(notes[5]!)!.officialId).toBe('claude-fable-5')
+    expect(matchAnthropicEvent(notes[5]!, asRows(ANTHROPIC_BASELINE))!.officialId).toBe('claude-fable-5')
     // Mythos 5/5.1 已随公开模型页+公开定价行核验入档(2026-09-02),invite only 记入 summary
     expect(ANTHROPIC_BASELINE.filter((b) => b.officialId.includes('mythos')).map((b) => b.officialId).sort())
       .toEqual(['claude-mythos-5', 'claude-mythos-5-1'])
@@ -804,12 +815,12 @@ describe('模型追踪:Anthropic release notes 解析(纯函数)', () => {
       "### July 1, 2026\n\n* Something new for Claude Opus 4.8. See [docs](https://platform.claude.com/docs/en/models/opus-4-8/overview).\n",
     ).entries
     // 文本提 4.8、链接也是 4.8:应归 claude-opus-4-8,而非基线里的 claude-opus-4(词边界)
-    expect(matchAnthropicEvent(note!)!.officialId).toBe('claude-opus-4-8')
+    expect(matchAnthropicEvent(note!, asRows(ANTHROPIC_BASELINE))!.officialId).toBe('claude-opus-4-8')
     const [snapshot] = parseAnthropicReleases(
       "### July 2, 2026\n\n* Update for Claude Haiku 4.5. See [snapshot](https://platform.claude.com/docs/en/models/haiku-4-5-20251001/overview).\n",
     ).entries
     // 家族 slug 尾边界不认领日期快照链接(dated URL 不自动归属,防误领)
-    expect(matchAnthropicEvent(snapshot!)).toBeNull()
+    expect(matchAnthropicEvent(snapshot!, asRows(ANTHROPIC_BASELINE))).toBeNull()
   })
 })
 
@@ -924,7 +935,7 @@ describe('模型追踪:xAI 发布流解析(纯函数,issues/05)', () => {
   it('标题归属:型号条目命中并锚定当月 1 日;产品条目(Grok Bot)与历史能力公告不产事件', () => {
     const entries = parseXaiReleaseNotes(XAI_MD, 2026, 8).entries
     const byTitle = (t: string) => entries.find((e) => e.title === t)!
-    expect(matchXaiEvent(byTitle('Grok 4.6'))).toEqual([
+    expect(matchXaiEvent(byTitle('Grok 4.6'), asRows(XAI_BASELINE))).toEqual([
       {
         officialId: 'grok-4.6',
         event: {
@@ -935,13 +946,13 @@ describe('模型追踪:xAI 发布流解析(纯函数,issues/05)', () => {
         },
       },
     ])
-    expect(matchXaiEvent(byTitle('Grok Bot'))).toEqual([]) // 非模型条目
-    expect(matchXaiEvent(byTitle('Grok Speech to Speech API is released'))).toEqual([]) // 能力 API 历史公告,不属于任一基线行
+    expect(matchXaiEvent(byTitle('Grok Bot'), asRows(XAI_BASELINE))).toEqual([]) // 非模型条目
+    expect(matchXaiEvent(byTitle('Grok Speech to Speech API is released'), asRows(XAI_BASELINE))).toEqual([]) // 能力 API 历史公告,不属于任一基线行
   })
 
   it('家族合并条目多命中:「Grok 4.20 and Grok 4.20 Multi-agent are live」同时命中 reasoning 与 multi-agent 两行', () => {
     const entries = parseXaiReleaseNotes(XAI_MD, 2026, 8).entries
-    const family = matchXaiEvent(entries.find((e) => e.yearMonth === '2026-03')!)
+    const family = matchXaiEvent(entries.find((e) => e.yearMonth === '2026-03')!, asRows(XAI_BASELINE))
     expect(family.map((h) => h.officialId).sort()).toEqual(['grok-4.20-0309-reasoning', 'grok-4.20-multi-agent-0309'])
     expect(family[0]!.event.occurredOn).toBe('2026-03-01') // 月份粒度锚定当月 1 日
   })
@@ -949,7 +960,7 @@ describe('模型追踪:xAI 发布流解析(纯函数,issues/05)', () => {
   it('标题词边界:「grok-imagine-video-1.5 modalities」只命中 1.5 行,不误认 grok-imagine-video', () => {
     const entries = parseXaiReleaseNotes(XAI_MD, 2026, 8).entries
     const v15 = entries.find((e) => e.title === 'grok-imagine-video-1.5 modalities')!
-    expect(matchXaiEvent(v15).map((h) => h.officialId)).toEqual(['grok-imagine-video-1.5'])
+    expect(matchXaiEvent(v15, asRows(XAI_BASELINE)).map((h) => h.officialId)).toEqual(['grok-imagine-video-1.5'])
   })
 })
 
@@ -1117,23 +1128,23 @@ describe('模型追踪:月之暗面资讯/Blog 解析(纯函数,issues/06)', () 
 
   it('标题归属:非模型文章(大使计划/Work 上新/PerceptionBench/Kimi-VL)不产事件', () => {
     const news = parseKimiArticles(KIMI_NEWS_HTML).entries
-    expect(matchKimiEvent(news.find((a) => a.title.includes('大使计划'))!)).toBeNull()
-    expect(matchKimiEvent(news.find((a) => a.title.includes('Work 上新'))!)).toBeNull()
+    expect(matchKimiEvent(news.find((a) => a.title.includes('大使计划'))!, asRows(KIMI_BASELINE))).toBeNull()
+    expect(matchKimiEvent(news.find((a) => a.title.includes('Work 上新'))!, asRows(KIMI_BASELINE))).toBeNull()
     const blog = parseKimiArticles(KIMI_BLOG_HTML).entries
-    expect(matchKimiEvent(blog.find((a) => a.title === 'PerceptionBench')!)).toBeNull()
-    expect(matchKimiEvent(blog.find((a) => a.title === 'Kimi-VL')!)).toBeNull()
+    expect(matchKimiEvent(blog.find((a) => a.title === 'PerceptionBench')!, asRows(KIMI_BASELINE))).toBeNull()
+    expect(matchKimiEvent(blog.find((a) => a.title === 'Kimi-VL')!, asRows(KIMI_BASELINE))).toBeNull()
     // 「Kimi K3 开放日」是 K3 的权重开放公告——归属 K3 本身(基线 weights_available 占同键)
-    expect(matchKimiEvent(news.find((a) => a.url.endsWith('kimi-k3-open-source'))!)!.officialId).toBe('kimi-k3')
+    expect(matchKimiEvent(news.find((a) => a.url.endsWith('kimi-k3-open-source'))!, asRows(KIMI_BASELINE))!.officialId).toBe('kimi-k3')
   })
 
   it('最长 alias 优先:「Kimi K2 Thinking」标题不误归属「Kimi K2」', () => {
-    const hit = matchKimiEvent({ url: 'https://www.kimi.com/en/blog/kimi-k2-thinking', title: 'Kimi K2 Thinking', date: '2025-11-06' })
+    const hit = matchKimiEvent({ url: 'https://www.kimi.com/en/blog/kimi-k2-thinking', title: 'Kimi K2 Thinking', date: '2025-11-06' }, asRows(KIMI_BASELINE))
     expect(hit!.officialId).toBe('kimi-k2-thinking')
   })
 
   it('词边界:「Kimi K2」不认领「Kimi K2.5」的标题', () => {
-    expect(matchKimiEvent({ url: 'https://www.kimi.com/news/x', title: 'Kimi K2.5 视觉能力升级', date: '2026-02-02' })!.officialId).toBe('kimi-k2.5')
-    expect(matchKimiEvent({ url: 'https://www.kimi.com/news/y', title: 'Kimi K3.5 发布预告', date: '2026-09-09' })).toBeNull()
+    expect(matchKimiEvent({ url: 'https://www.kimi.com/news/x', title: 'Kimi K2.5 视觉能力升级', date: '2026-02-02' }, asRows(KIMI_BASELINE))!.officialId).toBe('kimi-k2.5')
+    expect(matchKimiEvent({ url: 'https://www.kimi.com/news/y', title: 'Kimi K3.5 发布预告', date: '2026-09-09' }, asRows(KIMI_BASELINE))).toBeNull()
   })
 })
 
@@ -1350,7 +1361,7 @@ describe('模型追踪:OpenAI changelog 解析(纯函数,issues/03)', () => {
   })
 
   it('条目 → 事件:一表多模型各产一条、同键同锚点;无模型条目与基线外别名条目不产事件', () => {
-    const events = matchOpenAIEvents(parseOpenAIChangelog(OPENAI_MD).entries)
+    const events = matchOpenAIEvents(parseOpenAIChangelog(OPENAI_MD).entries, resolveOpenAIModelId)
     expect(events.map((e) => e.officialId)).toEqual([
       'gpt-5.6-sol',
       'gpt-5.6-sol',
@@ -1373,7 +1384,7 @@ describe('模型追踪:OpenAI changelog 解析(纯函数,issues/03)', () => {
       models: ['gpt-5.6-sol', 'gpt-6.2', 'gpt-6.2'],
       firstLine: 'Dual launch.',
     }
-    const partial = OPENAI_DEF.matchEntry(entry)
+    const partial = OPENAI_DEF.matchEntry(entry, asRows(OPENAI_BASELINE))
     expect(partial.hits.map((h) => h.officialId)).toEqual(['gpt-5.6-sol'])
     expect(partial.clues).toHaveLength(1)
     expect(partial.clues[0]).toMatchObject({
@@ -1382,12 +1393,12 @@ describe('模型追踪:OpenAI changelog 解析(纯函数,issues/03)', () => {
       sourceUrl: 'https://developers.openai.com/api/docs/changelog#aug-30',
     })
     expect(partial.clues[0]!.title).toMatch(/^gpt-6\.2:/)
-    expect(OPENAI_DEF.matchEntry({ ...entry, models: ['gpt-5.6-sol'] }).clues).toEqual([])
-    const whole = OPENAI_DEF.matchEntry({ ...entry, models: ['gpt-6.2'] })
+    expect(OPENAI_DEF.matchEntry({ ...entry, models: ['gpt-5.6-sol'] }, asRows(OPENAI_BASELINE)).clues).toEqual([])
+    const whole = OPENAI_DEF.matchEntry({ ...entry, models: ['gpt-6.2'] }, asRows(OPENAI_BASELINE))
     expect(whole.hits).toEqual([])
     expect(whole.clues).toHaveLength(1)
     expect(whole.clues[0]!.modelKey).toBe('gpt-6.2') // 全未认领同裸键:同一模型永不双行
-    expect(OPENAI_DEF.matchEntry({ ...entry, models: [] }).clues).toEqual([])
+    expect(OPENAI_DEF.matchEntry({ ...entry, models: [] }, asRows(OPENAI_BASELINE)).clues).toEqual([])
   })
 })
 
@@ -1542,7 +1553,7 @@ describe('模型追踪:DeepSeek Change Log 解析(纯函数;issues/07)', () => {
   it('标题词边界归属:模型名小节归其行;家族段/别名标题段/非模型段跳过(正文提及不作证据)', () => {
     const sections = parseDeepSeekUpdates(DEEPSEEK_HTML).entries
     const byAnchor = (a: string) => sections.find((s) => s.anchorUrl.endsWith(a))!
-    expect(matchDeepSeekEvent(byAnchor('deepseek-v4-pro-update'))).toEqual([
+    expect(matchDeepSeekEvent(byAnchor('deepseek-v4-pro-update'), asRows(DEEPSEEK_BASELINE))).toEqual([
       {
         officialId: 'deepseek-v4-pro',
         event: {
@@ -1553,24 +1564,24 @@ describe('模型追踪:DeepSeek Change Log 解析(纯函数;issues/07)', () => {
         },
       },
     ])
-    expect(matchDeepSeekEvent(byAnchor('deepseek-v4-flash-vision-exp-release')).map((h) => h.officialId)).toEqual(['deepseek-v4-flash-vision-exp'])
+    expect(matchDeepSeekEvent(byAnchor('deepseek-v4-flash-vision-exp-release'), asRows(DEEPSEEK_BASELINE)).map((h) => h.officialId)).toEqual(['deepseek-v4-flash-vision-exp'])
     // Vision-Exp 节正文提及「on par with DeepSeek-V4-Flash」——标题才作归属证据(否则误记 V4-Flash)
-    expect(matchDeepSeekEvent(byAnchor('deepseek-v4'))).toEqual([]) // 家族段:非基线 alias,待核验线索
-    expect(matchDeepSeekEvent(byAnchor('deepseek-chat'))).toEqual([]) // 别名标题段:史实由基线事件承载
-    expect(matchDeepSeekEvent(byAnchor('new-api-features'))).toEqual([]) // 平台功能段
+    expect(matchDeepSeekEvent(byAnchor('deepseek-v4'), asRows(DEEPSEEK_BASELINE))).toEqual([]) // 家族段:非基线 alias,待核验线索
+    expect(matchDeepSeekEvent(byAnchor('deepseek-chat'), asRows(DEEPSEEK_BASELINE))).toEqual([]) // 别名标题段:史实由基线事件承载
+    expect(matchDeepSeekEvent(byAnchor('new-api-features'), asRows(DEEPSEEK_BASELINE))).toEqual([]) // 平台功能段
   })
 
   it('多命中:家族式双提标题同时归属两行(同 xAI 合并条目口径,不漏记半边)', () => {
-    const hits = matchDeepSeekEvent({ date: '2026-09-01', title: 'DeepSeek-V4-Pro and DeepSeek-V4-Flash Update', anchorUrl: 'https://x/#c' })
+    const hits = matchDeepSeekEvent({ date: '2026-09-01', title: 'DeepSeek-V4-Pro and DeepSeek-V4-Flash Update', anchorUrl: 'https://x/#c' }, asRows(DEEPSEEK_BASELINE))
     expect(hits.map((h) => h.officialId).sort()).toEqual(['deepseek-v4-flash', 'deepseek-v4-pro'])
   })
 
   it('词边界防误认领:「DeepSeek-V4-Flash」不认领 Vision-Exp 小节;「DeepSeek-V3.2」不认领 Speciale', () => {
     expect(
-      matchDeepSeekEvent({ date: '2026-08-21', title: 'DeepSeek-V4-Flash-Vision-Exp Release', anchorUrl: 'https://x/#a' }).map((h) => h.officialId),
+      matchDeepSeekEvent({ date: '2026-08-21', title: 'DeepSeek-V4-Flash-Vision-Exp Release', anchorUrl: 'https://x/#a' }, asRows(DEEPSEEK_BASELINE)).map((h) => h.officialId),
     ).not.toContain('deepseek-v4-flash')
     expect(
-      matchDeepSeekEvent({ date: '2025-12-01', title: 'DeepSeek-V3.2-Speciale', anchorUrl: 'https://x/#b' }).map((h) => h.officialId),
+      matchDeepSeekEvent({ date: '2025-12-01', title: 'DeepSeek-V3.2-Speciale', anchorUrl: 'https://x/#b' }, asRows(DEEPSEEK_BASELINE)).map((h) => h.officialId),
     ).not.toContain('deepseek-v3.2')
   })
 })
@@ -1717,7 +1728,7 @@ describe('模型追踪:百炼上下架表解析(纯函数;issues/09)', () => {
   })
 
   it('表格行 → 事件:同格多 ID 命中同模型只产一条;第三方/别名行零事件;信源统一主发布源页', () => {
-    const hits = matchQwenEvents(parseBailianReleases(QWEN_HTML).entries)
+    const hits = matchQwenEvents(parseBailianReleases(QWEN_HTML).entries, resolveQwenModelId)
     expect(hits).toHaveLength(3)
     expect(hits).toContainEqual({
       officialId: 'wan3.0-video-prime',
@@ -1745,11 +1756,11 @@ describe('模型追踪:百炼上下架表解析(纯函数;issues/09)', () => {
       date: '2026-08-30',
       modelIds: ['qwen3.8-max', 'qwen3.9-preview', 'qwen3.9-preview'],
       description: '新一代旗舰与高性价比档',
-    })
+    }, asRows(QWEN_BASELINE))
     expect(partial.hits.map((h) => h.officialId)).toEqual(['qwen3.8-max'])
     expect(partial.clues.map((c) => c.modelKey)).toEqual(['qwen3.9-preview'])
     expect(partial.clues[0]!.title).toMatch(/^qwen3\.9-preview:/)
-    const whole = ALIBABA_DEF.matchEntry({ date: '2026-08-30', modelIds: ['kimi-k3'], description: '百炼托管第三方' })
+    const whole = ALIBABA_DEF.matchEntry({ date: '2026-08-30', modelIds: ['kimi-k3'], description: '百炼托管第三方' }, asRows(QWEN_BASELINE))
     expect(whole.hits).toEqual([])
     expect(whole.clues).toHaveLength(1)
     expect(whole.clues[0]!.modelKey).toBe('kimi-k3')

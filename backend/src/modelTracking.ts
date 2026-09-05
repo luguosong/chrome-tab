@@ -16,13 +16,7 @@ import type {
 import { fetchText } from './common'
 import type { Db } from './db'
 import type { AuthEnv } from './auth'
-import { ZHIPU_BASELINE } from './zhipuBaseline'
-import { ANTHROPIC_BASELINE } from './anthropicBaseline'
-import { XAI_BASELINE } from './xaiBaseline'
-import { KIMI_BASELINE } from './kimiBaseline'
-import { OPENAI_BASELINE } from './openaiBaseline'
-import { DEEPSEEK_BASELINE } from './deepseekBaseline'
-import { QWEN_BASELINE } from './qwenBaseline'
+import seed from './modelBaselineSeed.json'
 import { DEEPSEEK_DEF } from './providers/deepseek'
 import { ZHIPU_DEF } from './providers/zhipu'
 import { ANTHROPIC_DEF } from './providers/anthropic'
@@ -30,18 +24,23 @@ import { XAI_DEF } from './providers/xai'
 import { MOONSHOT_DEF } from './providers/moonshot'
 import { OPENAI_DEF } from './providers/openai'
 import { ALIBABA_DEF } from './providers/alibaba'
-import type { MatchedHit, PendingClue, ProviderDef } from './providers/def'
+import type { BaselineRow, MatchedHit, PendingClue, ProviderDef } from './providers/def'
 import {
   AA_EVALUATOR,
   AA_EVALUATOR_LABEL,
   AA_LLM_URL,
   AA_MEDIA_ENDPOINTS,
+  aaAutoMappings,
+  aaMappingIndex,
   aaRowsFromLlms,
   aaRowsFromMedia,
-  aaUnmappedClues,
   beijingToday,
+  type AaBaselineRef,
   type AaEvalRow,
+  type AaMappingRow,
 } from './aaEvaluations'
+import { verifyClue } from './modelVerify'
+import { ntfyNotify } from './notify'
 
 /**
  * 模型追踪(CONTEXT.md「模型追踪/跟踪模型/模型档案」;ADR-0025):全局单例图标的
@@ -63,7 +62,7 @@ import {
  * 漂移不产动态、首次进入评测产 evaluated,评测源失败与厂家信源互不影响。
  */
 
-/** 人工核验基线模型(代码即配置;profile 字段部署时幂等刷新,事件不动)。 */
+/** 人工核验基线模型(ADR-0058 起形态不变、真相源变:种子文件快照 + model_archive 表)。 */
 export interface BaselineModel {
   provider: ModelProviderId
   officialId: string
@@ -83,27 +82,20 @@ export interface BaselineModel {
    * 发布页块的归属判定:alias 词边界匹配是共用底座(「GLM-4.7」不认领「GLM-4.7-Flash」
    * 的块)。智谱/Anthropic 再加链接 slug 双条件(防上游张冠李戴——实测 GLM-Image 块误链
    * glm-4.7 文档页);xAI 只用标题 alias(条目标题即官方条目名,见 matchXaiEvent);
-   * OpenAI 用 changelog 类型行的 `Model:` 字段精确/最长前缀匹配(结构化 ID,见
-   * resolveOpenAIModelId),无需词边界。
+   * OpenAI 用 changelog 类型行的 `Model:` 字段精确/最长前缀匹配(结构化 ID),无需词边界。
    */
   matchAliases: string[]
   /** 智谱/Anthropic 双条件的链接半边(路径尾边界,「…/glm-4」不认领「…/glm-4-long」);xAI 行省略。 */
   matchSlugs?: string[]
-  /** 人工核验的历史动态(官方发布页/弃用表口径);幂等入库,同键自动解析 'updated' 事件被其取代。 */
+  /** 人工核验的历史动态(官方发布页/弃用表口径);仅空库首启灌入,此后事件只增不改。 */
   events?: Array<Omit<ModelEvent, 'id'>>
 }
 
-
-/** 全部厂家基线(init 幂等 upsert 的单一遍历源;新厂家票 = 基线文件 + 追加于此)。 */
-const ALL_BASELINES: BaselineModel[] = [
-  ...ZHIPU_BASELINE,
-  ...ANTHROPIC_BASELINE,
-  ...XAI_BASELINE,
-  ...KIMI_BASELINE,
-  ...OPENAI_BASELINE,
-  ...DEEPSEEK_BASELINE,
-  ...QWEN_BASELINE,
-]
+/** 种子快照(2026-09-05 由七个代码基线 + AA_MODEL_MAP 一次性生成;空库首启用,此后不再更新)。 */
+const SEED = seed as {
+  models: BaselineModel[]
+  aaMapping: Array<{ slug: string; provider: ModelProviderId; officialId: string }>
+}
 
 /**
  * 全部跟踪厂家的 provider 定义(取数差异面,ADR-0038):pollProvider 轮询入口的
@@ -135,6 +127,10 @@ export interface ParsedFeed {
 export interface ModelTrackingDeps {
   /** init 可选透传(AA 评测 x-api-key header;生产 fetchText 原生支持,测试桩忽略)。 */
   fetchText: (url: string, timeoutMs: number, init?: RequestInit) => Promise<string>
+  /** auto 核验(LLM 网关 Key/候选链)与 ntfy 通知的环境(ADR-0058);缺省 process.env,测试注入。 */
+  env?: NodeJS.ProcessEnv
+  /** LLM 单次调用注入(auto 核验测试零真网);缺省真 callModel(ADR-0037 闸门在其内部)。 */
+  callModel?: (model: string, apiKey: string, system: string, user: string) => Promise<{ content: string | null; resp: string }>
 }
 
 const nowIso = () => new Date().toISOString()
@@ -147,16 +143,126 @@ export class ModelTrackingService {
     private readonly aaApiKey = '',
   ) {}
 
+  /** deps 注入 env 或进程 env(auto 核验/通知共用)。 */
+  private get env(): NodeJS.ProcessEnv {
+    return this.deps.env ?? process.env
+  }
+
   /**
-   * 启动初始化:基线幂等 upsert(profile 字段以代码为准刷新,含定价/限额/参数量)+
-   * 基线事件入库(同键既有的自动解析 'updated' 事件被人工核验语义取代——同一公告
-   * 不留两条动态;issues/01 时期入库的旧 'updated' 行由此清理)+ 首轮取数(不阻塞
-   * 启动,失败照陈旧口径降级——基线数据已在库,tile 即有内容)。
+   * 启动初始化(ADR-0058):种子 bootstrap(空库全量灌、存量库回填归属列)取代原
+   * 「代码基线每启幂等 upsert」——profile 字段此后以 DB 为准,人工修订/auto 入库
+   * 不再被部署刷新。首轮取数照旧不阻塞启动。
    */
   async init(): Promise<void> {
-    for (const b of ALL_BASELINES) {
-      // profile 字段一处定义,insert 与 upsert 更新共用(新增字段只改这里)
-      const profile = {
+    await this.bootstrapFromSeed()
+    void this.pollProvider()
+  }
+
+  /** 空库灌种子(行+事件);存量库(迁移前列全默认)按种子回填 aliases/slugs。幂等。 */
+  private async bootstrapFromSeed(): Promise<void> {
+    // 旧 aaUnmappedClues 的存量线索(键 aa: 前缀)语义已死(2026-09-05 翻转为自动映射
+    // 不再产出),不清会被 verifyPendingClues 误核验——AA 模型页被当厂家一手信源
+    await this.db.deleteFrom('model_pending_clues').where('model_key', 'like', 'aa:%').execute()
+    const existing = await this.db
+      .selectFrom('model_archive')
+      .select(['provider', 'official_id', 'match_aliases'])
+      .execute()
+    if (existing.length === 0) {
+      // 单事务灌入(code-review:中途崩的重启会因「已有行」跳过灌入,半灌态永久化)。
+      // 事件入库同事务:同 (模型,日期,信源) 的 'updated' 先删(语义化事件取代)。
+      await this.db.transaction().execute(async (trx) => {
+        for (const b of SEED.models) {
+          const { id: modelId } = await trx
+            .insertInto('model_archive')
+            .values({
+              provider: b.provider,
+              official_id: b.officialId,
+              name: b.name,
+              kind: b.kind,
+              stage: b.stage,
+              availability: JSON.stringify(b.availability),
+              summary: b.summary,
+              sources: JSON.stringify(b.sources),
+              pricing: b.pricing === null ? null : JSON.stringify(b.pricing),
+              limits: b.limits === null ? null : JSON.stringify(b.limits),
+              training_params: b.trainingParams === null ? null : JSON.stringify(b.trainingParams),
+              match_aliases: JSON.stringify(b.matchAliases),
+              match_slugs: JSON.stringify(b.matchSlugs ?? []),
+              verified: 'manual',
+              created_at: nowIso(),
+              updated_at: nowIso(),
+            })
+            .onConflict((oc) => oc.columns(['provider', 'official_id']).doNothing())
+            .returning('id')
+            .executeTakeFirstOrThrow()
+          for (const ev of b.events ?? []) {
+            await trx
+              .deleteFrom('model_events')
+              .where('model_id', '=', modelId)
+              .where('kind', '=', 'updated')
+              .where('occurred_on', '=', ev.occurredOn)
+              .where('source_url', '=', ev.sourceUrl)
+              .execute()
+            await trx
+              .insertInto('model_events')
+              .values({
+                model_id: modelId,
+                kind: ev.kind,
+                occurred_on: ev.occurredOn,
+                title: ev.title,
+                source_url: ev.sourceUrl,
+                created_at: nowIso(),
+              })
+              .onConflict((oc) => oc.columns(['model_id', 'kind', 'occurred_on', 'source_url']).doNothing())
+              .execute()
+          }
+        }
+      })
+    } else if (existing.every((r) => r.match_aliases === '[]')) {
+      // ADR-0058 迁移:存量行(代码基线时代的档案镜像)按种子回填归属判定列;
+      // DB 独有行(理论上无——此分支只在迁移首启走到)留默认不炸。
+      const byKey = new Map(SEED.models.map((b) => [`${b.provider}|${b.officialId}`, b]))
+      for (const r of existing) {
+        const b = byKey.get(`${r.provider}|${r.official_id}`)
+        if (b === undefined) continue
+        await this.db
+          .updateTable('model_archive')
+          .set({
+            match_aliases: JSON.stringify(b.matchAliases),
+            match_slugs: JSON.stringify(b.matchSlugs ?? []),
+          })
+          .where('provider', '=', r.provider)
+          .where('official_id', '=', r.official_id)
+          .execute()
+      }
+    }
+    const aaExisting = await this.db.selectFrom('model_aa_mapping').select('slug').execute()
+    if (aaExisting.length === 0) {
+      for (const m of SEED.aaMapping) {
+        await this.db
+          .insertInto('model_aa_mapping')
+          .values({
+            slug: m.slug,
+            provider: m.provider,
+            official_id: m.officialId,
+            verified: 'manual',
+            created_at: nowIso(),
+            updated_at: nowIso(),
+          })
+          .execute()
+      }
+    }
+  }
+
+  /** 种子/auto 行入库共用:insert 行(verified 区分);冲突(已存在)静默跳过——修订不覆盖。 */
+  private async upsertBaselineRow(
+    b: Pick<BaselineModel, 'provider' | 'officialId' | 'name' | 'kind' | 'stage' | 'availability' | 'summary' | 'sources' | 'pricing' | 'limits' | 'trainingParams'> & { matchAliases: string[]; matchSlugs?: string[]; verified?: 'manual' | 'auto' },
+  ): Promise<void> {
+    await this.db
+      .insertInto('model_archive')
+      .values({
+        provider: b.provider,
+        official_id: b.officialId,
         name: b.name,
         kind: b.kind,
         stage: b.stage,
@@ -166,51 +272,14 @@ export class ModelTrackingService {
         pricing: b.pricing === null ? null : JSON.stringify(b.pricing),
         limits: b.limits === null ? null : JSON.stringify(b.limits),
         training_params: b.trainingParams === null ? null : JSON.stringify(b.trainingParams),
-      }
-      const { id: modelId } = await this.db
-        .insertInto('model_archive')
-        .values({
-          provider: b.provider,
-          official_id: b.officialId,
-          ...profile,
-          created_at: nowIso(),
-          updated_at: nowIso(),
-        })
-        .onConflict((oc) =>
-          oc
-            .columns(['provider', 'official_id'])
-            .doUpdateSet({ ...profile, updated_at: nowIso() }),
-        )
-        .returning('id')
-        .executeTakeFirstOrThrow()
-      for (const ev of b.events ?? []) {
-        // 同 (模型,日期,信源) 的自动解析 'updated' 事件 → 删(被本条语义化事件取代)
-        await this.db
-          .deleteFrom('model_events')
-          .where('model_id', '=', modelId)
-          .where('kind', '=', 'updated')
-          .where('occurred_on', '=', ev.occurredOn)
-          .where('source_url', '=', ev.sourceUrl)
-          .execute()
-        await this.db
-          .insertInto('model_events')
-          .values({
-            model_id: modelId,
-            kind: ev.kind,
-            occurred_on: ev.occurredOn,
-            title: ev.title,
-            source_url: ev.sourceUrl,
-            created_at: nowIso(),
-          })
-          .onConflict((oc) =>
-            oc
-              .columns(['model_id', 'kind', 'occurred_on', 'source_url'])
-              .doNothing(),
-          )
-          .execute()
-      }
-    }
-    void this.pollProvider()
+        match_aliases: JSON.stringify(b.matchAliases),
+        match_slugs: JSON.stringify(b.matchSlugs ?? []),
+        verified: b.verified ?? 'manual',
+        created_at: nowIso(),
+        updated_at: nowIso(),
+      })
+      .onConflict((oc) => oc.columns(['provider', 'official_id']).doNothing())
+      .execute()
   }
 
   /** 档案读侧(路由直调):模型(可用在前、retired 沉底)+ 各事件倒序 + 信源状态。 */
@@ -264,12 +333,14 @@ export class ModelTrackingService {
       .selectAll()
       .where('evaluator', '=', AA_EVALUATOR)
       .executeTakeFirst()
-    // 线索只读「7 天内仍出现」的(基线收录后条目停写,last_seen_at 停更自然滚出)
+    // 线索只读「7 天内仍出现」且未完结的(ADR-0058:accepted 已入档不再待办;rejected
+    // 留表触人 = 红点/推送的「待人工」;基线收录后条目停写,last_seen_at 停更自然滚出)
     const clueCutoff = new Date(Date.now() - 7 * 86400_000).toISOString()
     const clueRows = await this.db
       .selectFrom('model_pending_clues')
       .selectAll()
       .where('last_seen_at', '>=', clueCutoff)
+      .where((eb) => eb.or([eb('verify_state', 'is', null), eb('verify_state', '=', 'rejected')])) // noise 态排除:确定性已知噪音不触人
       .execute()
     return {
       pendingClues: clueRows
@@ -287,6 +358,7 @@ export class ModelTrackingService {
         name: r.name,
         kind: r.kind as ModelKind,
         stage: r.stage as ReleaseStage,
+        verified: r.verified === 'auto' ? 'auto' : 'manual',
         availability: JSON.parse(r.availability) as AvailabilityMode[],
         summary: r.summary ?? null,
         sources: JSON.parse(r.sources) as TrackedModel['sources'],
@@ -312,7 +384,7 @@ export class ModelTrackingService {
   /**
    * 取数轮询唯一入口(ADR-0041,吸收原 pollQuietly 与 7 个 pollXxx 薄壳):生产
    * cron/init 与测试同一 seam。省缺 id = 全部厂家 + 评测,**各家独立 catch**——
-   * 单家失败记日志、标陈旧,不牵连他家(6h 节奏即天然重试,禁密集重试,同
+   * 单家失败记日志、标陈旧,不牵连他家(ADR-0058 起 2h 节奏即天然重试,禁密集重试,同
    * videoUpdates 口径);全轮落定后 resolve(可等待),不抛。指定 id = 单家一轮,
    * 失败直抛——确定性单轮,测试断言标陈旧的入口。
    */
@@ -339,6 +411,7 @@ export class ModelTrackingService {
    */
   private async runPoll(def: ProviderDef<unknown>): Promise<void> {
     const errs: unknown[] = []
+    const rows = await this.baselineRows(def.id)
     for (const url of def.urls) {
       try {
         await this.pollOne(def.id, url, (md) => {
@@ -356,7 +429,7 @@ export class ModelTrackingService {
           const hits: MatchedHit[] = []
           const clues: PendingClue[] = []
           for (const e of entries) {
-            const r = def.matchEntry(e)
+            const r = def.matchEntry(e, rows)
             hits.push(...r.hits)
             clues.push(...r.clues)
           }
@@ -366,10 +439,29 @@ export class ModelTrackingService {
         errs.push(e)
       }
     }
+    // auto 核验(ADR-0058):窗口内未核验线索逐条 LLM 核验。取数失败也跑(旧线索
+    // 不该陪葬);自身失败只记日志,不并入取数错误口径。
+    await this.verifyPendingClues(def).catch((e) =>
+      console.error(`模型追踪(${def.label})auto 核验失败:`, e),
+    )
     if (errs.length > 0) {
       await this.markSource(def.id, false).catch(() => {})
       throw errs[0]
     }
+  }
+
+  /** 该家基线行集(每轮从 model_archive 读出;归属判定输入,ADR-0058 与代码常量解绑)。 */
+  private async baselineRows(provider: ModelProviderId): Promise<BaselineRow[]> {
+    const rows = await this.db
+      .selectFrom('model_archive')
+      .select(['official_id', 'match_aliases', 'match_slugs'])
+      .where('provider', '=', provider)
+      .execute()
+    return rows.map((r) => ({
+      officialId: r.official_id,
+      matchAliases: JSON.parse(r.match_aliases) as string[],
+      matchSlugs: JSON.parse(r.match_slugs) as string[],
+    }))
   }
 
   /**
@@ -444,7 +536,8 @@ export class ModelTrackingService {
   /**
    * 线索 upsert-only(2026-08-27 千问/智谱漏检):30 天内条目才入;基线收录后该条目
    * 不再被写入,last_seen_at 停更,读侧 7 天未见即滚出——收录自愈无需删行。滚动信源
-   * (百炼)翻走前线索已可见,「漏了什么」不再不可考。
+   * (百炼)翻走前线索已可见,「漏了什么」不再不可考。ADR-0058:新线索由
+   * verifyPendingClues 自动核验,rejected 留表触人(红点/推送)。
    */
   private async ingestClues(provider: ModelProviderId, clues: PendingClue[]): Promise<void> {
     const cutoff = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10)
@@ -472,8 +565,99 @@ export class ModelTrackingService {
   }
 
   /**
-   * 评测一轮(issues/08):LLM 主表 + 五个媒体榜单六路取数(单 Key 限额 1000/日,6h
-   * 节奏 ×6 路 ≈ 24 请求/日,远低于限额;结果落库即缓存,满足 API 缓存要求)。任一路
+   * auto 核验一轮(ADR-0058):7 天窗口内 verify_state IS NULL 的线索逐条——①噪音
+   * 谓词(def.noiseClue)硬拦 → rejected(确定性已知噪音,不触人:百炼托管常态,推送
+   * 即骚扰);②verifyClue(LLM)三态:accept 入档(verified='auto',aliases=草稿)+ 当轮
+   * 产 kind 'updated' 事件(occurredOn/标题/信源用线索——语义保守,api_available 留给
+   * 人工修订)+ 推送「已自动收录」;reject → rejected + 推送「待人工核验」(例外触人);
+   * error → 不写状态,下轮重试(LLM 失败/网关挂的天然退避)。行插入 onConflict
+   * doNothing:已存在(人工先收录)时静默,线索停更滚出自愈。
+   */
+  private async verifyPendingClues(def: ProviderDef<unknown>): Promise<void> {
+    const cutoff = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10)
+    const pending = await this.db
+      .selectFrom('model_pending_clues')
+      .selectAll()
+      .where('provider', '=', def.id)
+      .where('occurred_on', '>=', cutoff)
+      .where('verify_state', 'is', null)
+      .execute()
+    for (const row of pending) {
+      const clue: PendingClue = {
+        occurredOn: row.occurred_on,
+        title: row.title,
+        sourceUrl: row.source_url,
+        modelKey: row.model_key,
+      }
+      if (def.noiseClue?.(clue) === true) {
+        await this.setClueState(def.id, row.model_key, 'noise')
+        continue
+      }
+      const r = await verifyClue(def, clue, this.deps.fetchText, this.env, this.deps.callModel)
+      if (r.outcome === 'error') {
+        console.warn(`模型追踪(${def.label})线索核验失败(下轮重试) ${row.model_key}:`, r.reason)
+        continue
+      }
+      if (r.outcome === 'reject') {
+        await this.setClueState(def.id, row.model_key, 'rejected')
+        await ntfyNotify(`模型追踪待人工核验(${def.label})`, `${row.title}\n${r.reason}`, this.env)
+        continue
+      }
+      await this.upsertBaselineRow({
+        provider: def.id,
+        officialId: r.draft.officialId,
+        name: r.draft.name,
+        kind: r.draft.kind as ModelKind,
+        stage: r.draft.stage as ReleaseStage,
+        availability: r.draft.availability as AvailabilityMode[],
+        summary: r.draft.summary,
+        sources: r.draft.sources,
+        pricing: r.draft.pricing as ModelPricing | null,
+        limits: r.draft.limits as ModelLimit[] | null,
+        trainingParams: null,
+        matchAliases: r.draft.matchAliases,
+        verified: 'auto',
+      })
+      const modelId = (await this.db
+        .selectFrom('model_archive')
+        .select('id')
+        .where('provider', '=', def.id)
+        .where('official_id', '=', r.draft.officialId)
+        .executeTakeFirstOrThrow())!.id
+      await this.db
+        .insertInto('model_events')
+        .values({
+          model_id: modelId,
+          kind: 'updated',
+          occurred_on: clue.occurredOn,
+          title: clue.title,
+          source_url: clue.sourceUrl,
+          created_at: nowIso(),
+        })
+        .onConflict((oc) =>
+          oc
+            .columns(['model_id', 'kind', 'occurred_on', 'source_url'])
+            .doNothing(),
+        )
+        .execute()
+      await this.setClueState(def.id, row.model_key, 'accepted')
+      await ntfyNotify(`模型已自动核验收录(${def.label})`, `${r.draft.name}(${r.draft.officialId})`, this.env)
+    }
+  }
+
+  /** 线索核验状态落库(accepted/rejected/noise;error 不写=下轮重试)。 */
+  private async setClueState(provider: ModelProviderId, modelKey: string, state: 'accepted' | 'rejected' | 'noise'): Promise<void> {
+    await this.db
+      .updateTable('model_pending_clues')
+      .set({ verify_state: state })
+      .where('provider', '=', provider)
+      .where('model_key', '=', modelKey)
+      .execute()
+  }
+
+  /**
+   * 评测一轮(issues/08):LLM 主表 + 五个媒体榜单六路取数(单 Key 限额 1000/日,ADR-0058 起
+   * 2h 节奏 ×6 路 ≈ 72 请求/日,远低于限额;结果落库即缓存,满足 API 缓存要求)。任一路
    * 失败 → 整轮按评测源失败处理:保留最后成功快照、只标评测陈旧,不影响任何厂家档案。
    * 未配置 Key 时整体 no-op(不取数、不写状态)。分数漂移只更新快照行(不产动态);
    * 唯产动态的口径 = 运行期模型首次获得评测行(kind 'evaluated',首配接入整轮静默;
@@ -483,30 +667,61 @@ export class ModelTrackingService {
     if (this.aaApiKey === '') return
     try {
       const headers = { 'x-api-key': this.aaApiKey }
-      const rows: AaEvalRow[] = []
       const llmJson = await this.deps.fetchText(AA_LLM_URL, 30_000, { headers })
-      rows.push(...aaRowsFromLlms(llmJson))
+      // 同名自动映射(ADR-0058,formerly aaUnmappedClues 落线索):LLM 主表条目 slug
+      // 归一与基线行同名且不在映射表 → 直接 upsert(verified='auto')——媒体端点不参与
+      // (无 creator 且 slug 带厂商前缀,同名误配风险)。upsert 失败只记日志不炸评测轮。
+      const mappingRows = await this.readAaMappings()
+      const archiveRefs = await this.db
+        .selectFrom('model_archive')
+        .select(['provider', 'official_id', 'match_aliases'])
+        .execute()
+      const refs: AaBaselineRef[] = archiveRefs.map((r) => ({
+        provider: r.provider as ModelProviderId,
+        officialId: r.official_id,
+        matchAliases: JSON.parse(r.match_aliases) as string[],
+      }))
+      const autos = aaAutoMappings(llmJson, refs, new Map(mappingRows.map((r) => [r.slug, `${r.provider}|${r.officialId}`])))
+      for (const m of autos) {
+        await this.db
+          .insertInto('model_aa_mapping')
+          .values({
+            slug: m.slug,
+            provider: m.provider,
+            official_id: m.officialId,
+            verified: 'auto',
+            created_at: nowIso(),
+            updated_at: nowIso(),
+          })
+          .onConflict((oc) => oc.column('slug').doNothing())
+          .execute()
+          .catch((e: unknown) => console.warn(`模型追踪 AA 自动映射 ${m.slug} 落库失败:`, e))
+      }
+      // 映射(含本轮自动新增)→ 评测行;自动映射的 slug 当轮即带上分数
+      const mapping = aaMappingIndex([...mappingRows, ...autos])
+      const rows: AaEvalRow[] = [...aaRowsFromLlms(llmJson, mapping)]
       for (const ep of AA_MEDIA_ENDPOINTS) {
-        rows.push(...aaRowsFromMedia(await this.deps.fetchText(ep.url, 30_000, { headers }), ep.benchmark))
+        rows.push(...aaRowsFromMedia(await this.deps.fetchText(ep.url, 30_000, { headers }), ep.benchmark, mapping))
       }
       await this.replaceEvaluationSnapshot(rows)
-      // 未映射线索只在 LLM 主表收集:媒体端点无 model_creator(交叉校验缺席)且 slug
-      // 带厂商前缀+下划线形态(openai-gpt_image_1-5),与基线 id 归一永不相等——收集
-      // 形同死代码还引裸同名误配风险。按厂家分组落库(键 aa: 前缀与厂家残余 ID 裸键
-      // 不撞;occurredOn 恒当日,30 天窗天然放行;映射补上即不再产出、7 天滚出自愈);
-      // 各家独立 catch——线索是观测面,一家落库失败只记日志,不炸评测轮(快照已写,
-      // 炸了会把 eval 标陈旧且吞掉其余家的线索)
-      const aaClues = aaUnmappedClues(llmJson, ALL_BASELINES, beijingToday())
-      for (const { provider, clue } of aaClues) {
-        await this.ingestClues(provider, [clue]).catch((e) => {
-          console.warn(`模型追踪(${PROVIDERS[provider].label})AA 线索落库失败:`, e)
-        })
-      }
       await this.markEvalStatus(true)
     } catch (e) {
       await this.markEvalStatus(false).catch(() => {})
       throw e
     }
+  }
+
+  /** AA 映射表全量读(model_aa_mapping;pollEvaluations 每轮一次)。 */
+  private async readAaMappings(): Promise<AaMappingRow[]> {
+    const rows = await this.db
+      .selectFrom('model_aa_mapping')
+      .select(['slug', 'provider', 'official_id'])
+      .execute()
+    return rows.map((r) => ({
+      slug: r.slug,
+      provider: r.provider as ModelProviderId,
+      officialId: r.official_id,
+    }))
   }
 
   /** 快照整表替换(单事务:删旧插新 + 运行期首入评测动态;首配接入静默),幂等。 */
@@ -630,8 +845,8 @@ export function prodModelDeps(): ModelTrackingDeps {
   return { fetchText }
 }
 
-// ---- 定时轮询(研究 §6:6h 节奏;非整点错开,同 videoUpdates 口径)----
+// ---- 定时轮询(ADR-0058「当天时效」:6h→2h;非整点错开,同 videoUpdates 口径)----
 
 export function startModelTrackingScheduler(service: ModelTrackingService): void {
-  schedule('41 */6 * * *', () => void service.pollProvider())
+  schedule('41 */2 * * *', () => void service.pollProvider())
 }

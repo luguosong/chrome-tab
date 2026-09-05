@@ -1,5 +1,7 @@
-import { QWEN_BASELINE, QWEN_RELEASES_URL } from '../qwenBaseline'
 import { clipFragment, makeIdResolver, type MatchedHit, normalizeIsoDate, type ParseResult, type ProviderDef, residualIdClues } from './def'
+
+/** 阿里百炼「模型上下架与更新」页(主发布源,研究 §3;ADR-0058 起常量自基线文件迁入本体)。 */
+export const QWEN_RELEASES_URL = 'https://help.aliyun.com/zh/model-studio/newly-released-models'
 
 // ---- 阿里通义:百炼「模型上下架与更新」(研究 §3:主发布源 SSR 纯表格。解析器
 //  原随 qwenBaseline 走(并行接入防撞车约定),ADR-0038 起归一为厂家 provider 文件)----
@@ -64,12 +66,15 @@ export function parseBailianReleases(html: string): ParseResult<BailianRow> {
 }
 
 /**
- * 表格行模型 ID → 基线 officialId(makeIdResolver 绑定实例,精确/最长前缀口径立法见
- * def;快照/变体 qwen3.7-max-2026-06-08、qwen-plus-latest 归家族行)。无版本别名
- * (qwen-plus 等)与百炼托管第三方模型(kimi-k3、ZHIPU/GLM-5.3、vidu/…)不在任何
- * alias 集,天然 null——这是「跟踪厂家」定义性约束(不认领非自家模型)。
+ * 表格行模型 ID → 基线 officialId(当轮从 DB 行集构建 makeIdResolver,精确/最长前缀
+ * 口径立法见 def;快照/变体 qwen3.7-max-2026-06-08、qwen-plus-latest 归家族行)。
+ * 无版本别名(qwen-plus 等)与百炼托管第三方模型(kimi-k3、ZHIPU/GLM-5.3、vidu/…)
+ * 不在任何 alias 集,天然 null——「跟踪厂家」定义性约束(不认领非自家模型)。
  */
-export const resolveQwenModelId = makeIdResolver(QWEN_BASELINE)
+
+/** 百炼自家模型 ID 前缀(auto 核验噪音白名单):不匹配 = 托管第三方,规则硬拦不进 LLM。
+ *  前缀后可为连字符或数字(qwen-plus / qwen3.9-preview / wan2.2 / wanx2.1 / qwq-plus)。 */
+const ALIBABA_OWN_PREFIX = /^(qwen|qwq|wanx?)[-.\d]/
 
 /**
  * 表格行 → 每个被认领模型一条事件(kind 恒 'updated',自动解析不猜语义;同格多 ID 命中
@@ -78,12 +83,12 @@ export const resolveQwenModelId = makeIdResolver(QWEN_BASELINE)
  * ponytail: 同日同模型两条表格行会撞去重键只留一条(实测首表同日同行族归并一格;
  * 若上游出现同日同模型分格双公告,再升格内序号锚)。
  */
-export function matchQwenEvents(rows: BailianRow[]): Array<MatchedHit> {
+export function matchQwenEvents(rows: BailianRow[], resolve: (id: string) => string | null): Array<MatchedHit> {
   const out: Array<MatchedHit> = []
   for (const r of rows) {
     const claimed = new Set<string>()
     for (const id of r.modelIds) {
-      const officialId = resolveQwenModelId(id)
+      const officialId = resolve(id)
       if (officialId === null || claimed.has(officialId)) continue
       claimed.add(officialId)
       const title = r.description.length > 160 ? `${r.description.slice(0, 157)}…` : r.description
@@ -108,10 +113,15 @@ export const ALIBABA_DEF: ProviderDef<BailianRow> = {
   label: '通义',
   urls: [QWEN_RELEASES_URL],
   parse: parseBailianReleases,
-  matchEntry(r) {
+  // auto 核验信源 = 百炼表格页(价格/规格不在表内,LLM 只核「自家新模型上架」事实,资料字段留空)
+  verifyUrls: (clue) => [clue.sourceUrl],
+  // 托管第三方(kimi-k3/GLM-5.3/vidu 等百炼上架的非通义模型)规则硬拦,不进 LLM(ADR-0058 护栏②)
+  noiseClue: (clue) => !ALIBABA_OWN_PREFIX.test(clue.modelKey),
+  matchEntry(r, baseline) {
+    const resolve = makeIdResolver(baseline)
     return {
-      hits: matchQwenEvents([r]),
-      clues: residualIdClues(r.modelIds, resolveQwenModelId, {
+      hits: matchQwenEvents([r], resolve),
+      clues: residualIdClues(r.modelIds, resolve, {
         occurredOn: r.date,
         titleOf: () => r.description.slice(0, 60),
         sourceUrl: QWEN_RELEASES_URL,

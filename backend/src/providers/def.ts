@@ -36,6 +36,16 @@ export interface MatchEntryResult {
  * ProviderDef<unknown> 存放(matchEntry 为方法语法,TS 方法双变使具体条目形态
  * 可存入),runPoll 经此擦除形态统一巡走。
  */
+/**
+ * 基线行集(runPoll 每轮从 model_archive 读出传给 matchEntry;ADR-0058 基线 DB 化后
+ * 归属判定的输入不再绑定代码常量)。matchSlugs 仅智谱/Anthropic 双条件族消费。
+ */
+export interface BaselineRow {
+  officialId: string
+  matchAliases: readonly string[]
+  matchSlugs: readonly string[]
+}
+
 export interface ProviderDef<E> {
   id: ModelProviderId
   /** 中文厂名家(cron 失败日志用,与既有日志格式对齐)。 */
@@ -45,8 +55,13 @@ export interface ProviderDef<E> {
   /** 信源原文 → 条目+意外跳过;零条目由 runPoll 统一判「上游改版」,skipped 非空
    *  由 runPoll 统一 warn(CONTEXT「意外跳过」,ADR-0052)。 */
   parse: (md: string) => ParseResult<E>
-  /** 单条目分派(见 MatchEntryResult)。 */
-  matchEntry(e: E): MatchEntryResult
+  /** 单条目分派(见 MatchEntryResult);rows = 该家基线行集(当轮从 DB 读)。 */
+  matchEntry(e: E, rows: readonly BaselineRow[]): MatchEntryResult
+  /** auto 核验信源(ADR-0058):线索 → 厂家一手页 URL(字段回链的「链」);缺省 =
+   *  线索 sourceUrl 本身;undefined = 该家无线索自动核验(月暗文章流)。 */
+  verifyUrls?: (clue: PendingClue) => string[]
+  /** 确定性噪音谓词:命中不进 LLM(线索照常留表,红点可见;如百炼托管第三方前缀)。 */
+  noiseClue?: (clue: PendingClue) => boolean
 }
 
 /**

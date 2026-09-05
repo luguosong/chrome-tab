@@ -114,6 +114,9 @@ const MODEL_ARCHIVE: Col[] = [
   ['pricing', 'TEXT', 0, null, 0],
   ['limits', 'TEXT', 0, null, 0],
   ['training_params', 'TEXT', 0, null, 0],
+  ['match_aliases', 'TEXT', 1, "'[]'", 0],
+  ['match_slugs', 'TEXT', 1, "'[]'", 0],
+  ['verified', 'TEXT', 1, "'manual'", 0],
   ['created_at', 'TEXT', 1, null, 0],
   ['updated_at', 'TEXT', 1, null, 0],
 ]
@@ -178,7 +181,7 @@ describe('schema:表结构(research/03 骨架 + sessions + 视频更新三表 + 
   })
 
   it('全库表数守护(加表时同步此数)', () => {
-    expect(tableCount(sqlite)).toBe(23)
+    expect(tableCount(sqlite)).toBe(24) // +model_aa_mapping(ADR-0058)
   })
 })
 
@@ -247,7 +250,7 @@ describe('schema:建表幂等', () => {
       migrate(sqlite)
       migrate(sqlite)
     }).not.toThrow()
-    expect(tableCount(sqlite)).toBe(23)
+    expect(tableCount(sqlite)).toBe(24) // +model_aa_mapping(ADR-0058)
   })
 
   it('增量加列:issues/01 时期的旧库(无 pricing/limits/training_params)migrate 后补齐且数据保留', () => {

@@ -1,22 +1,40 @@
 import { describe, expect, it } from 'vitest'
 import type { ModelEvent, TrackedModel } from 'chrome-tab-shared'
 import { openDb, type Db } from './db'
-import { ModelTrackingService, type ModelTrackingDeps } from './modelTracking'
+import { ModelTrackingService, type BaselineModel, type ModelTrackingDeps } from './modelTracking'
 import { STUB_UPSTREAM_KEY } from './testUtils'
-import { ZHIPU_BASELINE } from './zhipuBaseline'
-import { ANTHROPIC_BASELINE } from './anthropicBaseline'
-import { XAI_BASELINE } from './xaiBaseline'
-import { KIMI_BASELINE } from './kimiBaseline'
-import { OPENAI_BASELINE } from './openaiBaseline'
-import { DEEPSEEK_BASELINE } from './deepseekBaseline'
-import { QWEN_BASELINE } from './qwenBaseline'
-import { AA_LLM_URL, AA_MEDIA_ENDPOINTS, AA_MODEL_MAP, aaModelUrl, aaRowsFromLlms, aaRowsFromMedia, aaUnmappedClues, beijingToday } from './aaEvaluations'
+import seedJson from './modelBaselineSeed.json'
+import {
+  AA_LLM_URL,
+  AA_MEDIA_ENDPOINTS,
+  aaAutoMappings,
+  aaMappingIndex,
+  aaModelUrl,
+  aaRowsFromLlms,
+  aaRowsFromMedia,
+  beijingToday,
+  type AaMappingRow,
+} from './aaEvaluations'
 
 /**
  * 评测接入自动检查(issues/08,CONTEXT.md「评测结果」):解析透传、slug 精确映射
- * (变体/快照不认领)、快照替换、首入评测动态、漂移不产动态、未配置 no-op、失败保留
- * 快照且只标评测陈旧(与厂家信源分表互不影响)。IO 全经假 fetchText,零真网。
+ * (变体/快照不认领)、同名自动映射(ADR-0058)、快照替换、首入评测动态、漂移不产
+ * 动态、未配置 no-op、失败保留快照且只标评测陈旧(与厂家信源分表互不影响)。
+ * IO 全经假 fetchText,零真网。基线/映射自种子快照派生(ADR-0058 基线 DB 化)。
  */
+
+const SEED = seedJson as { models: BaselineModel[]; aaMapping: AaMappingRow[] }
+const SEED_MODELS = SEED.models
+const seeded = (provider: string): BaselineModel[] => SEED_MODELS.filter((b) => b.provider === provider)
+const ZHIPU_BASELINE = seeded('zhipu')
+const ANTHROPIC_BASELINE = seeded('anthropic')
+const XAI_BASELINE = seeded('xai')
+const KIMI_BASELINE = seeded('moonshot')
+const OPENAI_BASELINE = seeded('openai')
+const DEEPSEEK_BASELINE = seeded('deepseek')
+const QWEN_BASELINE = seeded('alibaba')
+const ALL_SEED_BASELINES = [...ZHIPU_BASELINE, ...ANTHROPIC_BASELINE, ...XAI_BASELINE, ...KIMI_BASELINE, ...OPENAI_BASELINE, ...DEEPSEEK_BASELINE, ...QWEN_BASELINE]
+const SEED_MAPPING = aaMappingIndex(SEED.aaMapping)
 
 /** LLM 主表快照节选(2026-08-25 API 口径:evaluations 逐 Benchmark 数值;混映射外条目)。 */
 const AA_LLM_JSON = JSON.stringify({
@@ -58,7 +76,7 @@ const AA_T2I_JSON = JSON.stringify({
 
 const EMPTY_MEDIA_JSON = JSON.stringify({ status: 200, data: [] })
 
-/** 六路端点全就位的 deps(其余 URL 一律 404,厂家源状态与本文件断言无关)。 */
+/** 六路端点全就位的 deps(其余 URL 一律 404,厂家源状态与本文件断言无关;auto 核验 env 关闭)。 */
 function aaDeps(pages: Record<string, string>): ModelTrackingDeps {
   return {
     fetchText: async (url) => {
@@ -89,7 +107,7 @@ const evalsOf = (m: { evaluations: TrackedModel['evaluations'] }, benchmark: str
 
 describe('评测:解析与映射(纯函数)', () => {
   it('LLM 端点:映射内 slug 逐 Benchmark 透传,携带版本名与模型页链接;null 分跳过', () => {
-    const rows = aaRowsFromLlms(AA_LLM_JSON)
+    const rows = aaRowsFromLlms(AA_LLM_JSON, SEED_MAPPING)
     expect(rows).toHaveLength(2) // glm-4-7 的两个数值项
     expect(rows[0]).toEqual({
       provider: 'zhipu',
@@ -104,12 +122,12 @@ describe('评测:解析与映射(纯函数)', () => {
   })
 
   it('LLM 端点:零模型与缺 data 数组 = 上游改版,抛错(调用方标陈旧)', () => {
-    expect(() => aaRowsFromLlms(JSON.stringify({ status: 200, data: [] }))).toThrow()
-    expect(() => aaRowsFromLlms('<html>login</html>')).toThrow()
+    expect(() => aaRowsFromLlms(JSON.stringify({ status: 200, data: [] }), SEED_MAPPING)).toThrow()
+    expect(() => aaRowsFromLlms('<html>login</html>', SEED_MAPPING)).toThrow()
   })
 
   it('媒体端点:Elo 即分数、benchmark 用端点 key;空榜为合法零行;无 Elo 条目跳过', () => {
-    const rows = aaRowsFromMedia(AA_T2I_JSON, 'text_to_image_elo')
+    const rows = aaRowsFromMedia(AA_T2I_JSON, 'text_to_image_elo', SEED_MAPPING)
     expect(rows).toEqual([
       {
         provider: 'openai',
@@ -120,7 +138,7 @@ describe('评测:解析与映射(纯函数)', () => {
         url: aaModelUrl('gpt-image-2'),
       },
     ])
-    expect(aaRowsFromMedia(EMPTY_MEDIA_JSON, 'text_to_image_elo')).toEqual([])
+    expect(aaRowsFromMedia(EMPTY_MEDIA_JSON, 'text_to_image_elo', SEED_MAPPING)).toEqual([])
   })
 
   it('快照日期取北京时间(UTC 20:00 已是次日)', () => {
@@ -128,7 +146,7 @@ describe('评测:解析与映射(纯函数)', () => {
     expect(beijingToday(new Date('2026-08-24T10:00:00Z'))).toBe('2026-08-24')
   })
 
-  it('同名未映射线索:creator 归跟踪厂家 × 基线同名(圆点归一) × 未映射三条件齐才落;键 aa: 前缀', () => {
+  it('同名自动映射(ADR-0058):creator 归跟踪厂家 × 基线同名(圆点归一) × 未映射三条件齐才产映射行', () => {
     const json = JSON.stringify({
       status: 200,
       data: [
@@ -145,34 +163,20 @@ describe('评测:解析与映射(纯函数)', () => {
     const baselines = [
       { provider: 'zhipu' as const, officialId: 'glm-5.7', matchAliases: ['glm-5-turbo'] },
       { provider: 'openai' as const, officialId: 'gpt-6.2', matchAliases: ['gpt-6.2'] },
-      // 同名基线行是 anthropic 的,但条目 creator 判 zhipu → 交叉校验不过,不落
+      // 同名基线行是 anthropic 的,但条目 creator 判 zhipu → 交叉校验不过,不映射
       { provider: 'anthropic' as const, officialId: 'claude-x', matchAliases: [] },
+      // 该行的 slug 'glm-4-7' 未在映射,但目标已被别名 slug 'glm-4-7-alt' 占用 → 唯一目标守卫拦
+      { provider: 'zhipu' as const, officialId: 'glm-4.7', matchAliases: ['glm-4.7'] },
     ]
-    const clues = aaUnmappedClues(json, baselines, '2026-09-01')
-    expect(clues).toEqual([
-      {
-        provider: 'zhipu',
-        clue: {
-          occurredOn: '2026-09-01',
-          title: 'AA 已收录未映射:GLM-5-Turbo',
-          sourceUrl: aaModelUrl('glm-5-turbo'),
-          modelKey: 'aa:glm-5-turbo',
-        },
-      },
-      {
-        provider: 'openai',
-        clue: {
-          occurredOn: '2026-09-01',
-          title: 'AA 已收录未映射:GPT-6.2',
-          sourceUrl: aaModelUrl('gpt-6-2'),
-          modelKey: 'aa:gpt-6-2',
-        },
-      },
+    const autos = aaAutoMappings(json, baselines, new Map([['glm-4-7-alt', 'zhipu|glm-4.7']]))
+    expect(autos).toEqual([
+      { slug: 'glm-5-turbo', provider: 'zhipu', officialId: 'glm-5.7' },
+      { slug: 'gpt-6-2', provider: 'openai', officialId: 'gpt-6.2' },
     ])
   })
 
-  it('映射表形状:值唯一(防同模型双 slug 撞评测唯一键),且每项命中对应厂家基线行', () => {
-    const targets = Object.values(AA_MODEL_MAP).map((m) => `${m.provider}|${m.officialId}`)
+  it('映射形态:种子映射值唯一(防同模型双 slug 撞评测唯一键),且每项命中对应厂家基线行', () => {
+    const targets = SEED.aaMapping.map((m) => `${m.provider}|${m.officialId}`)
     expect(new Set(targets).size).toBe(targets.length)
     const baselines = {
       zhipu: ZHIPU_BASELINE,
@@ -183,16 +187,16 @@ describe('评测:解析与映射(纯函数)', () => {
       deepseek: DEEPSEEK_BASELINE,
       alibaba: QWEN_BASELINE,
     }
-    for (const [slug, m] of Object.entries(AA_MODEL_MAP)) {
-      const hit = baselines[m.provider].some((b) => b.officialId === m.officialId)
-      expect(hit, `${slug} → ${m.provider}/${m.officialId} 不在基线`).toBe(true)
+    for (const m of SEED.aaMapping) {
+      const hit = baselines[m.provider as keyof typeof baselines].some((b) => b.officialId === m.officialId)
+      expect(hit, `${m.slug} → ${m.provider}/${m.officialId} 不在基线`).toBe(true)
     }
   })
 
-  it('基线归一键无跨行冲突(同名未映射线索的 known 表是 last-wins Map,两行归一撞键会静默错归属;同行大小写变体无害)', () => {
+  it('基线归一键无跨行冲突(同名自动映射的 known 表是 last-wins Map,两行归一撞键会静默错归属;同行大小写变体无害)', () => {
     const norm = (s: string) => s.toLowerCase().replaceAll('.', '-')
     const seen = new Map<string, string>()
-    for (const b of [...ZHIPU_BASELINE, ...OPENAI_BASELINE, ...ANTHROPIC_BASELINE, ...XAI_BASELINE, ...KIMI_BASELINE, ...DEEPSEEK_BASELINE, ...QWEN_BASELINE]) {
+    for (const b of ALL_SEED_BASELINES) {
       for (const id of [b.officialId, ...b.matchAliases]) {
         const key = `${b.provider}|${norm(id)}`
         const prev = seen.get(key)
@@ -202,13 +206,9 @@ describe('评测:解析与映射(纯函数)', () => {
     }
   })
 
-  it('同名未映射的线上存量盘点(2026-09-01 实测 25 条):全部命中真基线行、无一来自变体/别家误配', () => {
+  it('同名命中的线上存量盘点(2026-09-01 实测 25 条):全部命中真基线行、无一来自变体/别家误配', () => {
     // 守卫方向:同名口径的 known 集来自真基线——断言真基线能被 aaSlugNorm 归一命中
     // 线上 25 条中的代表 slug(防归一函数被改动后口径静默失效)
-    const baselines: Array<{ provider: 'zhipu' | 'openai' | 'anthropic' | 'xai' | 'moonshot' | 'deepseek' | 'alibaba'; officialId: string; matchAliases: readonly string[] }> = [
-      ...ZHIPU_BASELINE, ...OPENAI_BASELINE, ...ANTHROPIC_BASELINE, ...XAI_BASELINE,
-      ...KIMI_BASELINE, ...DEEPSEEK_BASELINE, ...QWEN_BASELINE,
-    ]
     const json = JSON.stringify({
       status: 200,
       data: [
@@ -218,7 +218,7 @@ describe('评测:解析与映射(纯函数)', () => {
         { slug: 'grok-code-fast-1', name: 'Grok Code Fast 1', model_creator: { slug: 'xai' }, evaluations: {} },
       ],
     })
-    expect(aaUnmappedClues(json, baselines, '2026-09-01')).toHaveLength(4)
+    expect(aaAutoMappings(json, ALL_SEED_BASELINES, new Map())).toHaveLength(4)
   })
 })
 
@@ -242,28 +242,24 @@ describe('评测:轮询与快照(服务集成,零真网)', () => {
     expect(kinds(a.models.find((m) => m.officialId === 'gpt-image-2')!)).toHaveLength(0)
   })
 
-  it('未映射线索:同名未映射条目随轮询落厂家线索库(aa: 键),映射补上后自愈滚出', async () => {
+  it('同名自动映射(ADR-0058):未映射同名条目随轮询直接进映射表(verified=auto),不再落 aa: 线索', async ({ }) => {
+    const { sqlite, db } = openDb(':memory:')
     const pages = fullPages()
     pages[AA_LLM_URL] = JSON.stringify({
       status: 200,
       data: [
         ...JSON.parse(AA_LLM_JSON).data,
-        { id: 'u9', name: 'GLM-5-Turbo', slug: 'glm-5-turbo', model_creator: { id: 'c1', name: 'Z AI', slug: 'zai' }, evaluations: {} },
+        { id: 'u9', name: 'GLM-5-Turbo', slug: 'glm-5-turbo', model_creator: { id: 'c1', name: 'Z AI', slug: 'zai' }, evaluations: { mmlu_pro: 0.6 } },
       ],
     })
-    const { db } = openDb(':memory:')
     const svc = await makeService(db, aaDeps(pages))
     await svc.pollEvaluations()
-    const clueOf = async () => (await svc.archive()).pendingClues.find((c) => c.provider === 'zhipu')
-    expect((await clueOf())?.title).toBe('AA 已收录未映射:GLM-5-Turbo')
-    // 映射补上(线上是改 AA_MODEL_MAP,此处直接从页面消失同路径):条目不再产出,
-    // last_seen 停更 8 天 → 滚出读侧
-    await db
-      .updateTable('model_pending_clues')
-      .set({ last_seen_at: new Date(Date.now() - 8 * 86400_000).toISOString() })
-      .where('model_key', '=', 'aa:glm-5-turbo')
-      .execute()
-    expect(await clueOf()).toBeUndefined()
+    const mapping = sqlite.prepare("SELECT * FROM model_aa_mapping WHERE slug = 'glm-5-turbo'").get() as { provider: string; official_id: string; verified: string }
+    expect(mapping).toMatchObject({ provider: 'zhipu', official_id: 'glm-5-turbo', verified: 'auto' })
+    // 当轮映射即生效:评测行带上分数;线索表不落 aa: 键
+    const a = await svc.archive()
+    expect(evalsOf(a.models.find((m) => m.officialId === 'glm-5-turbo')!, 'mmlu_pro')!.score).toBe(0.6)
+    expect(a.pendingClues.some((c) => c.provider === 'zhipu')).toBe(false)
   })
 
   it('运行期 AA 新收录:仅新模型产 evaluated 动态(occurred_on=发现日),老模型不产', async () => {
@@ -333,10 +329,11 @@ describe('评测:轮询与快照(服务集成,零真网)', () => {
     const svc = await makeService(db, aaDeps(fullPages()))
     await svc.pollEvaluations()
     const a = await svc.archive()
+    const slugs = new Set(SEED.aaMapping.map((m) => m.slug))
     for (const m of a.models) {
       for (const e of m.evaluations) {
         expect(e.url.startsWith('https://artificialanalysis.ai/models/')).toBe(true)
-        expect(Object.keys(AA_MODEL_MAP)).toContain(e.url.split('/').pop()!)
+        expect(slugs.has(e.url.split('/').pop()!)).toBe(true)
       }
     }
   })

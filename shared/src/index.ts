@@ -158,6 +158,8 @@ export type TrackedModel = {
   name: string
   kind: ModelKind
   stage: ReleaseStage
+  /** 核验来源(ADR-0058):manual = 人工核验基线存量/修订;auto = LLM 自动核验入档(前端带标记、可发现可修正)。 */
+  verified: 'manual' | 'auto'
   availability: AvailabilityMode[]
   summary: string | null
   /** 基本资料的原始信源(模型文档页等)。 */

@@ -1,11 +1,25 @@
-import { OPENAI_BASELINE, OPENAI_CHANGELOG_PAGE_URL, openaiChangelogAnchor } from '../openaiBaseline'
 import { clipFragment, isRealIsoDate, makeIdResolver, MONTHS, type MatchedHit, type ParseResult, type ProviderDef, residualIdClues } from './def'
 
 // ---- OpenAI API changelog(研究 §3:主发布源。与别家不同,条目类型行自带
 //  `Model: id` 结构化字段,归属无需双条件猜测——精确 ID 匹配 + 最长前缀快照归族)----
 
-/** OpenAI API changelog(主发布源;.md 形式直抓,锚点用人类可读页 URL——基址出自 openaiBaseline 单一事实源)。 */
+/** changelog 人类可读页基址(ADR-0058 起常量与锚点函数自基线文件迁入本体)。 */
+export const OPENAI_CHANGELOG_PAGE_URL = 'https://developers.openai.com/api/docs/changelog'
+
+/** OpenAI API changelog(主发布源;.md 形式直抓,锚点用人类可读页 URL)。 */
 export const OPENAI_CHANGELOG_URL = `${OPENAI_CHANGELOG_PAGE_URL}.md`
+
+/** changelog 锚点月份词表(全名前三字母,`#sep-3` 形态)。 */
+const OPENAI_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'] as const
+
+/**
+ * changelog 日期锚点(`#mon-d` 格式):自动解析事件与 DB 内基线事件(种子迁移的
+ * `api_available` 等)共用此拼串——同公告去重键的公共信源串,两处漂移即去重失效
+ * (issues/02 的 eventKey 共享教训)。
+ */
+export function openaiChangelogAnchor(date: string): string {
+  return `${OPENAI_CHANGELOG_PAGE_URL}#${OPENAI_MONTHS[Number(date.slice(5, 7)) - 1]!}-${Number(date.slice(8, 10))}`
+}
 
 /** changelog 一个条目(解析后的统一形态)。 */
 export interface OpenAIChangelogEntry {
@@ -80,13 +94,6 @@ export function parseOpenAIChangelog(md: string): ParseResult<OpenAIChangelogEnt
   return { entries: out, skipped }
 }
 
-/**
- * 条目模型 ID → 基线 officialId(makeIdResolver 绑定实例,精确/最长前缀口径立法见
- * def;日期快照 gpt-image-2-2026-04-21 等归家族行;移动别名 chat-latest、
- * daybreak-*-latest、gpt-5.x-chat-latest 不在基线,天然返回 null)。
- */
-export const resolveOpenAIModelId = makeIdResolver(OPENAI_BASELINE)
-
 /** 条目标题:正文首行,超长截断(changelog 无短标题,首句即最接近的概述)。 */
 function openaiEntryTitle(firstLine: string): string {
   return firstLine.length > 160 ? `${firstLine.slice(0, 157)}…` : firstLine
@@ -101,6 +108,7 @@ function openaiEntryTitle(firstLine: string): string {
  */
 export function matchOpenAIEvents(
   entries: OpenAIChangelogEntry[],
+  resolve: (id: string) => string | null,
 ): Array<MatchedHit> {
   const out: Array<MatchedHit> = []
   for (const e of entries) {
@@ -108,7 +116,7 @@ export function matchOpenAIEvents(
     const anchor = openaiChangelogAnchor(e.date)
     const claimed = new Set<string>()
     for (const id of e.models) {
-      const officialId = resolveOpenAIModelId(id)
+      const officialId = resolve(id)
       if (officialId === null || claimed.has(officialId)) continue
       claimed.add(officialId)
       out.push({
@@ -137,13 +145,19 @@ export const OPENAI_DEF: ProviderDef<OpenAIChangelogEntry> = {
   label: 'OpenAI',
   urls: [OPENAI_CHANGELOG_URL],
   parse: parseOpenAIChangelog,
-  matchEntry(e) {
+  // auto 核验信源(ADR-0058):裸 ID 线索 → 模型文档页(.md 直抓,含规格/价格)+ changelog 页
+  verifyUrls: (clue) => [
+    `https://developers.openai.com/api/docs/models/${clue.modelKey}.md`,
+    OPENAI_CHANGELOG_URL,
+  ],
+  matchEntry(e, rows) {
     // 无 `Model:` 字段的平台/SDK 条目非模型线索,不落
     if (e.models.length === 0) return { hits: [], clues: [] }
+    const resolve = makeIdResolver(rows)
     const title = openaiEntryTitle(e.firstLine !== '' ? e.firstLine : e.typeLine)
     return {
-      hits: matchOpenAIEvents([e]),
-      clues: residualIdClues(e.models, resolveOpenAIModelId, {
+      hits: matchOpenAIEvents([e], resolve),
+      clues: residualIdClues(e.models, resolve, {
         occurredOn: e.date,
         titleOf: () => title,
         sourceUrl: openaiChangelogAnchor(e.date),

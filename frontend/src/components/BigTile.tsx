@@ -17,6 +17,7 @@ export default function BigTile({
   link,
   fresh,
   freshLabel,
+  alert,
   onOpenDetail,
   moreTitle,
   overlay = false,
@@ -35,6 +36,8 @@ export default function BigTile({
   /** 鲜度语义前缀(如「动态」);裸相对时间会被读作刷新时刻(2026-08-27 模型追踪
    *  「1 天前」误读事故:鲜度轴是最新动态发生时刻,非数据抓取时刻)。 */
   freshLabel?: string
+  /** 标头待办徽标文案(如「2 待核验」);null/undefined 不显示(ADR-0058 线索触达)。 */
+  alert?: string | null
   /** 「更多」按钮直调(ADR-0022);undefined = 编辑模式/overlay,按钮不渲染。 */
   onOpenDetail?: () => void
   /** 「更多」按钮悬浮提示。 */
@@ -78,6 +81,15 @@ export default function BigTile({
           </span>
         )}
         <span className="flex shrink-0 items-baseline gap-3">
+          {alert && (
+            <span
+              className="shrink-0 rounded-full bg-amber-400/25 px-2 leading-5 text-amber-200"
+              style={{ fontSize }}
+              title="发布源新条目待人工核验(点「更多」查看线索列表)"
+            >
+              {alert}
+            </span>
+          )}
           {fresh && (
             <span className="font-mono text-white/50" style={{ fontSize }}>
               {freshLabel ? `${freshLabel} ` : ''}
