@@ -542,8 +542,19 @@ export class ModelTrackingService {
   private async ingestClues(provider: ModelProviderId, clues: PendingClue[]): Promise<void> {
     const cutoff = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10)
     const now = nowIso()
+    // 已核验的行冻结不刷新(生产首发教训:常态噪音 reject 后仍被刷新 last_seen,
+    // 7 天窗内恒占「N 待核验」徽标)——完结线索不再滚窗,自然淡出
+    const done = new Set(
+      (await this.db
+        .selectFrom('model_pending_clues')
+        .select('model_key')
+        .where('provider', '=', provider)
+        .where('verify_state', 'is not', null)
+        .execute()
+      ).map((r) => r.model_key),
+    )
     for (const c of clues) {
-      if (c.occurredOn < cutoff) continue
+      if (c.occurredOn < cutoff || done.has(c.modelKey)) continue
       await this.db
         .insertInto('model_pending_clues')
         .values({
@@ -569,11 +580,13 @@ export class ModelTrackingService {
    * 谓词(def.noiseClue)硬拦 → rejected(确定性已知噪音,不触人:百炼托管常态,推送
    * 即骚扰);②verifyClue(LLM)三态:accept 入档(verified='auto',aliases=草稿)+ 当轮
    * 产 kind 'updated' 事件(occurredOn/标题/信源用线索——语义保守,api_available 留给
-   * 人工修订)+ 推送「已自动收录」;reject → rejected + 推送「待人工核验」(例外触人);
-   * error → 不写状态,下轮重试(LLM 失败/网关挂的天然退避)。行插入 onConflict
-   * doNothing:已存在(人工先收录)时静默,线索停更滚出自愈。
+   * 人工修订)+ 推送「已自动收录」;reject → rejected(合并推送「待人工核验」——逐条
+   * 推会在存量线索首轮核验时 46 连发,生产首发教训);error → 不写状态,下轮重试
+   * (LLM 失败/网关挂的天然退避)。行插入 onConflict doNothing:已存在(人工先收录)
+   * 时静默,线索停更滚出自愈。
    */
   private async verifyPendingClues(def: ProviderDef<unknown>): Promise<void> {
+    const rejectedTitles: string[] = []
     const cutoff = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10)
     const pending = await this.db
       .selectFrom('model_pending_clues')
@@ -600,7 +613,7 @@ export class ModelTrackingService {
       }
       if (r.outcome === 'reject') {
         await this.setClueState(def.id, row.model_key, 'rejected')
-        await ntfyNotify(`模型追踪待人工核验(${def.label})`, `${row.title}\n${r.reason}`, this.env)
+        rejectedTitles.push(row.title.slice(0, 60))
         continue
       }
       await this.upsertBaselineRow({
@@ -642,6 +655,13 @@ export class ModelTrackingService {
         .execute()
       await this.setClueState(def.id, row.model_key, 'accepted')
       await ntfyNotify(`模型已自动核验收录(${def.label})`, `${r.draft.name}(${r.draft.officialId})`, this.env)
+    }
+    if (rejectedTitles.length > 0) {
+      await ntfyNotify(
+        `模型追踪待人工核验(${def.label},${rejectedTitles.length} 条)`,
+        rejectedTitles.slice(0, 5).join('\n') + (rejectedTitles.length > 5 ? `\n…另 ${rejectedTitles.length - 5} 条` : ''),
+        this.env,
+      )
     }
   }
 
