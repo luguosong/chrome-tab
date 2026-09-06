@@ -40,7 +40,6 @@ import {
   type AaMappingRow,
 } from './aaEvaluations'
 import { verifyClue } from './modelVerify'
-import { ntfyNotify } from './notify'
 
 /**
  * 模型追踪(CONTEXT.md「模型追踪/跟踪模型/模型档案」;ADR-0025):全局单例图标的
@@ -127,7 +126,7 @@ export interface ParsedFeed {
 export interface ModelTrackingDeps {
   /** init 可选透传(AA 评测 x-api-key header;生产 fetchText 原生支持,测试桩忽略)。 */
   fetchText: (url: string, timeoutMs: number, init?: RequestInit) => Promise<string>
-  /** auto 核验(LLM 网关 Key/候选链)与 ntfy 通知的环境(ADR-0058);缺省 process.env,测试注入。 */
+  /** auto 核验(LLM 网关 Key/候选链)的环境(ADR-0058);缺省 process.env,测试注入。 */
   env?: NodeJS.ProcessEnv
   /** LLM 单次调用注入(auto 核验测试零真网);缺省真 callModel(ADR-0037 闸门在其内部)。 */
   callModel?: (model: string, apiKey: string, system: string, user: string) => Promise<{ content: string | null; resp: string }>
@@ -143,7 +142,7 @@ export class ModelTrackingService {
     private readonly aaApiKey = '',
   ) {}
 
-  /** deps 注入 env 或进程 env(auto 核验/通知共用)。 */
+  /** deps 注入 env 或进程 env(auto 核验用)。 */
   private get env(): NodeJS.ProcessEnv {
     return this.deps.env ?? process.env
   }
@@ -577,16 +576,15 @@ export class ModelTrackingService {
 
   /**
    * auto 核验一轮(ADR-0058):7 天窗口内 verify_state IS NULL 的线索逐条——①噪音
-   * 谓词(def.noiseClue)硬拦 → rejected(确定性已知噪音,不触人:百炼托管常态,推送
-   * 即骚扰);②verifyClue(LLM)三态:accept 入档(verified='auto',aliases=草稿)+ 当轮
-   * 产 kind 'updated' 事件(occurredOn/标题/信源用线索——语义保守,api_available 留给
-   * 人工修订)+ 推送「已自动收录」;reject → rejected(合并推送「待人工核验」——逐条
-   * 推会在存量线索首轮核验时 46 连发,生产首发教训);error → 不写状态,下轮重试
-   * (LLM 失败/网关挂的天然退避)。行插入 onConflict doNothing:已存在(人工先收录)
-   * 时静默,线索停更滚出自愈。
+   * 谓词(def.noiseClue)硬拦 → noise(确定性已知噪音,不触人:百炼托管常态,徽标
+   * 也不占);②verifyClue(LLM)三态:accept 入档(verified='auto',aliases=草稿)+
+   * 当轮产 kind 'updated' 事件(occurredOn/标题/信源用线索——语义保守,
+   * api_available 留给人工修订);reject(噪音/低置信)→ rejected 留表触人(触达 =
+   * 图标徽标「N 待核验」,ADR-0058 注记:ntfy 推送通道 2026-09-06 撤除);error →
+   * 不写状态,下轮重试(LLM 失败/网关挂的天然退避)。行插入 onConflict doNothing:
+   * 已存在(人工先收录)时静默,线索停更滚出自愈。
    */
   private async verifyPendingClues(def: ProviderDef<unknown>): Promise<void> {
-    const rejectedTitles: string[] = []
     const cutoff = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10)
     const pending = await this.db
       .selectFrom('model_pending_clues')
@@ -613,7 +611,6 @@ export class ModelTrackingService {
       }
       if (r.outcome === 'reject') {
         await this.setClueState(def.id, row.model_key, 'rejected')
-        rejectedTitles.push(row.title.slice(0, 60))
         continue
       }
       await this.upsertBaselineRow({
@@ -654,14 +651,6 @@ export class ModelTrackingService {
         )
         .execute()
       await this.setClueState(def.id, row.model_key, 'accepted')
-      await ntfyNotify(`模型已自动核验收录(${def.label})`, `${r.draft.name}(${r.draft.officialId})`, this.env)
-    }
-    if (rejectedTitles.length > 0) {
-      await ntfyNotify(
-        `模型追踪待人工核验(${def.label},${rejectedTitles.length} 条)`,
-        rejectedTitles.slice(0, 5).join('\n') + (rejectedTitles.length > 5 ? `\n…另 ${rejectedTitles.length - 5} 条` : ''),
-        this.env,
-      )
     }
   }
 

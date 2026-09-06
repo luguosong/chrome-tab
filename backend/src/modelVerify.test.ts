@@ -82,18 +82,16 @@ describe('auto 核验:service 集成(线索 → auto 行 + 事件 + 状态,零�
   /** 基线外新块(基线无 glm-9.9 → 线索)。 */
   const GLM99_MD = '<Update label="2026-9-9" description="GLM-9.9 未来旗舰模型上线">\n[**GLM-9.9**](/cn/guide/models/text/glm-9.9)\n</Update>'
 
-  function makeDeps(llmContent: string, ntfyHits: string[]) {
+  function makeDeps(llmContent: string) {
     return {
       fetchText: async (url: string) => {
         if (url === ZHIPU_RELEASES_URL) return GLM99_MD
         if (url === 'https://docs.bigmodel.cn/cn/guide/models/text/glm-9.9') return '# GLM-9.9\n1M 上下文'
         throw new Error('HTTP 404')
       },
-      env: { AIHUBMIX_API_KEY: 'test-key', LLM_MIN_REQUEST_INTERVAL_MS: '1', NTFY_URL: 'http://ntfy.test', NTFY_TOPIC: 'chrome-tab' },
-      // ntfy 走真 fetch(common.fetchText)——env 指向假域名会在集成里 warn 吞掉;通知断言靠 state,不验网
+      env: { AIHUBMIX_API_KEY: 'test-key', LLM_MIN_REQUEST_INTERVAL_MS: '1' },
       callModel: async () => ({ content: llmContent, resp: '' }),
-      _ntfyHits: ntfyHits,
-    } satisfies import('./modelTracking').ModelTrackingDeps & { _ntfyHits: string[] }
+    } satisfies import('./modelTracking').ModelTrackingDeps
   }
 
   it('accept:基线外线索 → auto 行入库 + updated 事件(标题=线索)+ 线索 accepted(读侧滚出)', async () => {
@@ -114,7 +112,7 @@ describe('auto 核验:service 集成(线索 → auto 行 + 事件 + 状态,零�
       },
     })
     const { db } = openDb(':memory:')
-    const svc = new ModelTrackingService(db, makeDeps(llm, []), '')
+    const svc = new ModelTrackingService(db, makeDeps(llm), '')
     await svc.init()
     await svc.pollProvider('zhipu')
     const a = await svc.archive()
@@ -127,7 +125,7 @@ describe('auto 核验:service 集成(线索 → auto 行 + 事件 + 状态,零�
   it('reject(LLM 判噪音):线索 rejected 留表触人(读侧可见),无档案行', async () => {
     const llm = JSON.stringify({ isNoise: true, reason: '平台功能条目', draft: null })
     const { db } = openDb(':memory:')
-    const svc = new ModelTrackingService(db, makeDeps(llm, []), '')
+    const svc = new ModelTrackingService(db, makeDeps(llm), '')
     await svc.init()
     await svc.pollProvider('zhipu')
     const a = await svc.archive()
@@ -137,7 +135,7 @@ describe('auto 核验:service 集成(线索 → auto 行 + 事件 + 状态,零�
 
   it('同线索不复核:第二轮 poll 不再调 LLM(verify_state 已定)', async () => {
     const llm = JSON.stringify({ isNoise: true, reason: 'x', draft: null })
-    const deps = makeDeps(llm, [])
+    const deps = makeDeps(llm)
     let calls = 0
     deps.callModel = async () => {
       calls++
