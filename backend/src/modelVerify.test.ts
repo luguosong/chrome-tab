@@ -3,7 +3,7 @@ import { openDb } from './db'
 import { ModelTrackingService } from './modelTracking'
 import { OPENAI_DEF } from './providers/openai'
 import { ANTHROPIC_DEF } from './providers/anthropic'
-import { ALIBABA_DEF } from './providers/alibaba'
+import { ALIBABA_DEF, QWEN_RELEASES_URL } from './providers/alibaba'
 import { ZHIPU_RELEASES_URL } from './providers/zhipu'
 import type { PendingClue } from './providers/def'
 import { parseLlmJson, validateDraft, verifyClue } from './modelVerify'
@@ -203,5 +203,39 @@ describe('auto 核验:service 集成(线索 → auto 行 + 事件 + 状态,零�
     const first = calls
     await svc.pollProvider('zhipu')
     expect(calls).toBe(first) // rejected 不重试
+  })
+
+  it('noise 出口:noiseClue 硬拦托管第三方 → noise 态不触人、零 LLM 调用(issues/06 验收项)', async () => {
+    // 行日期动态取今天(核验窗 7 天:写死日期会在一周后出窗,线索不进核验——假绿)
+    const bailian = `<table>
+<tr><th>模型类型</th><th>时间</th><th>模型ID</th><th>功能说明</th></tr>
+<tr><td>文本生成</td><td>${new Date().toISOString().slice(0, 10)}</td><td><p><code>kimi-k3</code></p></td><td>第三方托管模型,不认领</td></tr>
+</table>`
+    let calls = 0
+    const deps = {
+      fetchText: async (url: string) => {
+        if (url === QWEN_RELEASES_URL) return bailian
+        throw new Error('HTTP 404')
+      },
+      env: { AIHUBMIX_API_KEY: 'test-key', LLM_MIN_REQUEST_INTERVAL_MS: '1' },
+      callModel: async (): Promise<{ content: string | null; resp: string }> => {
+        calls++
+        return { content: '', resp: '' }
+      },
+    } satisfies import('./modelTracking').ModelTrackingDeps
+    const { db } = openDb(':memory:')
+    const svc = new ModelTrackingService(db, deps, '')
+    await svc.init()
+    await svc.pollProvider('alibaba')
+    // 状态直查:noise 态而非 NULL(若谓词回归放行,callModel 被调后状态不是 noise)
+    const row = await db
+      .selectFrom('model_pending_clues')
+      .selectAll()
+      .where('model_key', '=', 'kimi-k3')
+      .executeTakeFirst()
+    expect(row?.verify_state).toBe('noise')
+    const a = await svc.archive()
+    expect(a.pendingClues.some((c) => c.title.includes('kimi-k3'))).toBe(false) // 读侧不触人(徽标不占)
+    expect(calls).toBe(0)
   })
 })
