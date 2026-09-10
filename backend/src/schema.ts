@@ -202,7 +202,8 @@ CREATE TABLE IF NOT EXISTS model_evaluation_status (
 );
 -- 待核验线索(2026-08-27 千问/智谱漏检事故):轮询解析出但基线未认领的条目——ADR-0025
 -- 「跳过待人工核验」的落地形态,跳过不再静默。upsert-only:基线收录后条目不再被写入,
--- last_seen_at 停更,读侧只取 7 天内仍出现的(滚动信源翻页周期内漏检可见);月之暗面
+-- occurred_on 停更,读侧(occurred_on 轴,同核验窗)出窗即滚出(滚动信源翻页周期内
+-- 漏检可见);月之暗面
 -- 双页各自 upsert 天然共存。行翻走前线索已可见,「漏了什么」不再不可考。
 CREATE TABLE IF NOT EXISTS model_pending_clues (
     provider      TEXT NOT NULL,

@@ -332,13 +332,14 @@ export class ModelTrackingService {
       .selectAll()
       .where('evaluator', '=', AA_EVALUATOR)
       .executeTakeFirst()
-    // 线索只读「7 天内仍出现」且未完结的(ADR-0058:accepted 已入档不再待办;rejected
-    // 留表触人 = 红点/推送的「待人工」;基线收录后条目停写,last_seen_at 停更自然滚出)
-    const clueCutoff = new Date(Date.now() - 7 * 86400_000).toISOString()
+    // 线索只读「7 天内出现」且未完结的,与核验窗同 occurred_on 轴(ADR-0058 注记
+    // 2026-09-10 轴对齐:旧 last_seen_at 轴下已完结线索 last_seen 冻结在核验日,7 天内
+    // 恒占徽标淹没真增量;完结/停更后 occurred_on 不再前移,出窗自然滚出)
+    const clueCutoff = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10)
     const clueRows = await this.db
       .selectFrom('model_pending_clues')
       .selectAll()
-      .where('last_seen_at', '>=', clueCutoff)
+      .where('occurred_on', '>=', clueCutoff)
       .where((eb) => eb.or([eb('verify_state', 'is', null), eb('verify_state', '=', 'rejected')])) // noise 态排除:确定性已知噪音不触人
       .execute()
     return {
@@ -534,7 +535,8 @@ export class ModelTrackingService {
 
   /**
    * 线索 upsert-only(2026-08-27 千问/智谱漏检):30 天内条目才入;基线收录后该条目
-   * 不再被写入,last_seen_at 停更,读侧 7 天未见即滚出——收录自愈无需删行。滚动信源
+   * 不再被写入,occurred_on 停更,读侧 7 天窗(occurred_on 轴,同核验窗)出窗即滚出
+   * ——收录自愈无需删行。滚动信源
    * (百炼)翻走前线索已可见,「漏了什么」不再不可考。ADR-0058:新线索由
    * verifyPendingClues 自动核验,rejected 留表触人(红点/推送)。
    */
