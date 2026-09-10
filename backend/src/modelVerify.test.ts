@@ -102,6 +102,37 @@ describe('auto 核验:verifyClue(候选链与环境,零真网经注入)', () => 
   })
 })
 
+describe('auto 核验:固定强模型(VERIFY_LLM_MODEL 单值不降级,票 07 裁决 11)', () => {
+  const fetchOk = async (): Promise<string> => '原文'
+
+  it('env 有键:单值即链长 1,可换路错误也不降级', async () => {
+    const called: string[] = []
+    const call = async (model: string) => {
+      called.push(model)
+      throw Object.assign(new Error('模型不存在'), { status: 404 }) // 可换路错误:链上还有候选才会换下一个
+    }
+    const r = await verifyClue(OPENAI_DEF, ASTRA_CLUE, fetchOk, { AIHUBMIX_API_KEY: 'k', VERIFY_LLM_MODEL: ' glm-5.3 ' }, call)
+    expect(called).toEqual(['glm-5.3']) // trim 后单值;404 也不换候选 = 不降级
+    expect(r).toMatchObject({ outcome: 'error' }) // 全候选失效(链长 1,即它自己)
+  })
+
+  it('无键/空串/纯空白:回退译制候选链(dev/测试零配置形态)', async () => {
+    const called: string[] = []
+    const call = async (model: string) => {
+      called.push(model)
+      throw Object.assign(new Error('key 无效'), { status: 401 }) // 不可换路:首候选即 error,单次调用即可断言链头
+    }
+    const envs: Array<NodeJS.ProcessEnv> = [
+      { AIHUBMIX_API_KEY: 'k' },
+      { AIHUBMIX_API_KEY: 'k', VERIFY_LLM_MODEL: '' }, // compose 透传行对 .env 缺键注入 ''(非 undefined)
+      { AIHUBMIX_API_KEY: 'k', VERIFY_LLM_MODEL: '   ' },
+    ]
+    for (const env of envs) await verifyClue(OPENAI_DEF, ASTRA_CLUE, fetchOk, env, call)
+    const head = modelCandidates({})[0]
+    expect(called).toEqual([head, head, head])
+  })
+})
+
 describe('auto 核验:service 集成(线索 → auto 行 + 事件 + 状态,零真网)', () => {
   /** 基线外新块(基线无 glm-9.9 → 线索)。 */
   const GLM99_MD = '<Update label="2026-9-9" description="GLM-9.9 未来旗舰模型上线">\n[**GLM-9.9**](/cn/guide/models/text/glm-9.9)\n</Update>'

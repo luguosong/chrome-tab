@@ -28,8 +28,16 @@ export interface VerifiedDraft {
   matchAliases: string[]
 }
 
-/** 一次核验的三态:accept(入档)/ reject(噪音或低置信,留线索触人)/ error(调用失败,下轮重试)。 */
-export type VerifyOutcome = { outcome: 'accept'; draft: VerifiedDraft } | { outcome: 'reject'; reason: string } | { outcome: 'error'; reason: string }
+/**
+ * 一次核验的四态:accept(入档)/ reject(噪音或低置信,留线索触人)/ error(调用失败,
+ * 下轮重试)/ insufficient(判自家新模型但草稿校验不过——判别与抽取解耦,spec 1.5 裁决 7:
+ * 触人等人工裁决,不重试;信源 7 天窗内更新概率低,重试 = 每轮烧强模型看同一页)。
+ */
+export type VerifyOutcome =
+  | { outcome: 'accept'; draft: VerifiedDraft }
+  | { outcome: 'reject'; reason: string }
+  | { outcome: 'error'; reason: string }
+  | { outcome: 'insufficient'; reason: string }
 
 const MODEL_KINDS = new Set(['text', 'multimodal_understanding', 'image_generation', 'video_generation', 'audio_speech', 'embedding', 'rerank', 'moderation_classification'])
 const RELEASE_STAGES = new Set(['experimental', 'preview', 'beta', 'ga', 'deprecated', 'retired'])
@@ -40,6 +48,10 @@ const SOURCE_EXCERPT = 12_000
 
 const SYSTEM_PROMPT = `你是 AI 模型档案核验员。给你一条来自某厂家官方发布源的「待核验线索」和该厂家的官方一手信源原文。判断该线索指向的是否为**该厂家自家新发布的独立模型型号**(独立产品差异的变体算独立型号;移动别名、latest 引用、日期快照、平台/SDK 功能条目、第三方托管模型都不算),是则从原文抽取结构化档案草稿。
 
+判据正反例:
+- 算独立型号:新模型家族的新成员(如 glm-5.3 之于 glm-5 家族)、新一代版本发布(如 claude-fable-5-1)。
+- 不算(判噪音):托管第三方模型(别家模型上架自家平台,如 kimi-k3 上百炼)、纯别名/更名、fine-tune 变体、纯价格调整、region 可用性公告。
+
 只输出一个 JSON 对象,不要 markdown 代码围栏,不要解释:
 {"isNoise": false, "reason": "判定依据一句话", "draft": {"officialId": "该家 API 模型 ID(原文口径)", "name": "模型名", "kind": "text|multimodal_understanding|image_generation|video_generation|audio_speech|embedding|rerank|moderation_classification", "stage": "experimental|preview|beta|ga", "availability": ["api","first_party_app","open_weights"], "summary": "一句话定位(中文)", "sources": [{"title": "信源名", "url": "原文中该信息的 URL"}], "pricing": null, "limits": null, "matchAliases": ["认领别名,通常含 officialId"]}}
 
@@ -47,6 +59,7 @@ const SYSTEM_PROMPT = `你是 AI 模型档案核验员。给你一条来自某�
 - pricing:原文有明确官方价格才填 {"region": "...", "entries": [{"text": "输入 $x/百万 tokens", "scope": null}]},否则 null,不估不编。
 - limits:原文明确披露才填 [{"label": "上下文窗口", "text": "原文数值", "scope": null}],否则 null。
 - sources 的 url 必须来自所给原文中实际出现的 URL,禁止编造。
+- 证据不足:判为自家新模型但原文缺 API ID/定价时,如实报告已知信息(officialId 填原文最接近的标识、pricing 照实 null),不要因信息不全伪装成噪音——isNoise 只反映「是否自家新独立型号」这一判定本身。
 - 判定为噪音(非自家新模型)时:{"isNoise": true, "reason": "...", "draft": null}。`
 
 /**
@@ -77,7 +90,11 @@ export async function verifyClue(
   }
   const user = `厂家:${def.label}\n线索:${clue.title}\n线索信源页:${clue.sourceUrl}\n线索唯一键:${clue.modelKey}\n\n${sources.join('\n\n')}`
   let lastErr: unknown = null
-  for (const model of modelCandidates(env)) {
+  // 核验固定强模型(票 07,裁决 11):VERIFY_LLM_MODEL 单值即链长 1,语义自锁「不降级」
+  // ——判定质量不被译制链 free 弱模型拖累;缺省/空串(compose 缺键注入 '')回退译制候选链
+  const fixedModel = env.VERIFY_LLM_MODEL?.trim()
+  const models = fixedModel ? [fixedModel] : modelCandidates(env)
+  for (const model of models) {
     try {
       const { content } = await call(model, apiKey, SYSTEM_PROMPT, user)
       if (content === null) {
@@ -92,7 +109,9 @@ export async function verifyClue(
       if (parsed.isNoise === true) return { outcome: 'reject', reason: typeof parsed.reason === 'string' ? parsed.reason : 'LLM 判定非自家新模型' }
       const draft = validateDraft(parsed.draft, urls)
       if (draft !== null) return { outcome: 'accept', draft }
-      return { outcome: 'reject', reason: typeof parsed.reason === 'string' ? parsed.reason : '草稿字段校验未过(信源依据不足)' }
+      // isNoise !== true 但草稿校验不过:判别(自家新模型)与抽取(规格证据)解耦,
+      // 不伪装 reject(spec 1.5)——留 insufficient 触人等人工,不重试
+      return { outcome: 'insufficient', reason: typeof parsed.reason === 'string' ? parsed.reason : '草稿字段校验未过(信源依据不足)' }
     } catch (e) {
       if (!isCandidateExhausted(e)) return { outcome: 'error', reason: String(e) }
       lastErr = e

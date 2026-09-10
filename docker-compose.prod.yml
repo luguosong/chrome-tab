@@ -36,6 +36,10 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD} # 仅空库首启 seed 生效;已有数据全跳过
       AIHUBMIX_API_KEY: ${AIHUBMIX_API_KEY}
+      # 模型核验固定强模型(ADR-0058 票 07,裁决 11):单值不降级——核验判定质量不被
+      # 译制链 free 弱模型拖累;可缺省,缺省容器拿空串 = 回退译制候选链(dev 同形态)。
+      # 线上实配与准确模型串以网关在售名录为准(票 09 部署时核)
+      VERIFY_LLM_MODEL: ${VERIFY_LLM_MODEL}
       # 更新日志 GitHub Releases 日期源(matt-skills)认证,可选:未认证限额 60 req/h 按
       # 出口 IP 计,机场共享出口常态被别人耗光(2026-08-31 matt 日期 403 remaining:0);
       # 配了提至 5000/h。缺省容器拿空串 = 无 Authorization 头,行为不变
