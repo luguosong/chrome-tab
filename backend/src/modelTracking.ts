@@ -334,13 +334,16 @@ export class ModelTrackingService {
       .executeTakeFirst()
     // 线索只读「7 天内出现」且未完结的,与核验窗同 occurred_on 轴(ADR-0058 注记
     // 2026-09-10 轴对齐:旧 last_seen_at 轴下已完结线索 last_seen 冻结在核验日,7 天内
-    // 恒占徽标淹没真增量;完结/停更后 occurred_on 不再前移,出窗自然滚出)
+    // 恒占徽标淹没真增量;完结/停更后 occurred_on 不再前移,出窗自然滚出)。触人三态:
+    // NULL(待核验)/ rejected /
+    // insufficient(判自家但证据不足,spec 1.5);noise(确定性噪音)与 error(核验链
+    // 失败,轮询自愈,spec 1.2)不触人不占徽标
     const clueCutoff = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10)
     const clueRows = await this.db
       .selectFrom('model_pending_clues')
       .selectAll()
       .where('occurred_on', '>=', clueCutoff)
-      .where((eb) => eb.or([eb('verify_state', 'is', null), eb('verify_state', '=', 'rejected')])) // noise 态排除:确定性已知噪音不触人
+      .where((eb) => eb.or([eb('verify_state', 'is', null), eb('verify_state', '=', 'rejected'), eb('verify_state', '=', 'insufficient')]))
       .execute()
     return {
       pendingClues: clueRows
@@ -577,14 +580,17 @@ export class ModelTrackingService {
   }
 
   /**
-   * auto 核验一轮(ADR-0058):7 天窗口内 verify_state IS NULL 的线索逐条——①噪音
-   * 谓词(def.noiseClue)硬拦 → noise(确定性已知噪音,不触人:百炼托管常态,徽标
-   * 也不占);②verifyClue(LLM)三态:accept 入档(verified='auto',aliases=草稿)+
-   * 当轮产 kind 'updated' 事件(occurredOn/标题/信源用线索——语义保守,
-   * api_available 留给人工修订);reject(噪音/低置信)→ rejected 留表触人(触达 =
-   * 图标徽标「N 待核验」,ADR-0058 注记:ntfy 推送通道 2026-09-06 撤除);error →
-   * 不写状态,下轮重试(LLM 失败/网关挂的天然退避)。行插入 onConflict doNothing:
-   * 已存在(人工先收录)时静默,线索停更滚出自愈。
+   * auto 核验一轮(ADR-0058):7 天窗口内未完结线索(verify_state IS NULL 或 error
+   * ——error 落表可观测且下轮重试,spec 1.2)逐条——①噪音谓词(def.noiseClue)硬拦 →
+   * noise(确定性已知噪音,不触人:百炼托管常态,徽标也不占);②verifyClue(LLM)四态:
+   * accept 入档(verified='auto',aliases=草稿)+ 当轮产 kind 'updated' 事件
+   * (occurredOn/标题/信源用线索——语义保守,api_available 留给人工修订);
+   * reject(噪音/低置信)→ rejected 留表触人;insufficient(判自家但草稿校验不过,
+   * spec 1.5)→ 留表触人但不重试(一次定终身,人工裁决或滚窗淡出);error → 落表
+   * 不触人,下轮重试(LLM 失败/网关挂的天然退避)。reject/insufficient/error 均落
+   * verify_reason(误拒可归因,spec 1.4)。触达 = 图标徽标「N 待核验」(ADR-0058
+   * 注记:ntfy 推送通道 2026-09-06 撤除)。行插入 onConflict doNothing:已存在
+   * (人工先收录)时静默,线索停更滚出自愈。
    */
   private async verifyPendingClues(def: ProviderDef<unknown>): Promise<void> {
     const cutoff = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10)
@@ -593,7 +599,7 @@ export class ModelTrackingService {
       .selectAll()
       .where('provider', '=', def.id)
       .where('occurred_on', '>=', cutoff)
-      .where('verify_state', 'is', null)
+      .where((eb) => eb.or([eb('verify_state', 'is', null), eb('verify_state', '=', 'error')]))
       .execute()
     for (const row of pending) {
       const clue: PendingClue = {
@@ -609,10 +615,15 @@ export class ModelTrackingService {
       const r = await verifyClue(def, clue, this.deps.fetchText, this.env, this.deps.callModel)
       if (r.outcome === 'error') {
         console.warn(`模型追踪(${def.label})线索核验失败(下轮重试) ${row.model_key}:`, r.reason)
+        await this.setClueState(def.id, row.model_key, 'error', r.reason)
         continue
       }
       if (r.outcome === 'reject') {
-        await this.setClueState(def.id, row.model_key, 'rejected')
+        await this.setClueState(def.id, row.model_key, 'rejected', r.reason)
+        continue
+      }
+      if (r.outcome === 'insufficient') {
+        await this.setClueState(def.id, row.model_key, 'insufficient', r.reason)
         continue
       }
       await this.upsertBaselineRow({
@@ -656,11 +667,15 @@ export class ModelTrackingService {
     }
   }
 
-  /** 线索核验状态落库(accepted/rejected/noise;error 不写=下轮重试)。 */
-  private async setClueState(provider: ModelProviderId, modelKey: string, state: 'accepted' | 'rejected' | 'noise'): Promise<void> {
+  /**
+   * 线索核验状态落库(accepted/rejected/noise/error/insufficient;后两态为信息智能化
+   * 试点新增,旧读侧不含)。reason 无则写 NULL——状态转移时顺带清残(error 重试后
+   * accept,旧失败理由不残留误导归因)。
+   */
+  private async setClueState(provider: ModelProviderId, modelKey: string, state: 'accepted' | 'rejected' | 'noise' | 'error' | 'insufficient', reason?: string): Promise<void> {
     await this.db
       .updateTable('model_pending_clues')
-      .set({ verify_state: state })
+      .set({ verify_state: state, verify_reason: reason ?? null })
       .where('provider', '=', provider)
       .where('model_key', '=', modelKey)
       .execute()

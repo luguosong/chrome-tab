@@ -211,7 +211,8 @@ CREATE TABLE IF NOT EXISTS model_pending_clues (
     model_key     TEXT NOT NULL, -- 条目最强标识(千问=模型ID串、智谱=文档链接),provider 内唯一
     title         TEXT NOT NULL,
     source_url    TEXT NOT NULL,
-    verify_state  TEXT, -- ADR-0058 auto 核验状态:NULL=未核验/失败待重试,'accepted'=已入档,'rejected'=噪音/低置信(留表触人)
+    verify_state  TEXT, -- ADR-0058 auto 核验状态:NULL=未核验,'accepted'=已入档,'rejected'=噪音/低置信(留表触人),'noise'=确定性噪音(不触人);'error'=核验链失败(下轮重试,不触人)与 'insufficient'=判自家但草稿校验不过(触人等人工,不重试)为信息智能化试点新增(spec 1.2/1.5),旧读侧不含两值,回滚即静默
+    verify_reason TEXT, -- 判定理由:reject/insufficient/error 落库(误拒可归因是判别还是信源);accepted/noise 无理由为 NULL
     first_seen_at TEXT NOT NULL,
     last_seen_at  TEXT NOT NULL,
     UNIQUE (provider, model_key)
@@ -299,7 +300,7 @@ export function migrate(sqlite: SqliteConnection) {
     verified: "TEXT NOT NULL DEFAULT 'manual'",
   })
   // ADR-0058 auto 核验:存量线索表补状态列(NULL = 未核验)。
-  addMissingColumns(sqlite, 'model_pending_clues', { verify_state: 'TEXT' })
+  addMissingColumns(sqlite, 'model_pending_clues', { verify_state: 'TEXT', verify_reason: 'TEXT' })
   // 「重要日子」寄放布局设置(ADR-0026):存量行 NULL,读侧兜底 []。
   addMissingColumns(sqlite, 'layout_settings', { important_dates: 'TEXT' })
   // releaseTimes 落库(81888ea 曾以「迁移重」不动,2026-08-31 二次线上消失推翻):JSON
@@ -517,8 +518,10 @@ export interface ModelPendingCluesTable {
   model_key: string
   title: string
   source_url: string
-  /** ADR-0058 auto 核验状态;null = 未核验/失败待重试。 */
+  /** ADR-0058 auto 核验状态;null = 未核验(核验窗另含 error 态重试)。 */
   verify_state: string | null
+  /** 判定理由(reject/insufficient/error 落库;accepted/noise 为 NULL)。 */
+  verify_reason: string | null
   first_seen_at: string
   last_seen_at: string
 }

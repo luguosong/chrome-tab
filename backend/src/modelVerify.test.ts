@@ -100,6 +100,14 @@ describe('auto 核验:verifyClue(候选链与环境,零真网经注入)', () => 
     expect(r).toMatchObject({ outcome: 'reject' }) // 判定结果无关紧要,只验信源抓取面
     expect(fetched).toEqual(['https://platform.claude.com/docs/en/about-claude/models/overview.md', clue.sourceUrl])
   })
+
+  it('判自家但草稿校验不过 → insufficient(不再伪装 reject;reason 透传 LLM 判据)', async () => {
+    // spec 1.5 裁决 7:「判别」与「草稿抽取」解耦——isNoise:false + 畸形草稿 = 信源证据
+    // 不足,不是判错;Fable 5.1 误拒归因的结构点位(基线回放 #39 复现)。
+    const llm = JSON.stringify({ isNoise: false, reason: '自家新模型但信源未给规格', draft: { ...VALID_DRAFT, kind: 'vibe' } })
+    const r = await verifyClue(OPENAI_DEF, ASTRA_CLUE, async () => '# docs', { AIHUBMIX_API_KEY: 'k' }, async () => ({ content: llm, resp: '' }))
+    expect(r).toMatchObject({ outcome: 'insufficient', reason: '自家新模型但信源未给规格' })
+  })
 })
 
 describe('auto 核验:固定强模型(VERIFY_LLM_MODEL 单值不降级,票 07 裁决 11)', () => {
@@ -177,7 +185,7 @@ describe('auto 核验:service 集成(线索 → auto 行 + 事件 + 状态,零�
     expect(a.pendingClues.some((c) => c.title.includes('GLM-9.9'))).toBe(false) // accepted 不再待办
   })
 
-  it('reject(LLM 判噪音):线索 rejected 留表触人(读侧可见),无档案行', async () => {
+  it('reject(LLM 判噪音):线索 rejected 留表触人(读侧可见),无档案行;判定理由落库', async () => {
     const llm = JSON.stringify({ isNoise: true, reason: '平台功能条目', draft: null })
     const { db } = openDb(':memory:')
     const svc = new ModelTrackingService(db, makeDeps(llm), '')
@@ -186,6 +194,10 @@ describe('auto 核验:service 集成(线索 → auto 行 + 事件 + 状态,零�
     const a = await svc.archive()
     expect(a.models.some((m) => m.officialId === 'glm-9.9')).toBe(false)
     expect(a.pendingClues.some((c) => c.title.includes('GLM-9.9'))).toBe(true) // 待人工
+    // spec 1.4:reason 落库——误拒发生时可归因是判别问题还是信源问题
+    const row = await db.selectFrom('model_pending_clues').select(['verify_state', 'verify_reason']).executeTakeFirstOrThrow() // 库内唯一线索(GLM-9.9;智谱 model_key=文档链接全串,不拿 key 断言)
+    expect(row.verify_state).toBe('rejected')
+    expect(row.verify_reason).toBe('平台功能条目')
   })
 
   it('同线索不复核:第二轮 poll 不再调 LLM(verify_state 已定)', async () => {
@@ -237,5 +249,58 @@ describe('auto 核验:service 集成(线索 → auto 行 + 事件 + 状态,零�
     const a = await svc.archive()
     expect(a.pendingClues.some((c) => c.title.includes('kimi-k3'))).toBe(false) // 读侧不触人(徽标不占)
     expect(calls).toBe(0)
+  })
+
+  it('error 落表可观测:核验链失败 → 行 error 态 + reason;下轮核验窗仍含(重试);徽标不含(不触人)', async () => {
+    // spec 1.2:现状只 console.warn 不落表,核验链断没断不可见;落表后保持重试语义。
+    const deps = makeDeps('')
+    let calls = 0
+    deps.callModel = async () => {
+      calls++
+      throw Object.assign(new Error('网关超时'), { status: 401 }) // 不可换路:首候选即 error 出口
+    }
+    const { db } = openDb(':memory:')
+    const svc = new ModelTrackingService(db, deps, '')
+    await svc.init()
+    await svc.pollProvider('zhipu')
+    const row = await db.selectFrom('model_pending_clues').select(['verify_state', 'verify_reason']).executeTakeFirstOrThrow() // 库内唯一线索(GLM-9.9;智谱 model_key=文档链接全串,不拿 key 断言)
+    expect(row.verify_state).toBe('error')
+    expect(row.verify_reason).toContain('网关超时')
+    expect((await svc.archive()).pendingClues.some((c) => c.title.includes('GLM-9.9'))).toBe(false) // error 不触人
+    await svc.pollProvider('zhipu') // 等一轮落定(init 内含不被等待的首轮,绝对计数会撞竞态)
+    const first = calls
+    await svc.pollProvider('zhipu')
+    expect(calls).toBeGreaterThan(first) // 与 rejected 不重试对照:核验窗含 error,下轮重试
+  })
+
+  it('insufficient:判自家但草稿校验不过 → 触人(徽标含)+ 不重试(核验窗不含)+ reason 落库', async () => {
+    // spec 1.5 裁决 7:留表 + 触人(等人工裁决)+ 一次定终身不重试(信源 7 天窗内
+    // 更新概率低,重试 = 每轮烧强模型看同一页)。草稿 kind 越界 → validateDraft null。
+    const llm = JSON.stringify({
+      isNoise: false,
+      reason: '自家新模型但信源未给规格',
+      draft: {
+        officialId: 'glm-9.9', name: 'GLM-9.9', kind: 'vibe', stage: 'ga', availability: ['api'], summary: 'x',
+        sources: [{ title: '模型文档', url: 'https://docs.bigmodel.cn/cn/guide/models/text/glm-9.9' }],
+        pricing: null, limits: null, matchAliases: ['GLM-9.9'],
+      },
+    })
+    const deps = makeDeps(llm)
+    let calls = 0
+    deps.callModel = async () => {
+      calls++
+      return { content: llm, resp: '' }
+    }
+    const { db } = openDb(':memory:')
+    const svc = new ModelTrackingService(db, deps, '')
+    await svc.init()
+    await svc.pollProvider('zhipu')
+    const row = await db.selectFrom('model_pending_clues').select(['verify_state', 'verify_reason']).executeTakeFirstOrThrow() // 库内唯一线索(GLM-9.9;智谱 model_key=文档链接全串,不拿 key 断言)
+    expect(row.verify_state).toBe('insufficient')
+    expect(row.verify_reason).toBe('自家新模型但信源未给规格')
+    expect((await svc.archive()).pendingClues.some((c) => c.title.includes('GLM-9.9'))).toBe(true) // 触人
+    const first = calls
+    await svc.pollProvider('zhipu')
+    expect(calls).toBe(first) // 不重试
   })
 })
