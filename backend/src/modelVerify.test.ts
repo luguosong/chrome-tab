@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { openDb } from './db'
 import { ModelTrackingService } from './modelTracking'
 import { OPENAI_DEF } from './providers/openai'
+import { ANTHROPIC_DEF } from './providers/anthropic'
 import { ALIBABA_DEF } from './providers/alibaba'
 import { ZHIPU_RELEASES_URL } from './providers/zhipu'
 import type { PendingClue } from './providers/def'
 import { parseLlmJson, validateDraft, verifyClue } from './modelVerify'
+import { modelCandidates } from './translate'
 
 /** 一条裸 ID 线索(openai changelog 口径)。 */
 const ASTRA_CLUE: PendingClue = {
@@ -75,6 +77,28 @@ describe('auto 核验:verifyClue(候选链与环境,零真网经注入)', () => 
     const own: PendingClue = { ...hosted, modelKey: 'qwen3.9-preview', title: 'qwen3.9-preview:上架' }
     expect(ALIBABA_DEF.noiseClue!(own)).toBe(false)
     expect(OPENAI_DEF.noiseClue).toBeUndefined()
+  })
+
+  it('anthropic 核验信源:固定抓 models/overview 页 + 线索源页(spec 1.3 裁决 12,URL 字面量钉死)', async () => {
+    const clue: PendingClue = {
+      occurredOn: '2026-09-04',
+      title: "We've launched Claude Fable 5.1",
+      sourceUrl: 'https://platform.claude.com/docs/en/models/fable-5-1/whats-new-fable-5-1',
+      modelKey: 'https://platform.claude.com/docs/en/models/fable-5-1/whats-new-fable-5-1',
+    }
+    const fetched: string[] = []
+    const r = await verifyClue(
+      ANTHROPIC_DEF,
+      clue,
+      async (url) => {
+        fetched.push(url)
+        return '# Models'
+      },
+      { AIHUBMIX_API_KEY: 'test-key' },
+      async () => ({ content: JSON.stringify({ isNoise: true, reason: 'x', draft: null }), resp: '' }),
+    )
+    expect(r).toMatchObject({ outcome: 'reject' }) // 判定结果无关紧要,只验信源抓取面
+    expect(fetched).toEqual(['https://platform.claude.com/docs/en/about-claude/models/overview.md', clue.sourceUrl])
   })
 })
 

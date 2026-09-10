@@ -85,6 +85,11 @@ export const ANTHROPIC_DEF: ProviderDef<AnthropicNote> = {
   label: 'Anthropic',
   urls: [ANTHROPIC_RELEASES_URL],
   parse: parseAnthropicReleases,
+  // auto 核验信源(ADR-0058;信息智能化 spec 1.3 裁决 12):固定 models/overview 页
+  // (新模型发布即上页,API ID/定价/limits/retirement 齐全)+ 线索源页——release notes
+  // 条目只报发布不含规格,单靠它信源单薄(Fable 5.1 误拒归因之一)。直链
+  // platform.claude.com,不走 docs.claude.com(同路径是 302 重定向)
+  verifyUrls: (clue) => ['https://platform.claude.com/docs/en/about-claude/models/overview.md', clue.sourceUrl],
   matchEntry(n, rows) {
     const hit = matchAnthropicEvent(n, rows)
     if (hit !== null) return { hits: [hit], clues: [] }
