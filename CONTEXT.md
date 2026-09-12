@@ -66,8 +66,12 @@ _Avoid_: 块内列表、滚动区、榜单组件。
 _Avoid_: hover-intent(实现行话)、防误触(只指门槛一面)、宽限计时器(实现细节非契约)。
 
 **图标类型 (Icon Type)**:
-类型身份、画格跨度与是否单例由前后端共享的单源元数据表(shared `iconTypes.ts`,ADR-0057——双端各自派生,消灭五份手写漂移)声明;标签、配置表单等前端专属元数据由前端元数据表(`lib/iconTypeRegistry.ts`,静态全覆盖,span/singleton 自单源表展开)持有(ADR-0001 契约)。图标块与详情的组件映射由静态全覆盖 UI adapter(前端 `components/iconTypeUi.tsx`)持有——有无详情由可选详情 renderer 表达,入口策略('block' 整块点击 / 'header' 标头「更多」,ADR-0022)随 adapter 声明(2026-08-28 起,原注册表 detail/detailEntry 字段退役)。类型分基础与扩展两类。
+类型身份、画格跨度与是否单例由前后端共享的单源元数据表(shared `iconTypes.ts`,ADR-0057——双端各自派生,消灭五份手写漂移)声明;标签、配置表单与载荷 codec 等前端专属元数据由前端元数据表(`lib/iconTypeRegistry.ts`,静态全覆盖,span/singleton 自单源表展开)持有(ADR-0001 契约)。图标块与详情的组件映射由静态全覆盖 UI adapter(前端 `components/iconTypeUi.tsx`)持有——有无详情由可选详情 renderer 表达,入口策略('block' 整块点击 / 'header' 标头「更多」,ADR-0022)随 adapter 声明(2026-08-28 起,原注册表 detail/detailEntry 字段退役)。类型分基础与扩展两类。
 _Avoid_: 组件、widget、block。
+
+**图标载荷 (Icon Payload)**:
+图标实例绑定的类型专属配置对象(「网站链接」的 {name,url,icon?}、「自选股」的 {symbol,name}、「天气」的 {location}、「更新日志」的 {source};单例类型无载荷)。形状由所属类型的注册行 codec 单源声明(decode/encode,ADR-0059):坏形状解码为 null,可选字段缺失是合法载荷;「更新日志」的默认源兜底是行声明的域策略(ADR-0020 读侧兜底不改道)。空载荷与坏载荷的渲染回落由各渲染点自声明。后端不解释载荷语义(仅校验 object|null),载荷形状是纯前端契约。
+_Avoid_: data(实现字段名)、配置(过泛)。
 
 **基础类型 / 扩展类型 (Base / Extension Type)**:
 基础类型随产品内置、不可卸载(目前仅"网站链接")。扩展类型可插拔(目前为“股票”、“天气”、“更新日志”、“AI 热点”、“待办”、“视频更新”、“模型追踪”、“新闻”、“GitHub 趋势”、“服务器”、“倒计时”),是后续新增各类图标功能的扩展点。

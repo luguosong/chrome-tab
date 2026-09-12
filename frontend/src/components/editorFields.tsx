@@ -1,9 +1,9 @@
 import { Fragment, type ReactNode } from 'react'
-import { CHANGELOG_SOURCES, changelogSourceOf } from 'chrome-tab-shared'
+import { CHANGELOG_SOURCES } from 'chrome-tab-shared'
 import type { EditorField } from '../lib/iconTypeRegistry'
-import { extractString } from '../lib/iconData'
+import { decodeIcon, resolveIcon } from '../lib/iconTypeRegistry'
 import { normalizeUrl } from '../lib/normalizeUrl'
-import { readWeatherLocation, type WeatherLocation } from '../lib/weather'
+import type { WeatherLocation } from '../lib/weather'
 import LocationPicker from './LocationPicker'
 import SymbolPicker from './SymbolPicker'
 import IconPicker from './IconPicker'
@@ -52,6 +52,14 @@ function asTrimmedText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+/** 臂层机械读:无形状知识的字符串字段读取(载荷形状知识归 registry codec,ADR-0059;
+ *  原 iconData extractString 退役后仅存于此)。 */
+function readString(data: Record<string, unknown> | null, key: string): string {
+  if (!data) return ''
+  const v = data[key]
+  return typeof v === 'string' ? v : ''
+}
+
 /** 文本臂:name/url 等自由文本字段的公共形态;url 臂在其上覆写 serialize。 */
 const textArm: EditorFieldArm = {
   render: ({ field, values, setField }) => (
@@ -63,7 +71,7 @@ const textArm: EditorFieldArm = {
       className="w-full px-3 py-2 rounded-lg bg-white/20 text-white placeholder-white/50 text-sm outline-none focus:ring-2 focus:ring-accent"
     />
   ),
-  prefill: (data, field) => extractString(data, field.name),
+  prefill: (data, field) => readString(data, field.name),
   serialize: asTrimmedText,
 }
 
@@ -87,7 +95,7 @@ const symbolArm: EditorFieldArm = {
       placeholder={field.placeholder}
     />
   ),
-  prefill: (data, field) => extractString(data, field.name),
+  prefill: (data, field) => readString(data, field.name),
   serialize: asTrimmedText,
 }
 
@@ -102,7 +110,7 @@ const locationArm: EditorFieldArm = {
       placeholder={field.placeholder}
     />
   ),
-  prefill: (data) => readWeatherLocation(data) ?? '',
+  prefill: (data) => decodeIcon('weather', data)?.location ?? '',
   serialize: (value) => (value ? value : undefined),
   required: '请选择城市',
 }
@@ -120,14 +128,14 @@ const iconArm: EditorFieldArm = {
       placeholder={field.placeholder}
     />
   ),
-  prefill: (data, field) => extractString(data, field.name),
+  prefill: (data, field) => readString(data, field.name),
   serialize: asTrimmedText,
 }
 
 /** source 臂:更新日志外源下拉(ADR-0020,选项 = shared CHANGELOG_SOURCES 枚举)。
- *  预填走 changelogSourceOf 读侧兜底——存量 data=null 与非法 id 都显示生效源,
- *  编辑弹层从此与新增同款下拉、不再退化为自由文本。values 未设时回落声明 default
- *  (双保险,实际不可达:新增初值即 default,编辑预填必为合法 id)。 */
+ *  预填走 changelog 行声明兜底(resolveIcon,ADR-0059)——存量 data=null 与非法 id
+ *  都显示生效源,编辑弹层从此与新增同款下拉、不再退化为自由文本。values 未设时回落
+ *  声明 default(双保险,实际不可达:新增初值即 default,编辑预填必为合法 id)。 */
 const sourceArm: EditorFieldArm = {
   render: ({ field, values, setField }) => {
     const initial = 'default' in field ? field.default : ''
@@ -146,7 +154,7 @@ const sourceArm: EditorFieldArm = {
       </select>
     )
   },
-  prefill: (data) => changelogSourceOf(data),
+  prefill: (data) => resolveIcon('changelog', data).source,
   serialize: asTrimmedText,
 }
 

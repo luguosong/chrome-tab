@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react'
 import { useIconData } from '../context/IconDataContext'
-import { hourHM, locationKey, weatherIconUrl, readWeatherLocation, type WeatherAir, type WeatherAlert, type WeatherDay, type WeatherHour, type WeatherNow } from '../lib/weather'
+import { decodeIcon } from '../lib/iconTypeRegistry'
+import { hourHM, locationKey, weatherIconUrl, type WeatherAir, type WeatherAlert, type WeatherDay, type WeatherHour, type WeatherNow } from '../lib/weather'
 import type { Icon } from '../lib/types'
 import DetailModal, { QueryPane } from './DetailModal'
 import StatCell from './StatCell'
@@ -23,7 +24,7 @@ export default function WeatherModal({
 }) {
   const { weather, weatherError, refetchWeather } = useIconData()
 
-  const loc = readWeatherLocation(icon.data)
+  const loc = decodeIcon('weather', icon.data)?.location ?? null
   const key = loc ? locationKey(loc) : ''
   const bundle = key ? weather[key] ?? null : null
   const now = bundle?.now ?? null

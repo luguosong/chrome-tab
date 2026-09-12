@@ -1,11 +1,13 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { useAiHot, useAiHotDaily, useAiHotModelPicks } from '../hooks/useAiHot'
 import { formatDailyDate } from '../lib/aihot'
 import { timeAgo } from '../lib/timeAgo'
-import { extractString } from '../lib/iconData'
+import { decodeIcon } from '../lib/iconTypeRegistry'
 import { paneState } from '../lib/detailModalState'
 import type { Icon } from '../lib/types'
 import DetailModal, { QueryPane } from './DetailModal'
+import InfoRow from './InfoRow'
 
 /**
  * AI 热点详情 Modal(见 CONTEXT.md「AI 热点」,与天气同范式的详情容器),三 tab:
@@ -43,7 +45,7 @@ export default function AiHotModal({ icon, onClose }: { icon: Icon; onClose: () 
       ariaLabel="AI 热点"
       width="2xl"
       className="p-6"
-      title={extractString(icon.data, 'name') || 'AI 热点'}
+      title={decodeIcon('aihot', icon.data)?.name || 'AI 热点'}
       subtitle="AIHOT 事件热点榜 + 模型精选 + AI 日报"
       tabs={TABS}
       tab={tab}
@@ -65,43 +67,24 @@ export default function AiHotModal({ icon, onClose }: { icon: Icon; onClose: () 
       {tab === 'hot' ? (
         <ol className="space-y-1">
           {topics.map((t) => (
-            <li
+            <AiHotRow
               key={t.rank}
-              className="rounded-xl px-3 py-2.5 hover:bg-white/10 active:bg-white/20 transition flex gap-3"
-            >
-              <span className="font-mono text-accent text-sm w-5 shrink-0 text-right self-start mt-0.5">
-                {t.rank}
-              </span>
-              <div className="min-w-0 flex-1">
-                {t.storyUrl ? (
-                  <a
-                    href={t.storyUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-sm text-white/90 leading-snug hover:text-accent"
-                  >
-                    {t.title}
-                  </a>
-                ) : (
-                  <span className="text-sm text-white/90 leading-snug">{t.title}</span>
-                )}
-                <div className="text-meta text-white/50 mt-1 flex items-center gap-2 flex-wrap">
-                  {t.sourceName && <span className="truncate max-w-[40%]">{t.sourceName}</span>}
+              url={t.storyUrl}
+              title={t.title}
+              leading={
+                <span className="font-mono text-accent text-sm w-5 shrink-0 text-right self-start mt-0.5">
+                  {t.rank}
+                </span>
+              }
+              meta={
+                <>
                   {t.sourceCount > 1 && <span>{t.sourceCount} 源</span>}
                   {t.latestAt && <span>{timeAgo(t.latestAt)}</span>}
-                  {t.originalUrl && (
-                    <a
-                      href={t.originalUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="underline underline-offset-2 hover:text-accent"
-                    >
-                      原文
-                    </a>
-                  )}
-                </div>
-              </div>
-            </li>
+                  <AiHotOriginalLink url={t.originalUrl} />
+                </>
+              }
+              source={t.sourceName}
+            />
           ))}
         </ol>
       ) : tab === 'picks' ? (
@@ -110,6 +93,61 @@ export default function AiHotModal({ icon, onClose }: { icon: Icon; onClose: () 
         <DailyPanel />
       )}
     </DetailModal>
+  )
+}
+
+/**
+ * AI 热点族行壳适配(三面板同构的族内方言):px-3 py-2.5 + active 态覆盖 InfoRow
+ * 默认 p-2(轴向前缀类在 Tailwind 样式表中后于 p 简写,追加即覆盖);标题可选
+ * 主跳(缺 storyUrl/aihotUrl 时纯文本),次行 = 源名 + 域自持分段。
+ */
+function AiHotRow({
+  url,
+  title,
+  meta,
+  leading,
+  source,
+  children,
+}: {
+  url?: string | null
+  title: string
+  meta?: ReactNode
+  leading?: ReactNode
+  source?: string | null
+  children?: ReactNode
+}) {
+  return (
+    <InfoRow
+      className="px-3 py-2.5 active:bg-white/20"
+      leading={leading}
+      title={
+        url ? (
+          <a href={url} target="_blank" rel="noreferrer" className="hover:text-accent">
+            {title}
+          </a>
+        ) : (
+          title
+        )
+      }
+      meta={
+        <div className="text-meta text-white/50 flex items-center gap-2 flex-wrap">
+          {source && <span className="truncate max-w-[40%]">{source}</span>}
+          {meta}
+        </div>
+      }
+    >
+      {children}
+    </InfoRow>
+  )
+}
+
+/** 原文次链(热点榜/精选/日报同款):underline 悬浮 accent,可缺(容 null wire)。 */
+function AiHotOriginalLink({ url }: { url?: string | null }) {
+  if (!url) return null
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-accent">
+      原文
+    </a>
   )
 }
 
@@ -133,34 +171,18 @@ function ModelPicksPanel() {
     >
       <ul className="space-y-1">
         {picks.map((p) => (
-          <li key={p.id} className="rounded-xl px-3 py-2.5 hover:bg-white/10 active:bg-white/20 transition">
-            {p.aihotUrl ? (
-              <a
-                href={p.aihotUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-sm text-white/90 leading-snug hover:text-accent"
-              >
-                {p.title}
-              </a>
-            ) : (
-              <span className="text-sm text-white/90 leading-snug">{p.title}</span>
-            )}
-            <div className="text-meta text-white/50 mt-1 flex items-center gap-2 flex-wrap">
-              {p.sourceName && <span className="truncate max-w-[40%]">{p.sourceName}</span>}
-              {p.publishedAt && <span>{timeAgo(p.publishedAt)}</span>}
-              {p.originalUrl && (
-                <a
-                  href={p.originalUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="underline underline-offset-2 hover:text-accent"
-                >
-                  原文
-                </a>
-              )}
-            </div>
-          </li>
+          <AiHotRow
+            key={p.id}
+            url={p.aihotUrl}
+            title={p.title}
+            source={p.sourceName}
+            meta={
+              <>
+                {p.publishedAt && <span>{timeAgo(p.publishedAt)}</span>}
+                <AiHotOriginalLink url={p.originalUrl} />
+              </>
+            }
+          />
         ))}
       </ul>
     </QueryPane>
@@ -205,36 +227,17 @@ function DailyPanel() {
             <div className="text-xs text-accent/80 mt-3 first:mt-0 mb-1">{s.label}</div>
             <ul className="space-y-1">
               {s.items.map((it, ii) => (
-                <li key={ii} className="rounded-xl px-3 py-2.5 hover:bg-white/10 active:bg-white/20 transition">
-                  {it.aihotUrl ? (
-                    <a
-                      href={it.aihotUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-sm text-white/90 leading-snug hover:text-accent"
-                    >
-                      {it.title}
-                    </a>
-                  ) : (
-                    <span className="text-sm text-white/90 leading-snug">{it.title}</span>
-                  )}
-                  <div className="text-meta text-white/50 mt-1 flex items-center gap-2 flex-wrap">
-                    {it.sourceName && <span className="truncate max-w-[40%]">{it.sourceName}</span>}
-                    {it.originalUrl && (
-                      <a
-                        href={it.originalUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="underline underline-offset-2 hover:text-accent"
-                      >
-                        原文
-                      </a>
-                    )}
-                  </div>
+                <AiHotRow
+                  key={ii}
+                  url={it.aihotUrl}
+                  title={it.title}
+                  source={it.sourceName}
+                  meta={<AiHotOriginalLink url={it.originalUrl} />}
+                >
                   {it.summary && (
                     <p className="text-sm text-white/60 leading-relaxed mt-1.5">{it.summary}</p>
                   )}
-                </li>
+                </AiHotRow>
               ))}
             </ul>
           </section>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { CHANGELOG_SOURCES, DEFAULT_CHANGELOG_SOURCE } from 'chrome-tab-shared'
 import { missingRequiredText, prefillFields, serializeFields } from './editorFields'
-import type { EditorField } from '../lib/iconTypeRegistry'
+import { decodeIcon, type EditorField } from '../lib/iconTypeRegistry'
 
 // editorFields:字段渲染 seam 的纯决策面(编辑预填 / 表单值→data 序列化 / 新增必填门)。
 // 渲染控件与两表单的接线是薄 map,按 repo 惯例不测组件(见 components/editorFields.tsx)。
@@ -110,5 +110,45 @@ describe('missingRequiredText(新增提交门)', () => {
 
   it('只看 fields 里声明的字段', () => {
     expect(missingRequiredText([NAME], {})).toBeUndefined()
+  })
+})
+
+describe('serializeFields ↔ codec 往返(表单层与载荷层 coherence,ADR-0059)', () => {
+  // codec 只承诺形状,值规整(trim/normalizeUrl)留表单层(ADR-0059 决策三);
+  // 本组断言 serializeFields 的产出恒能被所属类型 codec 读回预期 payload——
+  // 两层各自演进时漂移在此报警,不靠注释对齐。
+
+  it('nav:url 补前缀、icon 空串入 data 后仍可读回(空串是合法覆盖值)', () => {
+    const data = serializeFields(
+      [URL, NAME, { name: 'icon', label: '图标', placeholder: '' }],
+      { url: 'github.com', name: ' GitHub ', icon: '' },
+    )
+    expect(data).toEqual({ url: 'https://github.com', name: 'GitHub', icon: '' })
+    expect(decodeIcon('nav', data)).toEqual({
+      name: 'GitHub',
+      url: 'https://github.com',
+      icon: '',
+    })
+  })
+
+  it('stock:symbol/name trim 后读回', () => {
+    const data = serializeFields([SYMBOL, NAME], { symbol: ' sh600519 ', name: ' 茅台 ' })
+    expect(decodeIcon('stock', data)).toEqual({ symbol: 'sh600519', name: '茅台' })
+  })
+
+  it('changelog:source trim 后读回', () => {
+    const data = serializeFields([SOURCE], { source: ' idea ' })
+    expect(decodeIcon('changelog', data)).toEqual({ source: 'idea' })
+  })
+
+  it('weather:location 对象原样入 data、读回同值', () => {
+    const data = serializeFields([LOCATION], { location: SH })
+    expect(decodeIcon('weather', data)).toEqual({ location: SH })
+  })
+
+  it('aihot:name 空串入 data、读回空串(渲染回落「AI 热点」在消费点)', () => {
+    const data = serializeFields([NAME], { name: '' })
+    expect(data).toEqual({ name: '' })
+    expect(decodeIcon('aihot', data)).toEqual({ name: '' })
   })
 })

@@ -1,8 +1,9 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import { useQuotes } from '../hooks/useQuotes'
 import { useWeather } from '../hooks/useWeather'
+import { decodeIcon } from '../lib/iconTypeRegistry'
 import type { Quote } from '../lib/quoteParser'
-import { locationKey, readWeatherLocation, type WeatherBundle, type WeatherLocation } from '../lib/weather'
+import { locationKey, type WeatherBundle, type WeatherLocation } from '../lib/weather'
 import type { Icon } from '../lib/types'
 
 /**
@@ -39,25 +40,25 @@ export function IconDataProvider({
   icons: Icon[]
   children: ReactNode
 }) {
-  // 收集所有 stock 图标的 symbol(去重、稳定排序以稳 queryKey)
+  // 收集所有 stock 图标的 symbol(去重、稳定排序以稳 queryKey;载荷解码见 ADR-0059)
   const symbols = useMemo(() => {
     const set = new Set<string>()
     for (const i of icons) {
       if (i.type === 'stock') {
-        const sym = i.data?.symbol
-        if (typeof sym === 'string' && sym) set.add(sym)
+        const sym = decodeIcon('stock', i.data)?.symbol ?? ''
+        if (sym) set.add(sym)
       }
     }
     return [...set].sort()
   }, [icons])
 
-  // 收集所有天气图标的 location(按 locationKey 去重,稳 queryKey)
+  // 收集所有天气图标的 location(按 locationKey 去重,稳 queryKey;解码经 codec,ADR-0059)
   const weatherLocs = useMemo(() => {
     const out: WeatherLocation[] = []
     const seen = new Set<string>()
     for (const i of icons) {
       if (i.type === 'weather') {
-        const loc = readWeatherLocation(i.data)
+        const loc = decodeIcon('weather', i.data)?.location ?? null
         if (loc) {
           const k = locationKey(loc)
           if (!seen.has(k)) {

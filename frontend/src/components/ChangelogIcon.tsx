@@ -1,6 +1,7 @@
-import { changelogSourceOf, getChangelogSource, isLtsVersion, isPrereleaseVersion } from 'chrome-tab-shared'
+import { getChangelogSource, isLtsVersion, isPrereleaseVersion } from 'chrome-tab-shared'
 import { useChangelog } from '../hooks/useChangelog'
 import { latestStableTitle } from '../lib/changelogParser'
+import { resolveIcon } from '../lib/iconTypeRegistry'
 import { timeAgo } from '../lib/timeAgo'
 import { isFreshRow } from '../lib/tileBody'
 import { ICON_SCALE, tileFont } from '../lib/iconLayout'
@@ -31,8 +32,8 @@ export default function ChangelogIconBody({
   /** 「更多」按钮直调(ADR-0022);undefined = 编辑模式/overlay,按钮不渲染。 */
   onOpenDetail?: () => void
 }) {
-  // data.source 读侧兜底:存量 data=null 图标归默认源(ADR-0020)
-  const source = changelogSourceOf(icon.data)
+  // 存量 data=null / 非法 id 兜底默认源(ADR-0020)——行声明 fallback 经 resolveIcon(ADR-0059)
+  const source = resolveIcon('changelog', icon.data).source
   const { data } = useChangelog(source)
   const times = data?.releaseTimes ?? {}
   // 块内信号位剔预发布(ADR-0050):预发布发布频繁(如 codex alpha 日均 2-3 个)近乎常亮

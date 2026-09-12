@@ -1,18 +1,12 @@
-import { isValidElement, type ReactElement } from 'react'
-import { describe, expect, it, vi } from 'vitest'
-import type { Icon, IconTypeId } from '../lib/types'
+import { describe, expect, it } from 'vitest'
+import type { IconTypeId } from '../lib/types'
 import AiHotIconBody from './AiHotIcon'
 import AiHotModal from './AiHotModal'
 import ChangelogIconBody from './ChangelogIcon'
 import ChangelogModal from './ChangelogModal'
 import CountdownIconBody from './CountdownIcon'
 import CountdownModal from './CountdownModal'
-import {
-  ChangelogDetail,
-  GroupIconBody,
-  ICON_TYPE_UI,
-  NavIconBody,
-} from './iconTypeUi'
+import { GroupIconBody, ICON_TYPE_UI, NavIconBody } from './iconTypeUi'
 import ModelIconBody from './ModelIcon'
 import ModelModal from './ModelModal'
 import NewsIconBody from './NewsIcon'
@@ -34,7 +28,7 @@ describe('图标类型 UI adapter', () => {
   it.each([
     ['nav', NavIconBody, undefined, undefined],
     ['stock', StockIconBody, StockModal, 'block'],
-    ['changelog', ChangelogIconBody, ChangelogDetail, 'header'],
+    ['changelog', ChangelogIconBody, ChangelogModal, 'header'],
     ['weather', WeatherIconBody, WeatherModal, 'block'],
     ['aihot', AiHotIconBody, AiHotModal, 'header'],
     ['todo', TodoIconBody, TodoModal, 'header'],
@@ -54,19 +48,7 @@ describe('图标类型 UI adapter', () => {
     },
   )
 
-  it('更新日志详情把图标 data 转为外源参数', () => {
-    const onClose = vi.fn()
-    const rendered = ICON_TYPE_UI.changelog.detail?.({
-      icon: makeIcon('changelog', { source: 'matt-skills' }),
-      onClose,
-    }) as ReactElement<{ source: string; onClose: () => void }>
-
-    expect(isValidElement(rendered)).toBe(true)
-    expect(rendered.type).toBe(ChangelogModal)
-    expect(rendered.props).toEqual({ source: 'matt-skills', onClose })
-  })
+  // 更新日志详情自 ChangelogModal 直接挂行(自解析 icon,ADR-0059):原「wrapper 把
+  // data 转外源参数」转译测试随 ChangelogDetail 退役——兜底语义的用例在
+  // iconTypeRegistry.test.ts(resolveIcon)。
 })
-
-function makeIcon(type: IconTypeId, data: Record<string, unknown> | null = null): Icon {
-  return { id: 1, pageId: 1, parentId: null, type, sortOrder: 0, data }
-}

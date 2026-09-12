@@ -1,13 +1,16 @@
 import { useMemo } from 'react'
-import { getChangelogSource, hasChangelogRaw, isLtsVersion, type ChangelogSourceId } from 'chrome-tab-shared'
+import { getChangelogSource, hasChangelogRaw, isLtsVersion } from 'chrome-tab-shared'
 import { useChangelog, useTranslateStatus, useTranslateVersions } from '../hooks/useChangelog'
 import { inline, latestStableTitle } from '../lib/changelogParser'
+import { resolveIcon } from '../lib/iconTypeRegistry'
+import type { Icon } from '../lib/types'
 import DetailModal, { QueryPane } from './DetailModal'
 
 /**
  * 更新日志详情 Modal(ADR-0022,原 ChangelogDrawer 改造:与 AiHotModal/WeatherModal
  * 同范式的居中玻璃面板;检索框随之移除——版本列表纵向滚动即达,入口收窄为 tile 标头
- * 「更多」按钮)。按打开图标的源(source prop,ADR-0020)经 useChangelog 拉取(1h
+ * 「更多」按钮)。按打开图标的源(自解析 icon 载荷,ADR-0059;存量 data=null 与
+ * 非法 id 经 resolveIcon 兜底默认源,ADR-0020)经 useChangelog 拉取(1h
  * staleTime,与网格图标共享同源 queryKey 缓存),展示完整版本列表(纵向滚动)。
  * 真实 CHANGELOG 无日期、无 ### 小节,条目直接挂在版本下,故按「发布时间线」呈现:
  * 左侧连续细轨 + 每版本一个节点,最新版 accent 高亮 + 「最新」药丸,旧版弱化;每版本
@@ -25,12 +28,13 @@ import DetailModal, { QueryPane } from './DetailModal'
  * 版本列表自滚)。编辑态进入时由父组件(DashboardPage)onClose。
  */
 export default function ChangelogModal({
-  source,
+  icon,
   onClose,
 }: {
-  source: ChangelogSourceId
+  icon: Icon
   onClose: () => void
 }) {
+  const source = resolveIcon('changelog', icon.data).source
   const def = getChangelogSource(source)
   const sourceLabel = def.label
   // 无原文源(两地址皆缺省,现无实例):版本流为 npm 合成空块,无条目无译制,

@@ -1,5 +1,6 @@
 import { useIconData } from '../context/IconDataContext'
-import { alertBadge, locationKey, weatherIconUrl, readWeatherLocation } from '../lib/weather'
+import { decodeIcon } from '../lib/iconTypeRegistry'
+import { alertBadge, locationKey, weatherIconUrl } from '../lib/weather'
 import type { Icon } from '../lib/types'
 import Tile, { TilePrimary } from './Tile'
 
@@ -18,7 +19,7 @@ import Tile, { TilePrimary } from './Tile'
  */
 export default function WeatherIconBody({ icon, overlay = false }: { icon: Icon; overlay?: boolean }) {
   const { weather } = useIconData()
-  const loc = readWeatherLocation(icon.data)
+  const loc = decodeIcon('weather', icon.data)?.location ?? null
   const bundle = loc ? weather[locationKey(loc)] ?? null : null
   const now = bundle?.now ?? null
   const badge = alertBadge(bundle?.alerts ?? [])

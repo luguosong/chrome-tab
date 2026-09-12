@@ -1,5 +1,5 @@
 import { useIconData } from '../context/IconDataContext'
-import { extractString } from '../lib/iconData'
+import { decodeIcon } from '../lib/iconTypeRegistry'
 import { TILE_FONT_TIERS } from '../lib/iconLayout'
 import type { Quote } from '../lib/quoteParser'
 import type { Icon } from '../lib/types'
@@ -18,8 +18,9 @@ import Tile, { TilePrimary, TileSecondary } from './Tile'
  */
 export default function StockIconBody({ icon, overlay = false }: { icon: Icon; overlay?: boolean }) {
   const { quotes } = useIconData()
-  const symbol = extractString(icon.data, 'symbol')
-  const name = extractString(icon.data, 'name')
+  const payload = decodeIcon('stock', icon.data)
+  const symbol = payload?.symbol ?? ''
+  const name = payload?.name ?? ''
   const q = symbol ? quotes[symbol] ?? null : null
   // 显示串先构造、显示与字号同源取用——字号按 n 字符算而显示 n+1 就破功
   const priceText = q ? q.price.toFixed(2) : null

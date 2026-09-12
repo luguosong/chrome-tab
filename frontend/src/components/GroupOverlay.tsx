@@ -5,12 +5,13 @@ import { CSS } from '@dnd-kit/utilities'
 import { useConfig, useDeleteIcon, useUpdateIconData } from '../api/config'
 import { useEditMode } from '../context/EditModeContext'
 import { useExitClose } from '../hooks/useExitClose'
-import { get } from '../lib/iconTypeRegistry'
+import { get, decodeIcon, encodeIcon, iconDisplayName } from '../lib/iconTypeRegistry'
+import { swallowEscape } from '../lib/escStack'
 import ConfirmButton from './ConfirmButton'
 import { EditForm } from './Icon'
 import { groupMembers, groupPageCount, groupPageSlice } from '../lib/groupReducer'
 import { groupContainerId } from '../lib/iconDrag'
-import { extractString, navIconSrc } from '../lib/iconData'
+import { navIconSrc } from '../lib/iconData'
 import type { Icon } from '../lib/types'
 
 /**
@@ -69,12 +70,12 @@ export default function GroupOverlay({
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState('')
   const renameMut = useUpdateIconData()
-  const name = extractString(group.data, 'name') || '新建分组'
+  const name = decodeIcon('group', group.data)?.name || '新建分组'
   function commitRename() {
     setRenaming(false)
     const next = draft.trim() || '新建分组' // 清空回落默认(CONTEXT.md「分组」)
     if (next === name) return
-    renameMut.mutate({ id: group.id, data: { name: next } })
+    renameMut.mutate({ id: group.id, data: encodeIcon('group', { name: next }) })
   }
 
   // ── 点外部关闭(左键)——同步关,不走退场 ────────────────────────────────
@@ -151,8 +152,8 @@ export default function GroupOverlay({
           closing ? 'animate-pop-out' : 'animate-pop-in'
         }`}
       >
-        {/* 组名:点开行内改名(Enter/失焦提交,ESC 只取消改名——input 的
-            stopPropagation 挡住下方 document keydown,不连带关弹层) */}
+        {/* 组名:点开行内改名(Enter/失焦提交,ESC 只取消改名——swallowEscape
+            就地消化,不连带关弹层) */}
         {renaming ? (
           <input
             autoFocus
@@ -161,10 +162,7 @@ export default function GroupOverlay({
             onBlur={commitRename}
             onKeyDown={(e) => {
               if (e.key === 'Enter') commitRename()
-              else if (e.key === 'Escape') {
-                e.stopPropagation()
-                setRenaming(false)
-              }
+              swallowEscape(() => setRenaming(false))(e)
             }}
             aria-label="分组名称"
             className="block mx-auto w-52 px-2 py-0.5 rounded-full text-center text-sm font-medium tracking-wide bg-white/20 text-white placeholder-white/50 outline-none focus:ring-2 focus:ring-accent"
@@ -245,10 +243,10 @@ function MemberTile({ member, onClose }: { member: Icon; onClose: () => void }) 
     id: member.id,
   })
 
-  const name = extractString(member.data, 'name')
-  const url = member.type === 'nav' ? extractString(member.data, 'url') : ''
-  // 覆盖 > 派生,与网格/组预览同一口径(navIconSrc)
-  const src = member.type === 'nav' ? navIconSrc(member.data) : ''
+  const name = iconDisplayName(member.type, member.data)
+  const url = member.type === 'nav' ? decodeIcon('nav', member.data)?.url ?? '' : ''
+  // 覆盖 > 派生,与网格/组预览同一口径(navIconSrc,载荷化 ADR-0059)
+  const src = member.type === 'nav' ? navIconSrc(decodeIcon('nav', member.data)) : ''
 
   const body = (
     <>

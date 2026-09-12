@@ -9,7 +9,9 @@ export type { IconSpan, IconTypeId, IconWireType, LayoutSettings, SearchEngineId
 /** 走马灯一屏:图标的容器(见 CONTEXT.md「页面」)。 */
 export type Page = { id: number; name: string; sortOrder: number }
 
-/** 图标实例(见 CONTEXT.md「图标」)。data 为类型专属配置(nav={name,url} / stock={symbol,name} / changelog=null)。
+/** 图标实例(见 CONTEXT.md「图标」)。data 为「图标载荷」(CONTEXT.md/ADR-0059):类型专属
+ *  配置对象,形状由所属类型注册行 codec 单源声明(nav={name,url,icon?} / stock={symbol,name} /
+ *  weather={location} / changelog={source};空载荷单例为 null)。
  *  parentId:分组成员的组行 id(ADR-0011),顶层图标为 null。图标一律占 1 格、无尺寸档位(ADR-0016)。 */
 export type Icon = {
   id: number

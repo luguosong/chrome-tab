@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { canAdd, get, iconCells, listTypes } from './iconTypeRegistry'
+import { DEFAULT_CHANGELOG_SOURCE } from 'chrome-tab-shared'
+import {
+  canAdd,
+  decodeIcon,
+  encodeIcon,
+  get,
+  iconCells,
+  iconDisplayName,
+  listTypes,
+  resolveIcon,
+} from './iconTypeRegistry'
 
 // 静态类型表直接断言元数据 + 纯查询函数。
 // 对齐 spec §接缝2:canAdd(单例判断)纯函数输入输出断言。图标无尺寸档位(ADR-0016)。
@@ -169,5 +179,129 @@ describe('倒计时类型 countdown(单例;CONTEXT.md「倒计时」)', () => {
   it('单例:不存在时允许,已存在时拒绝(新增抽屉置灰的判据)', () => {
     expect(canAdd('countdown', ['nav', 'aihot'])).toBe(true)
     expect(canAdd('countdown', ['nav', 'countdown'])).toBe(false)
+  })
+})
+
+// ── 图标载荷 codec(ADR-0059)──────────────────────────────────────────────
+// decode 统一 strict:结构键违规 → null;描述性字符串字段缺失/非串 → '' 宽松投影
+// (readWeatherLocation 先例);可选字段缺失是合法载荷(值为 undefined)。
+
+describe('codec decode — 严格/宽松分界', () => {
+  it('nav:合法形状 → payload;描述字段非串 → 空串;data null → null', () => {
+    expect(decodeIcon('nav', { name: 'GitHub', url: 'https://github.com' })).toEqual({
+      name: 'GitHub',
+      url: 'https://github.com',
+    })
+    expect(decodeIcon('nav', { name: 123, url: 'u', icon: 'x.png' })).toEqual({
+      name: '',
+      url: 'u',
+      icon: 'x.png',
+    })
+    expect(decodeIcon('nav', null)).toBeNull()
+  })
+
+  it('nav icon 可选:非串省略,空串保留(与 encode 往返自洽)', () => {
+    expect(decodeIcon('nav', { name: 'n', url: 'u', icon: 123 })).toEqual({ name: 'n', url: 'u' })
+    expect(decodeIcon('nav', { name: 'n', url: 'u', icon: '' })).toEqual({ name: 'n', url: 'u', icon: '' })
+  })
+
+  it('stock:同 flat 形态(symbol/name 宽松投影)', () => {
+    expect(decodeIcon('stock', { symbol: 'sh600519', name: '贵州茅台' })).toEqual({
+      symbol: 'sh600519',
+      name: '贵州茅台',
+    })
+    expect(decodeIcon('stock', {})).toEqual({ symbol: '', name: '' })
+    expect(decodeIcon('stock', null)).toBeNull()
+  })
+
+  it('changelog:source 是结构键——非法 id / 缺失 / null → null(兜底走 resolveIcon)', () => {
+    expect(decodeIcon('changelog', { source: 'idea' })).toEqual({ source: 'idea' })
+    expect(decodeIcon('changelog', { source: 'bogus' })).toBeNull()
+    expect(decodeIcon('changelog', {})).toBeNull()
+    expect(decodeIcon('changelog', null)).toBeNull()
+  })
+
+  it('weather:包壳 readWeatherLocation——lat/lon 非数 → null,描述字段缺失 → 宽松', () => {
+    expect(
+      decodeIcon('weather', { location: { name: '北京', adm1: '', adm2: '', lat: 39.9, lon: 116.4 } }),
+    ).toEqual({ location: { name: '北京', adm1: '', adm2: '', lat: 39.9, lon: 116.4 } })
+    expect(decodeIcon('weather', { location: { name: 'x', lat: 'a', lon: 1 } })).toBeNull()
+    expect(decodeIcon('weather', { location: { lat: 1, lon: 2 } })).toEqual({
+      location: { name: '', adm1: '', adm2: '', lat: 1, lon: 2 },
+    })
+    expect(decodeIcon('weather', null)).toBeNull()
+  })
+
+  it('aihot:name 可选——{} 是合法载荷;data null → null(统一契约)', () => {
+    expect(decodeIcon('aihot', { name: 'AI 日报' })).toEqual({ name: 'AI 日报' })
+    expect(decodeIcon('aihot', {})).toEqual({})
+    expect(decodeIcon('aihot', null)).toBeNull()
+  })
+
+  it('group:name 缺失 → 空串(渲染点回落「新建分组」不变)', () => {
+    expect(decodeIcon('group', { name: '开发' })).toEqual({ name: '开发' })
+    expect(decodeIcon('group', {})).toEqual({ name: '' })
+    expect(decodeIcon('group', null)).toBeNull()
+  })
+
+  it('空载荷单例(×7):decode/encode 恒 null——条目显式而非缺席', () => {
+    for (const t of ['todo', 'video', 'model', 'news', 'trending', 'servers', 'countdown'] as const) {
+      expect(decodeIcon(t, null)).toBeNull()
+      expect(decodeIcon(t, { whatever: 1 })).toBeNull()
+      expect(encodeIcon(t, null)).toBeNull()
+    }
+  })
+})
+
+describe('codec resolveIcon — changelog 行声明兜底(ADR-0020 读侧不改道)', () => {
+  it('null / 非法 id / 缺失 → 默认源;合法 id 原样', () => {
+    expect(resolveIcon('changelog', null).source).toBe(DEFAULT_CHANGELOG_SOURCE)
+    expect(resolveIcon('changelog', { source: 'bogus' }).source).toBe(DEFAULT_CHANGELOG_SOURCE)
+    expect(resolveIcon('changelog', {}).source).toBe(DEFAULT_CHANGELOG_SOURCE)
+    expect(resolveIcon('changelog', { source: 'codex' }).source).toBe('codex')
+  })
+
+  it('无兜底类型:resolveIcon 与 decodeIcon 同值', () => {
+    expect(resolveIcon('nav', null)).toBeNull()
+    expect(resolveIcon('nav', { name: 'n', url: 'u' })).toEqual({ name: 'n', url: 'u' })
+  })
+})
+
+describe('codec encode — payload ↔ data 形状往返', () => {
+  it('encode(decode(canonical data)) ≡ canonical data(五个有载荷类型)', () => {
+    const cases: Array<['nav' | 'stock' | 'changelog' | 'weather' | 'group', Record<string, unknown>]> = [
+      ['nav', { name: 'GitHub', url: 'https://github.com', icon: 'https://x/f.png' }],
+      ['nav', { name: '', url: 'https://a.b' }],
+      ['stock', { symbol: 'sh600519', name: '贵州茅台' }],
+      ['changelog', { source: 'idea' }],
+      ['weather', { location: { name: '北京', adm1: '北京', adm2: '东城', lat: 39.9, lon: 116.4 } }],
+      ['group', { name: '开发' }],
+    ]
+    for (const [type, data] of cases) {
+      const payload = decodeIcon(type, data)
+      expect(payload).not.toBeNull()
+      expect(encodeIcon(type, payload!)).toEqual(data)
+    }
+  })
+
+  it('aihot:name 未设时 encode 省略键', () => {
+    expect(encodeIcon('aihot', {})).toEqual({})
+    expect(encodeIcon('aihot', { name: 'AI 日报' })).toEqual({ name: 'AI 日报' })
+  })
+
+  it('encodeIcon 服务编程写路径:分组改名', () => {
+    expect(encodeIcon('group', { name: '工具' })).toEqual({ name: '工具' })
+  })
+})
+
+describe('iconDisplayName — 通用取名(删除确认等)', () => {
+  it('声明类型取 payload.name;null 载荷与未声明类型 → 空串', () => {
+    expect(iconDisplayName('nav', { name: 'GitHub', url: 'u' })).toBe('GitHub')
+    expect(iconDisplayName('stock', { symbol: 's', name: '茅台' })).toBe('茅台')
+    expect(iconDisplayName('aihot', { name: 'AI 日报' })).toBe('AI 日报')
+    expect(iconDisplayName('group', { name: '开发' })).toBe('开发')
+    expect(iconDisplayName('nav', null)).toBe('')
+    expect(iconDisplayName('weather', { location: { name: '北京', adm1: '', adm2: '', lat: 1, lon: 2 } })).toBe('')
+    expect(iconDisplayName('todo', null)).toBe('')
   })
 })

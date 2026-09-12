@@ -7,7 +7,7 @@ import KlineChart from './KlineChart'
 import DetailModal, { Chip, QueryPane } from './DetailModal'
 import StatCell from './StatCell'
 import { formatMarketCap, isIndexSymbol, symbolToSecid, symbolToSecucode } from '../lib/companyOverview'
-import { extractString } from '../lib/iconData'
+import { decodeIcon } from '../lib/iconTypeRegistry'
 import { KLINE_RANGES, type KlineRange } from '../lib/kline'
 import type { Icon } from '../lib/types'
 import type { Quote } from '../lib/quoteParser'
@@ -35,8 +35,9 @@ export default function StockModal({
 }) {
   const { quotes, quotesError, refetchQuotes } = useIconData()
 
-  const symbol = extractString(icon.data, 'symbol')
-  const name = extractString(icon.data, 'name') || symbol
+  const payload = decodeIcon('stock', icon.data)
+  const symbol = payload?.symbol ?? ''
+  const name = (payload?.name ?? '') || symbol
   const code = symbol.replace(/^(us|sh|sz)/, '')
   const q = symbol ? quotes[symbol] ?? null : null
 

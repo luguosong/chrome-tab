@@ -1,5 +1,5 @@
 import { useAiHotDaily } from '../hooks/useAiHot'
-import { extractString } from '../lib/iconData'
+import { decodeIcon } from '../lib/iconTypeRegistry'
 import { ICON_SCALE, tileFont } from '../lib/iconLayout'
 import { useEditMode } from '../context/EditModeContext'
 import type { Icon } from '../lib/types'
@@ -31,7 +31,7 @@ export default function AiHotIconBody({
 }) {
   const { data } = useAiHotDaily()
   const { editing } = useEditMode()
-  const name = extractString(icon.data, 'name') || 'AI 热点'
+  const name = decodeIcon('aihot', icon.data)?.name || 'AI 热点'
   const sections = (data?.sections ?? []).filter((s) => s.items.length > 0)
   const fresh = data?.date ? `${data.date}T08:00:00+08:00` : null
   const fontSize = tileFont(ICON_SCALE, 'secondary')

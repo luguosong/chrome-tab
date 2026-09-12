@@ -1,14 +1,14 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { get, type EditorField, type IconTypeDefinition } from '../lib/iconTypeRegistry'
+import { get, decodeIcon, iconDisplayName, type EditorField, type IconTypeDefinition } from '../lib/iconTypeRegistry'
+import { swallowEscape } from '../lib/escStack'
 import ConfirmButton from './ConfirmButton'
 import { ICON_TYPE_UI } from './iconTypeUi'
 import type { Icon as IconModel } from '../lib/types'
 import { useEditMode } from '../context/EditModeContext'
 import { useGroupGesture } from '../context/GroupGestureContext'
 import { LABEL_GAP_PX } from '../lib/iconLayout'
-import { extractString } from '../lib/iconData'
 import { useSiteInfoAutofill } from '../api/siteInfo'
 import { useDeleteIcon, useDissolveGroup, useUpdateIconData } from '../api/config'
 import { ApiError } from '../api/client'
@@ -94,7 +94,7 @@ export default function Icon({
       : null),
   }
 
-  const url = icon.type === 'nav' ? extractString(icon.data, 'url') : ''
+  const url = icon.type === 'nav' ? decodeIcon('nav', icon.data)?.url ?? '' : ''
 
   // 点击派发(UI adapter 契约:可选详情 renderer 决定有无详情,detailEntry 决定入口):
   //   - group:点开分组弹层(票 08)——任意模式(编辑态也要先开弹层才能组内排序)
@@ -207,8 +207,9 @@ function EditActions({
   // 仅 editor 非空的类型出现编辑配置 ✎——含 changelog(✎ 弹层经 source 臂同款下拉改绑外源)。
   const editor = def?.editor ?? []
   const showEdit = editor.length > 0
-  // 删除/解散确认文案要带图标名(下方 ConfirmButton 的 aria-label)
-  const name = extractString(icon.data, 'name')
+  // 删除/解散确认文案要带图标名(下方 ConfirmButton 的 aria-label);
+  // 通用取名走行声明 displayName(ADR-0059),未声明/空载荷 → ''
+  const name = iconDisplayName(icon.type, icon.data)
   return (
     <>
       <div
@@ -287,8 +288,8 @@ export function EditForm({
   onCancel: () => void
 }) {
   // 预填当前 data;组件仅在 editOpen 时挂载,故初值即打开瞬间的快照。
-  // 逐字段预填语义在臂上(prefillFields:location 走 readWeatherLocation、source 走
-  // changelogSourceOf 存量兜底显示生效源),见 editorFields.tsx。
+  // 逐字段预填语义在臂上(prefillFields:location 走 weather codec、source 走
+  // changelog resolveIcon 兜底显示生效源),见 editorFields.tsx。
   const [values, setValues] = useState<Record<string, unknown>>(() =>
     prefillFields(fields, icon.data),
   )
@@ -320,14 +321,11 @@ export function EditForm({
         className="absolute top-5 right-0 z-[61] glass-panel glass-panel-readable rounded-lg p-2 min-w-[240px] space-y-2"
         onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          // Esc 关闭:面板本身不可聚焦,但输入框聚焦时键盘事件冒泡到面板即触发。
-          // stopPropagation 防 Esc 继续冒泡(编辑模式无拖拽进行时才有表单,不与 dnd-kit 冲突)
-          if (e.key === 'Escape') {
-            e.stopPropagation()
-            onCancel()
-          }
-        }}
+        onKeyDown={
+          // Esc 关闭:面板本身不可聚焦,但输入框聚焦时键盘事件冒泡到面板即触发;
+          // 就地消化不冒泡(编辑模式无拖拽进行时才有表单,不与 dnd-kit 冲突)
+          swallowEscape(onCancel)
+        }
       >
         {/* 字段渲染唯一分派点(臂表),add/edit 两路共用,见 editorFields.tsx */}
         <EditorFields fields={fields} values={values} setField={setField} onBusyChange={setArmBusy} />

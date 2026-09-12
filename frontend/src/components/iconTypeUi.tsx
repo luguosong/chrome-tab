@@ -1,8 +1,8 @@
 import { useMemo, type ReactNode } from 'react'
-import { changelogSourceOf } from 'chrome-tab-shared'
 import { useConfig } from '../api/config'
+import { decodeIcon } from '../lib/iconTypeRegistry'
 import { groupMembers } from '../lib/groupReducer'
-import { extractString, navIconSrc } from '../lib/iconData'
+import { navIconSrc } from '../lib/iconData'
 import { GROUP_PAD_PX } from '../lib/iconLayout'
 import type { Icon, IconTypeId } from '../lib/types'
 import AiHotIconBody from './AiHotIcon'
@@ -63,7 +63,7 @@ export const ICON_TYPE_UI: Record<IconTypeId, IconTypeUiAdapter> = {
   stock: { body: StockIconBody, detail: StockModal, detailEntry: 'block' },
   changelog: {
     body: ChangelogIconBody,
-    detail: ChangelogDetail,
+    detail: ChangelogModal,
     detailEntry: 'header',
   },
   weather: { body: WeatherIconBody, detail: WeatherModal, detailEntry: 'block' },
@@ -78,14 +78,11 @@ export const ICON_TYPE_UI: Record<IconTypeId, IconTypeUiAdapter> = {
   group: { body: GroupIconBody },
 }
 
-export function ChangelogDetail({ icon, onClose }: IconDetailProps) {
-  return <ChangelogModal source={changelogSourceOf(icon.data)} onClose={onClose} />
-}
-
 export function NavIconBody({ icon, overlay = false }: IconBodyProps) {
-  const favicon = navIconSrc(icon.data)
+  const payload = decodeIcon('nav', icon.data)
+  const favicon = navIconSrc(payload)
   return (
-    <Tile label={extractString(icon.data, 'name')} overlay={overlay} bare>
+    <Tile label={payload?.name ?? ''} overlay={overlay} bare>
       {favicon && (
         <img
           src={favicon}
@@ -106,13 +103,13 @@ export function GroupIconBody({ icon, overlay = false }: IconBodyProps) {
   )
   return (
     <Tile
-      label={extractString(icon.data, 'name')}
+      label={decodeIcon('group', icon.data)?.name ?? ''}
       padPx={GROUP_PAD_PX}
       overlay={overlay}
     >
       <div className="grid w-full h-full grid-cols-3 grid-rows-2 place-items-center gap-[6%]">
         {members.map((member) => {
-          const src = member.type === 'nav' ? navIconSrc(member.data) : ''
+          const src = member.type === 'nav' ? navIconSrc(decodeIcon('nav', member.data)) : ''
           return src ? (
             <img
               key={member.id}
