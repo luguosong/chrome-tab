@@ -1,5 +1,5 @@
 import type { PendingClue, ProviderDef } from './providers/def'
-import { callModel, CandidateExhausted, modelCandidates, runCandidateChain } from './translate'
+import { callModel, CandidateExhausted, modelCandidates, runCandidateChain } from './llm'
 
 /**
  * LLM 自动核验(ADR-0058,2026-09-05「当天时效」grill 定案):待核验线索 → 抓厂家

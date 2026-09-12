@@ -1,166 +1,25 @@
 import { createHash } from 'node:crypto'
 import type { Db } from './db'
-import { fetchText } from './common'
+import {
+  callModel,
+  CandidateExhausted,
+  isCandidateExhausted,
+  modelCandidates,
+  runCandidateChain,
+} from './llm'
 
 /**
  * 跨域批量 LLM 译制机制(CONTEXT.md「译文表」;ADR-0029 首建于新闻标题、ADR-0030
- * 复用于趋势描述、ADR-0032 地基归位):候选模型链 + 宁原文勿空;批量编号列表 ≤20 条/请求、
+ * 复用于趋势描述、ADR-0061 网关边界):候选模型链 + 宁原文勿空;批量编号列表 ≤20 条/请求、
  * 批间串行(free 渠道限流敏感,不并发,changelog 同纪律);漏行/畸行返回 null 由调用方依
  * 自身轮询节奏免费重试。域特化(system prompt、语言判定、译文表归属)在各域模块。
  *
- * 本文件同时是译制机制的**地基**(ADR-0032):网关地址/候选链/响应解析/哈希派生住在这里,
- * changelog/news/trending 三域消费——机制不得反向依赖任何域模块。
+ * 网关地址/候选链/响应解析由 LLM Gateway(ADR-0061)统一持有；本文件保留译制域的
+ * 分段、编号协议、提示词、译文表和输出校验。
  */
-
-// ---- LLM 网关地基(自 changelog.ts 归位,ADR-0032;原文注释随迁)----
 
 /** 译文表主键派生(哈希即身份:原文变即新键,同原文终身复用;三域译文表同款)。 */
 export const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex')
-
-export const LLM_BASE_URL = 'https://aihubmix.com/v1'
-
-/** 从 OpenAI 兼容响应取 choices[0].message.content;任何畸形形态返回 null(调用方据此降级英文)。 */
-export function extractContent(resp: unknown): string | null {
-  const choices = (resp as { choices?: unknown } | null)?.choices
-  if (!Array.isArray(choices) || choices.length === 0) return null
-  const content = (choices[0] as { message?: { content?: unknown } })?.message?.content
-  return typeof content === 'string' ? content : null
-}
-
-/**
- * 译制模型候选链(2026-08-27):free 优先(coding-glm-5.3-flash-free 打头),free 全不可用落到付费 coding-glm-5.3。
- * 候选失效 = 403/404(模型被禁/不存在)、429/5xx(限流/网关错)、400 no_available_channel(渠道没了)、超时(挂死)或 200 但响应无 content(空补全);其他错误(401 key/网络)换模型无益,直接抛。
- * CHANGELOG_LLM_MODEL 支持逗号分隔列表覆盖;Key 沿用 AIHUBMIX_API_KEY。
- */
-const DEFAULT_LLM_MODELS =
-  'coding-glm-5.3-flash-free,coding-glm-5.3-free,coding-kimi-k3-free,gemini-3.7-flash-free,gpt-5.5-free,coding-glm-5-free,coding-glm-5.3'
-
-export function modelCandidates(env: NodeJS.ProcessEnv = process.env): string[] {
-  // 空串/纯分隔符(如 ",")回退默认:compose 引用行对 .env 缺省键注入的是 ''(非
-  // undefined;此键现无 compose 透传行、线上走默认链);纯分隔符过滤后为空列表会让
-  // 候选链恒空、`throw lastErr` 抛 undefined(code-review 补齐)
-  const list = (env.CHANGELOG_LLM_MODEL ?? '').split(',').map((m) => m.trim()).filter(Boolean)
-  return list.length ? list : DEFAULT_LLM_MODELS.split(',')
-}
-
-/** 网关对该候选「没戏了,换下一个」的判定:模型被禁/不存在(403/404)、限流/网关错(429/5xx,
- *  换候选=换渠道可能绕开)、无渠道(400 no_available_channel)、超时(fetchText 的
- *  AbortSignal.timeout 抛 TimeoutError——挂死的 free 模型换下一个,不再单点拖满上限)。 */
-export function isCandidateExhausted(e: unknown): boolean {
-  const err = e as { status?: number; body?: string; name?: string }
-  return (
-    err?.status === 403 ||
-    err?.status === 404 ||
-    err?.status === 429 ||
-    (err?.status ?? 0) >= 500 ||
-    err?.name === 'TimeoutError' ||
-    /no_available_channel/.test(err?.body ?? '')
-  )
-}
-
-// ---- 候选链 runner(ADR-0060:三份手抄循环的骨架与两源换路分类单点)----
-
-/** 软失效哨兵:200 但产物不可用(批量的「配对数 0」、块的「空 content」、核验的「非
- *  JSON」)。什么算不可用是调用方域知识,住各 attempt 内以 throw 表达;runner 将本哨兵
- *  与 isCandidateExhausted 两源合一判「此候选没戏,换下一个」。 */
-export class CandidateExhausted extends Error {}
-
-/** 候选链一次运行的终局三态:answer = 某候选给出确定答案(含核验 reject/insufficient
- *  这类「确定否定」);exhausted = 全链疲竭,带 lastErr(空链时为 null,对齐核验
- *  「全候选失效:null」现状);fatal = 不可换路错误停链,带候选上下文(调用方致命
- *  日志行含「候选 i/N model」前缀,不携带则零 diff 验收破功)。index 为 1 基序数,
- *  对齐日志/onPhase 口径。 */
-export type ChainVerdict<T> =
-  | { status: 'answer'; value: T }
-  | { status: 'exhausted'; lastErr: unknown }
-  | { status: 'fatal'; err: unknown; model: string; index: number }
-
-/** 两源换路判定的合一式(哨兵软失效 ∪ 网关硬错误):runner 的分类核心,本文件各
- *  attempt 的逐候选「换下一」日志同用一式——分类单点,永不双写。 */
-function isChainExhausted(e: unknown): boolean {
-  return e instanceof CandidateExhausted || isCandidateExhausted(e)
-}
-
-/**
- * 候选链 runner(ADR-0060,修订 ADR-0032 决策二的保留范围:循环骨架与换路分类收编,
- * 出口映射仍留调用方):候选迭代 + 两源分类 + lastErr 记账 + 链尽聚合。attempt 是
- * 调用方域闭包(callModel + 软失效判定 + 自产成败日志);onAttempt 每候选尝试前上报
- * (块译制 onPhase 专用,其余调用方不传)。runner 自身零日志(ADR-0032「原语不打印
- * 日志」纪律);链构造(含核验 VERIFY_LLM_MODEL 单值)在调用方,runner 只迭代传入
- * 数组,永不自行补链。
- */
-export async function runCandidateChain<T>(
-  models: string[],
-  attempt: (model: string, index: number, total: number) => Promise<T>,
-  onAttempt?: (model: string, index: number, total: number) => void,
-): Promise<ChainVerdict<T>> {
-  let lastErr: unknown = null // null 非 undefined:空链时核验侧拼「全候选失效:null」,对齐改线前现状
-  for (const [i, model] of models.entries()) {
-    onAttempt?.(model, i + 1, models.length)
-    try {
-      return { status: 'answer', value: await attempt(model, i + 1, models.length) }
-    } catch (e) {
-      if (!isChainExhausted(e)) return { status: 'fatal', err: e, model, index: i + 1 }
-      lastErr = e
-    }
-  }
-  return { status: 'exhausted', lastErr }
-}
-
-/**
- * 发请求闸门(free 渠道限额 2026-08-27 告示:5 次/分钟、500 次/天、100 万 Token/天):
- * 进程级单例,连续网关请求至少间隔 env LLM_MIN_REQUEST_INTERVAL_MS(0/空/非数回默认
- * 12_000ms;测试注入小值跳过等待)——住 callModel 原语内部(ADR-0037),任何走原语的
- * 消费者(changelog 单段链 / news / trending 批量链)自动共享同一闸门主动避 429,而非
- * 全靠候选链事后换路(换路只在限额按模型计时有效,按账号计时换路无用)。检查与占位
- * 之间无 await(JS 单线程原子),并发轮询亦正确排队;间隔按「发起时刻」计,请求耗时算
- * 在外,实际速率恒 ≤ 上限。付费兜底同受此闸约束——兜底一天碰不了几次,代价可忽略。
- */
-let nextRequestAt = 0
-async function gateRequest(): Promise<void> {
-  const intervalMs = Number(process.env.LLM_MIN_REQUEST_INTERVAL_MS) || 12_000
-  for (;;) {
-    const now = Date.now()
-    if (now >= nextRequestAt) {
-      nextRequestAt = now + intervalMs
-      return
-    }
-    await new Promise((r) => setTimeout(r, nextRequestAt - now))
-  }
-}
-
-/**
- * 调一个候选模型一次(候选链的内层原语,ADR-0032 起单点):POST /chat/completions →
- * { content, resp }。content = 解析出的译文或 null(200 无 content = 候选失效形态);
- * resp 总是带回,供外层失败日志附响应体切片。fetch 错误上抛(外层 isCandidateExhausted
- * 分类)。**不做日志**——日志格式是各外层的运维 interface,原语返回数据不打印。
- * 发请求前先过闸门(ADR-0037:限流是「调一次模型」的内层时序纪律,进原语由构造保证,
- * 不依赖调用方记得过闸——changelog 单段链此前即绕闸裸奔)。
- */
-export async function callModel(
-  model: string,
-  apiKey: string,
-  system: string,
-  user: string,
-): Promise<{ content: string | null; resp: string }> {
-  await gateRequest()
-  const resp = await fetchText(`${LLM_BASE_URL}/chat/completions`, 60_000, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-    }),
-  })
-  try {
-    return { content: extractContent(JSON.parse(resp)), resp }
-  } catch {
-    return { content: null, resp }
-  }
-}
 
 /** 版本块再切段(2026-08-26;ADR-0053 自 changelog.ts 归位——分段是「怎么送 LLM」的译制
  *  机制,补全 ADR-0032 地基清单):段 = 连续整行(行是原子,不撕开),总长 ≤ maxChars;
@@ -265,7 +124,7 @@ export function makeBatchTranslator(
         } catch (e) {
           if (e instanceof CandidateExhausted) throw e // 软失效日志已记,不双写
           // 上抛会把前面批次已付 token 的成果一并丢弃——warn 后由映射终止,带着成果返回
-          if (isChainExhausted(e)) log(`候选失效,换下一: ${e}`)
+          if (isCandidateExhausted(e)) log(`候选失效,换下一: ${e}`)
           else log(`不可换路错误,终止本批后续: ${e}`)
           throw e
         }
@@ -332,7 +191,7 @@ export function makeBlockTranslator(
             return content
           } catch (e) {
             if (e instanceof CandidateExhausted) log(`失败: ${e}`, ',换下一候选') // 软失效日志在此,不双写
-            else if (isChainExhausted(e)) log(`失败: ${e} ${(e as { body?: string }).body ?? ''}`, ',换下一候选')
+            else if (isCandidateExhausted(e)) log(`失败: ${e} ${(e as { body?: string }).body ?? ''}`, ',换下一候选')
             else log(`失败: ${e}`, ',换模型无益,放弃本次译制')
             throw e
           }

@@ -561,7 +561,7 @@ export function changelogRoutes(services: ChangelogServices): Hono<AuthEnv> {
 }
 
 // ---- 生产协作器(Java ChangelogConfig/NpmReleaseDateService 对应物;源定义在 shared)----
-// 网关地基(sha256/LLM_BASE_URL/候选链/响应解析)与调模型原语在 translate.ts(ADR-0032)。
+// 网关地基(LLM_BASE_URL/候选链/响应解析)与调模型原语在 llm.ts(ADR-0061)。
 
 /** 译制系统提示(照搬 Java,ADR-0005):确定性靠提示约束,GPT-5 系 temperature 被网关忽略。 */
 const SYSTEM_PROMPT = `你是专业技术译者。把用户给出的 CHANGELOG markdown 片段由英文译成简体中文。
@@ -712,7 +712,7 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
   }
   return {
     fetchUpstream,
-    // 译制机制(候选链/分段/onPhase)单点 translate.ts(ADR-0032 地基 + ADR-0053 归位);
+    // 译制域分段/onPhase 在 translate.ts；候选链/调模原语在 llm.ts(ADR-0061)。
     // SYSTEM_PROMPT 是「更新日志」域的译制词表,留域内(同 trending 传 TRENDING_SYSTEM_PROMPT 先例)。
     translate: makeBlockTranslator(SYSTEM_PROMPT, `changelog-translate-${source}`),
   }

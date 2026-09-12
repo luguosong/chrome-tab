@@ -2,21 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDb } from './db'
 import {
   buildNumberedList,
-  CandidateExhausted,
-  extractContent,
   makeBatchTranslator,
   makeBlockTranslator,
   makeTranslationStore,
-  modelCandidates,
   parseNumberedTranslations,
-  runCandidateChain,
   sha256,
   splitSegments,
 } from './translate'
 
-/** 机制层测试(ADR-0029 首建编号协议;ADR-0032 起含网关地基与候选链真链路):
- * 纯函数(编号配对、漏行/畸行 null、围栏宽容、响应解析、候选链 env 解析)直测;
- * 候选链走 mock globalThis.fetch 真链路(同 changelog.test.ts mockFetchSeq 先例)。 */
+/** 译制域机制测试:编号协议、分段、批量/块译制和译文表行为。 */
 describe('parseNumberedTranslations', () => {
   it('正常逐条配对', () => {
     expect(parseNumberedTranslations('1. 甲\n2. 乙\n3. 丙', 3)).toEqual(['甲', '乙', '丙'])
@@ -65,112 +59,9 @@ describe('parseNumberedTranslations', () => {
   })
 })
 
-// ---- 网关地基(ADR-0032 自 changelog.ts 随符号迁入)----
-
-describe('extractContent(畸形响应 → null 触发降级,不抛)', () => {
-  it('取 choices[0].message.content', () => {
-    expect(extractContent({ choices: [{ message: { content: '译文' } }] })).toBe('译文')
-  })
-
-  it('choices 缺失 / 非数组 / 空数组 → null', () => {
-    expect(extractContent(null)).toBeNull()
-    expect(extractContent({})).toBeNull()
-    expect(extractContent({ choices: 'nope' })).toBeNull()
-    expect(extractContent({ choices: [] })).toBeNull()
-  })
-
-  it('content 非字符串 → null', () => {
-    expect(extractContent({ choices: [{ message: { content: 42 } }] })).toBeNull()
-    expect(extractContent({ choices: [{ message: null }] })).toBeNull()
-  })
-})
-
-describe('modelCandidates(free 优先,CHANGELOG_LLM_MODEL 逗号分隔覆盖)', () => {
-  it('默认:coding-glm-5.3-flash-free 打头,其余 free + coding-glm-5.3 兜底', () => {
-    expect(modelCandidates()).toEqual([
-      'coding-glm-5.3-flash-free',
-      'coding-glm-5.3-free',
-      'coding-kimi-k3-free',
-      'gemini-3.7-flash-free',
-      'gpt-5.5-free',
-      'coding-glm-5-free',
-      'coding-glm-5.3',
-    ])
-  })
-
-  it('env 覆盖:逗号分隔 + trim,空段过滤;空串回默认(compose 缺省键注入的是 "")', () => {
-    expect(modelCandidates({ CHANGELOG_LLM_MODEL: ' a , b,,' } as NodeJS.ProcessEnv)).toEqual(['a', 'b'])
-    expect(modelCandidates({ CHANGELOG_LLM_MODEL: '' } as NodeJS.ProcessEnv)).toEqual(modelCandidates())
-  })
-
-  it('纯分隔符(如 ",")过滤后为空 → 回默认:候选链恒空会让调用方 throw undefined', () => {
-    expect(modelCandidates({ CHANGELOG_LLM_MODEL: ',,,' } as NodeJS.ProcessEnv)).toEqual(modelCandidates())
-  })
-})
-
-describe('runCandidateChain(两源换路分类单点,ADR-0060;attempt 注入零真网)', () => {
-  it('软失效哨兵换下一候选,拿到答案即停链', async () => {
-    const seen: string[] = []
-    const verdict = await runCandidateChain(['m1', 'm2'], async (model) => {
-      seen.push(model)
-      if (model === 'm1') throw new CandidateExhausted('200 但产物不可用')
-      return `答案@${model}`
-    })
-    expect(seen).toEqual(['m1', 'm2'])
-    expect(verdict).toEqual({ status: 'answer', value: '答案@m2' })
-  })
-
-  it('两源同链混跑:软失效与硬错误(429)都换路,链尽 exhausted 带末次 lastErr', async () => {
-    const attempts: string[] = []
-    const verdict = await runCandidateChain(['m1', 'm2'], async (model) => {
-      attempts.push(model)
-      if (model === 'm1') throw new CandidateExhausted('200 但产物不可用')
-      const e = new Error('限流')
-      ;(e as { status?: number }).status = 429
-      throw e
-    })
-    expect(attempts).toEqual(['m1', 'm2'])
-    expect(verdict).toMatchObject({ status: 'exhausted', lastErr: { message: '限流' } })
-  })
-
-  it('不可换路错误即停链:fatal 带候选上下文(1 基序数),前序软失效不干扰', async () => {
-    const err = new Error('key 无效')
-    const verdict = await runCandidateChain(['m1', 'm2'], async (model) => {
-      if (model === 'm1') throw new CandidateExhausted('软')
-      throw err
-    })
-    expect(verdict).toEqual({ status: 'fatal', err, model: 'm2', index: 2 })
-  })
-
-  it('空链:exhausted 且 lastErr 为 null(对齐核验「全候选失效:null」现状)', async () => {
-    const verdict = await runCandidateChain([], async () => 'x')
-    expect(verdict).toEqual({ status: 'exhausted', lastErr: null })
-  })
-
-  it('onAttempt 每候选尝试前上报(1 基序数/总数);attempt 收同口径参数', async () => {
-    const phases: Array<[string, number, number]> = []
-    const attemptParams: Array<[string, number, number]> = []
-    const verdict = await runCandidateChain(
-      ['m1', 'm2'],
-      async (model, index, total) => {
-        attemptParams.push([model, index, total])
-        if (model === 'm1') throw new CandidateExhausted('软')
-        return 'ok'
-      },
-      (model, index, total) => phases.push([model, index, total]),
-    )
-    expect(phases).toEqual([
-      ['m1', 1, 2],
-      ['m2', 2, 2],
-    ])
-    expect(attemptParams).toEqual(phases)
-    expect(verdict).toEqual({ status: 'answer', value: 'ok' })
-  })
-})
-
 describe('makeBatchTranslator 候选链(真链路 mock fetch;no_key/换候选/401 fatal/部分成果)', () => {
   const realFetch = globalThis.fetch
-  // 节流闸门默认 12s(free 5rpm),测试注入 1ms 跳过等待;节流行为本身单测见末尾用例
+  // 节流闸门默认 12s(free 5rpm),测试注入 1ms 跳过等待;闸门机制在 llm.test.ts 单测
   beforeEach(() => {
     process.env.LLM_MIN_REQUEST_INTERVAL_MS = '1'
   })
@@ -231,22 +122,6 @@ describe('makeBatchTranslator 候选链(真链路 mock fetch;no_key/换候选/40
     expect(out.slice(20)).toEqual([null, null, null, null, null])
   })
 
-  it('节流闸门:连续两次网关请求至少间隔 LLM_MIN_REQUEST_INTERVAL_MS(free 5rpm 限额;闸门住 callModel,ADR-0037)', async () => {
-    process.env.AIHUBMIX_API_KEY = 'k'
-    process.env.LLM_MIN_REQUEST_INTERVAL_MS = '80' // 覆盖 beforeEach 的 1ms(闸门读 process.env,非构造参数)
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const times: number[] = []
-    globalThis.fetch = vi.fn(async () => {
-      times.push(Date.now())
-      return new Response(JSON.stringify(OK('1. 甲').body), { status: 200 })
-    }) as typeof fetch
-    const t = makeBatchTranslator('sys', 'tag-gate')
-    await t(['a'])
-    await t(['b'])
-    expect(times.length).toBe(2)
-    // 闸门间隔按「放行时刻」计,fetch 时刻差带 ±几 ms 微任务噪声(80 全额偶发 79);50 居中判别
-    expect(times[1] - times[0]).toBeGreaterThanOrEqual(50)
-  })
 })
 
 // ---- 单块分段译制(ADR-0053 自 changelog 归位;用例随迁,被测对象从 prodChangelogDeps.translate
@@ -275,7 +150,7 @@ describe('splitSegments(段=行边界,单请求输出压小,稳离 60s 超时)',
 
 describe('makeBlockTranslator 候选链(候选失效=403/404/429/5xx/no_available_channel/超时/200空content 换下一个,401等直接抛)', () => {
   const realFetch = globalThis.fetch
-  // 闸门住 callModel(ADR-0037):真链路用例过闸,注入 1ms 跳过等待;节流行为本身单测见末尾用例
+  // 闸门住 callModel(ADR-0037):真链路用例过闸,注入 1ms 跳过等待;闸门机制在 llm.test.ts 单测
   beforeEach(() => {
     process.env.LLM_MIN_REQUEST_INTERVAL_MS = '1'
   })
@@ -383,23 +258,6 @@ describe('makeBlockTranslator 候选链(候选失效=403/404/429/5xx/no_availabl
     ])
   })
 
-  it('节流闸门:换候选的连续两次请求至少间隔 LLM_MIN_REQUEST_INTERVAL_MS(闸门住 callModel,三域共享)', async () => {
-    process.env.AIHUBMIX_API_KEY = 'k'
-    process.env.CHANGELOG_LLM_MODEL = 'm1,m2'
-    process.env.LLM_MIN_REQUEST_INTERVAL_MS = '80'
-    const times: number[] = []
-    globalThis.fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
-      times.push(Date.now())
-      const model = JSON.parse(String(init?.body)).model
-      if (model === 'm1') return new Response(JSON.stringify(NO_CHANNEL.body), { status: NO_CHANNEL.status })
-      return new Response(JSON.stringify(OK.body), { status: 200 })
-    }) as typeof fetch
-    await expect(make()('块')).resolves.toBe('译文')
-    expect(times.length).toBe(2)
-    // 闸门间隔按「放行时刻」计,fetch 时刻差带 ±几 ms 微任务噪声,80 全额会偶发 79——
-    // 无闸裸奔实测 0~3ms,50 居中判别(闸门用例同款)
-    expect(times[1] - times[0]).toBeGreaterThanOrEqual(50)
-  })
 })
 
 describe('makeBlockTranslator 分段(大块逐段请求,段失败换候选只重试该段)', () => {

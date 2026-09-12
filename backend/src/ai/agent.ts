@@ -1,5 +1,5 @@
 import { lookup, toGatewayTools, type ToolCtx } from './registry'
-import { LLM_BASE_URL } from '../translate'
+import { LLM_BASE_URL } from '../llm'
 
 /**
  * agent loop(ai-platform.md §3):普通 async 函数,非流式,骨架阶段无 HTTP 端点。
@@ -20,7 +20,7 @@ export const CONNECT_TIMEOUT_MS = 10_000
 export const READ_TIMEOUT_MS = 300_000
 
 export const DEFAULT_MODEL = 'gpt-5-nano'
-// LLM_BASE_URL 见文件头 import:网关地址与译制机制同源(translate.ts,ADR-0032 单点),Key 同用 AIHUBMIX_API_KEY
+// LLM_BASE_URL 见文件头 import:网关地址与译制机制同源(llm.ts,ADR-0061),Key 同用 AIHUBMIX_API_KEY
 
 // ---- 消息模型(OpenAI chat 形状)----
 

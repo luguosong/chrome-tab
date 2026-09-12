@@ -7,7 +7,7 @@ import { ALIBABA_DEF, QWEN_RELEASES_URL } from './providers/alibaba'
 import { ZHIPU_RELEASES_URL } from './providers/zhipu'
 import type { PendingClue } from './providers/def'
 import { parseLlmJson, validateDraft, verifyClue } from './modelVerify'
-import { modelCandidates } from './translate'
+import { modelCandidates } from './llm'
 
 /** 一条裸 ID 线索(openai changelog 口径)。 */
 const ASTRA_CLUE: PendingClue = {
