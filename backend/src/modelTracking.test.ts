@@ -660,35 +660,6 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
     }
   })
 
-  it('完结线索 occurred_on 出窗后不再计入徽标:读侧与核验窗同轴(轴对齐,spec 1.1 痛点 1)', async () => {
-    // 生产首发痛点:35 条已完结死线索 verify_state 非 NULL 后 last_seen 冻结在核验日,
-    // 旧读侧 last_seen_at 轴下 7 天内恒占「N 待核验」徽标。判别性断言:last_seen
-    // 保持新鲜(旧轴下仍在窗)而 occurred_on 已老 → 新轴下必须滚出。
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
-    try {
-      const { db } = openDb(':memory:')
-      const svc = await makeService(db, makeDeps(ZHIPU_MD))
-      await svc.pollProvider('zhipu') // GLM-9.9(occurred_on 02-03)落线索库,窗内可见
-      await db
-        .updateTable('model_pending_clues')
-        .set({ verify_state: 'rejected' }) // 完结:reject 留表触人
-        .where('title', 'like', '%GLM-9.9%')
-        .execute()
-      // 时间到 03-01(occurred_on 已老 26 天),但 last_seen 人为保持新鲜——旧轴判活,新轴判出
-      vi.setSystemTime(new Date('2026-03-01T02:41:00Z'))
-      await db
-        .updateTable('model_pending_clues')
-        .set({ last_seen_at: new Date().toISOString() })
-        .where('title', 'like', '%GLM-9.9%')
-        .execute()
-      const clues = (await svc.archive()).pendingClues
-      expect(clues.some((c) => c.title.includes('GLM-9.9'))).toBe(false)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
   it('残余 ID 线索:部分认领条目(命中+基线外混排)的残余半边落线索库,不再静默', async () => {
     const partialMd = `## August, 2026
 

@@ -40,6 +40,7 @@ import {
   type AaMappingRow,
 } from './aaEvaluations'
 import { verifyClue } from './modelVerify'
+import { makeClueLedger, type ClueLedger } from './clueLedger'
 
 /**
  * 模型追踪(CONTEXT.md「模型追踪/跟踪模型/模型档案」;ADR-0025):全局单例图标的
@@ -135,12 +136,17 @@ export interface ModelTrackingDeps {
 const nowIso = () => new Date().toISOString()
 
 export class ModelTrackingService {
+  /** 线索账本(票 .scratch/线索账本/01):model_pending_clues 域行为的单点(入库/结案/两窗可见性)。 */
+  private readonly ledger: ClueLedger
+
   constructor(
     private readonly db: Db,
     private readonly deps: ModelTrackingDeps,
     /** Artificial Analysis API Key(issues/08);空串 = 未配置:评测轮询整体跳过,读侧 configured=false。 */
     private readonly aaApiKey = '',
-  ) {}
+  ) {
+    this.ledger = makeClueLedger(db)
+  }
 
   /** deps 注入 env 或进程 env(auto 核验用)。 */
   private get env(): NodeJS.ProcessEnv {
@@ -160,7 +166,8 @@ export class ModelTrackingService {
   /** 空库灌种子(行+事件);存量库(迁移前列全默认)按种子回填 aliases/slugs。幂等。 */
   private async bootstrapFromSeed(): Promise<void> {
     // 旧 aaUnmappedClues 的存量线索(键 aa: 前缀)语义已死(2026-09-05 翻转为自动映射
-    // 不再产出),不清会被 verifyPendingClues 误核验——AA 模型页被当厂家一手信源
+    // 不再产出),不清会被 verifyPendingClues 误核验——AA 模型页被当厂家一手信源。
+    // 一次性迁移清残留原地、不走「线索账本」(票 01 裁决 7:不为一次性调用 widening interface)
     await this.db.deleteFrom('model_pending_clues').where('model_key', 'like', 'aa:%').execute()
     const existing = await this.db
       .selectFrom('model_archive')
@@ -332,28 +339,16 @@ export class ModelTrackingService {
       .selectAll()
       .where('evaluator', '=', AA_EVALUATOR)
       .executeTakeFirst()
-    // 线索只读「7 天内出现」且未完结的,与核验窗同 occurred_on 轴(ADR-0058 注记
-    // 2026-09-10 轴对齐:旧 last_seen_at 轴下已完结线索 last_seen 冻结在核验日,7 天内
-    // 恒占徽标淹没真增量;完结/停更后 occurred_on 不再前移,出窗自然滚出)。触人三态:
-    // NULL(待核验)/ rejected /
-    // insufficient(判自家但证据不足,spec 1.5);noise(确定性噪音)与 error(核验链
-    // 失败,轮询自愈,spec 1.2)不触人不占徽标
-    const clueCutoff = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10)
-    const clueRows = await this.db
-      .selectFrom('model_pending_clues')
-      .selectAll()
-      .where('occurred_on', '>=', clueCutoff)
-      .where((eb) => eb.or([eb('verify_state', 'is', null), eb('verify_state', '=', 'rejected'), eb('verify_state', '=', 'insufficient')]))
-      .execute()
+    // 线索读侧经「线索账本」(徽标窗 × 触人集,ADR-0058 注记 2026-09-10 轴对齐——
+    // 窗口与集合策略单点于 clueLedger.ts);此处只做 wire 投影(date/url)
+    const clues = await this.ledger.visibleClues()
     return {
-      pendingClues: clueRows
-        .sort((a, b) => (a.occurred_on < b.occurred_on ? 1 : -1))
-        .map((r) => ({
-          provider: r.provider as ModelProviderId,
-          date: r.occurred_on,
-          title: r.title,
-          url: r.source_url,
-        })),
+      pendingClues: clues.map((c) => ({
+        provider: c.provider,
+        date: c.occurredOn,
+        title: c.title,
+        url: c.sourceUrl,
+      })),
       models: models.map((r) => ({
         id: r.id,
         provider: r.provider as ModelProviderId,
@@ -528,7 +523,7 @@ export class ModelTrackingService {
       const feed = parseAndMatch(md)
       if (feed === null) throw new Error('发布源无结构化条目(疑似上游改版)')
       await this.ingest(provider, feed.hits)
-      await this.ingestClues(provider, feed.clues)
+      await this.ledger.ingest(provider, feed.clues)
       await this.markSource(provider, true)
     } catch (e) {
       await this.markSource(provider, false).catch(() => {})
@@ -537,51 +532,8 @@ export class ModelTrackingService {
   }
 
   /**
-   * 线索 upsert-only(2026-08-27 千问/智谱漏检):30 天内条目才入;基线收录后该条目
-   * 不再被写入,occurred_on 停更,读侧 7 天窗(occurred_on 轴,同核验窗)出窗即滚出
-   * ——收录自愈无需删行。滚动信源
-   * (百炼)翻走前线索已可见,「漏了什么」不再不可考。ADR-0058:新线索由
-   * verifyPendingClues 自动核验,rejected 留表触人(红点/推送)。
-   */
-  private async ingestClues(provider: ModelProviderId, clues: PendingClue[]): Promise<void> {
-    const cutoff = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10)
-    const now = nowIso()
-    // 已核验的行冻结不刷新(生产首发教训:常态噪音 reject 后仍被刷新 last_seen,
-    // 7 天窗内恒占「N 待核验」徽标)——完结线索不再滚窗,自然淡出
-    const done = new Set(
-      (await this.db
-        .selectFrom('model_pending_clues')
-        .select('model_key')
-        .where('provider', '=', provider)
-        .where('verify_state', 'is not', null)
-        .execute()
-      ).map((r) => r.model_key),
-    )
-    for (const c of clues) {
-      if (c.occurredOn < cutoff || done.has(c.modelKey)) continue
-      await this.db
-        .insertInto('model_pending_clues')
-        .values({
-          provider,
-          occurred_on: c.occurredOn,
-          model_key: c.modelKey,
-          title: c.title,
-          source_url: c.sourceUrl,
-          first_seen_at: now,
-          last_seen_at: now,
-        })
-        .onConflict((oc) =>
-          oc
-            .columns(['provider', 'model_key'])
-            .doUpdateSet({ occurred_on: c.occurredOn, title: c.title, source_url: c.sourceUrl, last_seen_at: now }),
-        )
-        .execute()
-    }
-  }
-
-  /**
-   * auto 核验一轮(ADR-0058):7 天窗口内未完结线索(verify_state IS NULL 或 error
-   * ——error 落表可观测且下轮重试,spec 1.2)逐条——①噪音谓词(def.noiseClue)硬拦 →
+   * auto 核验一轮(ADR-0058):核验窗重试集逐条(「线索账本」dueClues——含 error
+   * 下轮重试,spec 1.2)——①噪音谓词(def.noiseClue)硬拦 →
    * noise(确定性已知噪音,不触人:百炼托管常态,徽标也不占);②verifyClue(LLM)四态:
    * accept 入档(verified='auto',aliases=草稿)+ 当轮产 kind 'updated' 事件
    * (occurredOn/标题/信源用线索——语义保守,api_available 留给人工修订);
@@ -593,37 +545,23 @@ export class ModelTrackingService {
    * (人工先收录)时静默,线索停更滚出自愈。
    */
   private async verifyPendingClues(def: ProviderDef<unknown>): Promise<void> {
-    const cutoff = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10)
-    const pending = await this.db
-      .selectFrom('model_pending_clues')
-      .selectAll()
-      .where('provider', '=', def.id)
-      .where('occurred_on', '>=', cutoff)
-      .where((eb) => eb.or([eb('verify_state', 'is', null), eb('verify_state', '=', 'error')]))
-      .execute()
-    for (const row of pending) {
-      const clue: PendingClue = {
-        occurredOn: row.occurred_on,
-        title: row.title,
-        sourceUrl: row.source_url,
-        modelKey: row.model_key,
-      }
+    for (const clue of await this.ledger.dueClues(def.id)) {
       if (def.noiseClue?.(clue) === true) {
-        await this.setClueState(def.id, row.model_key, 'noise')
+        await this.ledger.settle(def.id, clue.modelKey, 'noise')
         continue
       }
       const r = await verifyClue(def, clue, this.deps.fetchText, this.env, this.deps.callModel)
       if (r.outcome === 'error') {
-        console.warn(`模型追踪(${def.label})线索核验失败(下轮重试) ${row.model_key}:`, r.reason)
-        await this.setClueState(def.id, row.model_key, 'error', r.reason)
+        console.warn(`模型追踪(${def.label})线索核验失败(下轮重试) ${clue.modelKey}:`, r.reason)
+        await this.ledger.settle(def.id, clue.modelKey, 'error', r.reason)
         continue
       }
       if (r.outcome === 'reject') {
-        await this.setClueState(def.id, row.model_key, 'rejected', r.reason)
+        await this.ledger.settle(def.id, clue.modelKey, 'rejected', r.reason)
         continue
       }
       if (r.outcome === 'insufficient') {
-        await this.setClueState(def.id, row.model_key, 'insufficient', r.reason)
+        await this.ledger.settle(def.id, clue.modelKey, 'insufficient', r.reason)
         continue
       }
       await this.upsertBaselineRow({
@@ -663,22 +601,8 @@ export class ModelTrackingService {
             .doNothing(),
         )
         .execute()
-      await this.setClueState(def.id, row.model_key, 'accepted')
+      await this.ledger.settle(def.id, clue.modelKey, 'accepted')
     }
-  }
-
-  /**
-   * 线索核验状态落库(accepted/rejected/noise/error/insufficient;后两态为信息智能化
-   * 试点新增,旧读侧不含)。reason 无则写 NULL——状态转移时顺带清残(error 重试后
-   * accept,旧失败理由不残留误导归因)。
-   */
-  private async setClueState(provider: ModelProviderId, modelKey: string, state: 'accepted' | 'rejected' | 'noise' | 'error' | 'insufficient', reason?: string): Promise<void> {
-    await this.db
-      .updateTable('model_pending_clues')
-      .set({ verify_state: state, verify_reason: reason ?? null })
-      .where('provider', '=', provider)
-      .where('model_key', '=', modelKey)
-      .execute()
   }
 
   /**

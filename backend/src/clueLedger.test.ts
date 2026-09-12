@@ -1,0 +1,203 @@
+import { describe, expect, it, vi } from 'vitest'
+import { openDb } from './db'
+import { makeClueLedger } from './clueLedger'
+import type { PendingClue } from './providers/def'
+
+/**
+ * 线索账本策略直测(票 .scratch/线索账本/01):五态 × 三窗 × 冻结/重试/触人集,
+ * 全部经账本 interface(ingest/settle)播种——Kysely 只作**存储真值断言**(行数/
+ * 列值,house style 同 modelVerify.test.ts),唯一例外是轴判别用例的单点 last_seen
+ * 直写(旧轴形态经 interface 不可表达,判别性断言所必需)。
+ */
+
+const baseClue = (over: Partial<PendingClue> = {}): PendingClue => ({
+  occurredOn: '2026-02-03',
+  title: 'GLM-9.9 超长上下文升级',
+  sourceUrl: 'https://docs.zhipu.com/glm-9-9',
+  modelKey: 'https://docs.zhipu.com/glm-9-9',
+  ...over,
+})
+
+async function rows(db: ReturnType<typeof openDb>['db']) {
+  return db.selectFrom('model_pending_clues').selectAll().execute()
+}
+
+describe('线索账本:ingest(30 天窗 + 幂等 upsert + 完结冻结)', () => {
+  it('窗内条目落库,窗外历史块被 30 天 ingest 窗挡掉', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
+    try {
+      const { db } = openDb(':memory:')
+      const ledger = makeClueLedger(db)
+      await ledger.ingest('zhipu', [
+        baseClue(), // 02-03:窗内
+        baseClue({ occurredOn: '2025-06-18', title: 'Vidu 历史块', modelKey: 'vidu', sourceUrl: 'https://vidu.example' }), // 窗外(滚动信源的历史块非漏检信号)
+      ])
+      const stored = await rows(db)
+      expect(stored).toHaveLength(1)
+      expect(stored[0]!.model_key).toBe(baseClue().modelKey)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('同键 re-ingest 幂等不翻倍,occurred_on/title 刷新、last_seen 前移', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
+    try {
+      const { db } = openDb(':memory:')
+      const ledger = makeClueLedger(db)
+      await ledger.ingest('zhipu', [baseClue({ title: 'GLM-9.9 初版' })])
+      vi.setSystemTime(new Date('2026-02-06T02:41:00Z'))
+      await ledger.ingest('zhipu', [baseClue({ occurredOn: '2026-02-04', title: 'GLM-9.9 修订' })])
+      const stored = await rows(db)
+      expect(stored).toHaveLength(1)
+      expect(stored[0]!.occurred_on).toBe('2026-02-04')
+      expect(stored[0]!.title).toBe('GLM-9.9 修订')
+      expect(stored[0]!.last_seen_at).toBe('2026-02-06T02:41:00.000Z')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('完结行冻结:re-ingest 不再刷新 occurred_on/title/last_seen(生产首发教训:常态噪音 reject 后仍被刷新,7 天窗内恒占徽标)', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
+    try {
+      const { db } = openDb(':memory:')
+      const ledger = makeClueLedger(db)
+      await ledger.ingest('zhipu', [baseClue({ title: 'GLM-9.9 初版' })])
+      await ledger.settle('zhipu', baseClue().modelKey, 'rejected', 'fixture')
+      vi.setSystemTime(new Date('2026-02-07T02:41:00Z'))
+      await ledger.ingest('zhipu', [baseClue({ occurredOn: '2026-02-06', title: 'GLM-9.9 修订' })])
+      const stored = await rows(db)
+      expect(stored).toHaveLength(1)
+      expect(stored[0]!.occurred_on).toBe('2026-02-03') // 未前移
+      expect(stored[0]!.title).toBe('GLM-9.9 初版')
+      expect(stored[0]!.last_seen_at).toBe('2026-02-05T02:41:00.000Z') // 冻结在完结前
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('线索账本:两窗两集(dueClues 重试集 / visibleClues 触人集)', () => {
+  /** 五态同窗种子:02-03 各一条 + 一条 pending 但 occurred_on 出核验窗(01-20,ingest 窗内)。 */
+  async function seedFiveStates() {
+    const { db } = openDb(':memory:')
+    const ledger = makeClueLedger(db)
+    const mk = (modelKey: string, occurredOn = '2026-02-03') =>
+      baseClue({ modelKey, occurredOn, sourceUrl: `https://docs.zhipu.com/${modelKey}`, title: `线索 ${modelKey}` })
+    await ledger.ingest('zhipu', [
+      mk('pending'),
+      mk('accepted'),
+      mk('rejected'),
+      mk('noise'),
+      mk('error'),
+      mk('insufficient'),
+      mk('old-window', '2026-01-20'), // >7 天核验/徽标窗、<30 天 ingest 窗
+    ])
+    await ledger.settle('zhipu', 'accepted', 'accepted')
+    await ledger.settle('zhipu', 'rejected', 'rejected', 'r')
+    await ledger.settle('zhipu', 'noise', 'noise')
+    await ledger.settle('zhipu', 'error', 'error', 'e')
+    await ledger.settle('zhipu', 'insufficient', 'insufficient', 'i')
+    return { db, ledger, mk }
+  }
+
+  it('dueClues = 核验窗(7 天)× 重试集 {pending, error}:完结三触人态与已入档态不重试,出窗 pending 不重试', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
+    try {
+      const { ledger } = await seedFiveStates()
+      const due = await ledger.dueClues('zhipu')
+      expect(due.map((c) => c.modelKey).sort()).toEqual(['error', 'pending'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('visibleClues = 徽标窗(7 天)× 触人集 {pending, rejected, insufficient}:noise/error 不触人,accepted 自然滚出,occurred_on 倒序', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
+    try {
+      const { ledger } = await seedFiveStates()
+      // 再入一条最新线索验证倒序
+      await ledger.ingest('zhipu', [baseClue({ occurredOn: '2026-02-04', modelKey: 'newest', sourceUrl: 'https://docs.zhipu.com/newest', title: '线索 newest' })])
+      const visible = await ledger.visibleClues()
+      const titles = visible.map((c) => c.title)
+      expect(titles[0]).toBe('线索 newest') // 唯一新日期者居首
+      // 其余三条同 occurred_on:原比较器对相等键返回 -1(不一致比较器,生产行为原样),
+      // 并列序无保证——只断言集合
+      expect(titles.slice(1).sort()).toEqual(['线索 insufficient', '线索 pending', '线索 rejected'])
+      // 域形状:occurredOn 而非 wire 的 date(wire 投影归 archive())
+      expect(visible[0]).toMatchObject({ provider: 'zhipu', occurredOn: '2026-02-04', title: '线索 newest', sourceUrl: 'https://docs.zhipu.com/newest' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('occurred_on 滑出 7 天窗:pending 亦滚出两窗(读侧与核验窗同轴,ADR-0058 注记 2026-09-10)', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
+    try {
+      const { db } = openDb(':memory:')
+      const ledger = makeClueLedger(db)
+      await ledger.ingest('zhipu', [baseClue()]) // 02-03
+      vi.setSystemTime(new Date('2026-02-13T02:41:00Z')) // +8 天:02-03 出 7 天窗
+      expect(await ledger.dueClues('zhipu')).toHaveLength(0)
+      expect(await ledger.visibleClues()).toHaveLength(0)
+      expect((await rows(db))).toHaveLength(1) // 行保留:滚出读侧 ≠ 删行
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('轴判别(自 modelTracking.test.ts 迁入):完结行 occurred_on 已老、last_seen 人为保新 → 不计入徽标', async () => {
+    // 生产首发痛点:35 条已完结死线索 last_seen 冻结在核验日,旧 last_seen_at 轴下 7 天内
+    // 恒占「N 待核验」徽标。本用例的 last_seen 直写是全文件唯一 interface 外播种:旧轴
+    // 形态(完结行 + 新鲜 last_seen)经账本 interface 不可表达——冻结规则使然,判别性
+    // 断言所必需。
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
+    try {
+      const { db } = openDb(':memory:')
+      const ledger = makeClueLedger(db)
+      await ledger.ingest('zhipu', [baseClue()]) // occurred_on 02-03,窗内可见
+      await ledger.settle('zhipu', baseClue().modelKey, 'rejected') // 完结:reject 留表触人
+      // 时间到 03-01(occurred_on 已老 26 天),但 last_seen 人为保持新鲜——旧轴判活,新轴判出
+      vi.setSystemTime(new Date('2026-03-01T02:41:00Z'))
+      await db
+        .updateTable('model_pending_clues')
+        .set({ last_seen_at: new Date().toISOString() })
+        .where('model_key', '=', baseClue().modelKey)
+        .execute()
+      const visible = await ledger.visibleClues()
+      expect(visible.some((c) => c.title.includes('GLM-9.9'))).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('线索账本:settle(reason 落库与清残)', () => {
+  it('reason 落库;后续不带 reason 的 settle 清残(error 重试成功后旧失败理由不残留误导归因)', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
+    try {
+      const { db } = openDb(':memory:')
+      const ledger = makeClueLedger(db)
+      await ledger.ingest('zhipu', [baseClue()])
+      await ledger.settle('zhipu', baseClue().modelKey, 'error', '网关 502')
+      let stored = (await rows(db))[0]!
+      expect(stored.verify_state).toBe('error')
+      expect(stored.verify_reason).toBe('网关 502')
+      await ledger.settle('zhipu', baseClue().modelKey, 'accepted')
+      stored = (await rows(db))[0]!
+      expect(stored.verify_state).toBe('accepted')
+      expect(stored.verify_reason).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
