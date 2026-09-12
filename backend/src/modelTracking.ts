@@ -136,7 +136,7 @@ export interface ModelTrackingDeps {
 const nowIso = () => new Date().toISOString()
 
 export class ModelTrackingService {
-  /** 线索账本(票 .scratch/线索账本/01):model_pending_clues 域行为的单点(入库/结案/两窗可见性)。 */
+  /** 线索账本(票 .scratch/线索账本/01):model_pending_clues 域行为的单点(入库/核验结果/活动窗)。 */
   private readonly ledger: ClueLedger
 
   constructor(
@@ -263,8 +263,9 @@ export class ModelTrackingService {
   /** 种子/auto 行入库共用:insert 行(verified 区分);冲突(已存在)静默跳过——修订不覆盖。 */
   private async upsertBaselineRow(
     b: Pick<BaselineModel, 'provider' | 'officialId' | 'name' | 'kind' | 'stage' | 'availability' | 'summary' | 'sources' | 'pricing' | 'limits' | 'trainingParams'> & { matchAliases: string[]; matchSlugs?: string[]; verified?: 'manual' | 'auto' },
+    db: Pick<Db, 'insertInto'> = this.db,
   ): Promise<void> {
-    await this.db
+    await db
       .insertInto('model_archive')
       .values({
         provider: b.provider,
@@ -538,8 +539,8 @@ export class ModelTrackingService {
    * accept 入档(verified='auto',aliases=草稿)+ 当轮产 kind 'updated' 事件
    * (occurredOn/标题/信源用线索——语义保守,api_available 留给人工修订);
    * reject(噪音/低置信)→ rejected 留表触人;insufficient(判自家但草稿校验不过,
-   * spec 1.5)→ 留表触人但不重试(一次定终身,人工裁决或滚窗淡出);error → 落表
-   * 不触人,下轮重试(LLM 失败/网关挂的天然退避)。reject/insufficient/error 均落
+   * spec 1.5)→ 活动窗内触人但不重试(一次定终身,超窗淡出);error → 落表
+   * 不触人,按 2h 轮询在活动窗内重试。reject/insufficient/error 均落
    * verify_reason(误拒可归因,spec 1.4)。触达 = 图标徽标「N 待核验」(ADR-0058
    * 注记:ntfy 推送通道 2026-09-06 撤除)。行插入 onConflict doNothing:已存在
    * (人工先收录)时静默,线索停更滚出自愈。
@@ -547,61 +548,59 @@ export class ModelTrackingService {
   private async verifyPendingClues(def: ProviderDef<unknown>): Promise<void> {
     for (const clue of await this.ledger.dueClues(def.id)) {
       if (def.noiseClue?.(clue) === true) {
-        await this.ledger.settle(def.id, clue.modelKey, 'noise')
+        await this.ledger.recordVerification(def.id, clue.modelKey, 'noise')
         continue
       }
       const r = await verifyClue(def, clue, this.deps.fetchText, this.env, this.deps.callModel)
       if (r.outcome === 'error') {
         console.warn(`模型追踪(${def.label})线索核验失败(下轮重试) ${clue.modelKey}:`, r.reason)
-        await this.ledger.settle(def.id, clue.modelKey, 'error', r.reason)
+        await this.ledger.recordVerification(def.id, clue.modelKey, 'error', r.reason)
         continue
       }
       if (r.outcome === 'reject') {
-        await this.ledger.settle(def.id, clue.modelKey, 'rejected', r.reason)
+        await this.ledger.recordVerification(def.id, clue.modelKey, 'rejected', r.reason)
         continue
       }
       if (r.outcome === 'insufficient') {
-        await this.ledger.settle(def.id, clue.modelKey, 'insufficient', r.reason)
+        await this.ledger.recordVerification(def.id, clue.modelKey, 'insufficient', r.reason)
         continue
       }
-      await this.upsertBaselineRow({
-        provider: def.id,
-        officialId: r.draft.officialId,
-        name: r.draft.name,
-        kind: r.draft.kind as ModelKind,
-        stage: r.draft.stage as ReleaseStage,
-        availability: r.draft.availability as AvailabilityMode[],
-        summary: r.draft.summary,
-        sources: r.draft.sources,
-        pricing: r.draft.pricing as ModelPricing | null,
-        limits: r.draft.limits as ModelLimit[] | null,
-        trainingParams: null,
-        matchAliases: r.draft.matchAliases,
-        verified: 'auto',
+      await this.db.transaction().execute(async (trx) => {
+        if (!(await makeClueLedger(trx).recordVerification(def.id, clue.modelKey, 'accepted'))) return
+        await this.upsertBaselineRow({
+          provider: def.id,
+          officialId: r.draft.officialId,
+          name: r.draft.name,
+          kind: r.draft.kind as ModelKind,
+          stage: r.draft.stage as ReleaseStage,
+          availability: r.draft.availability as AvailabilityMode[],
+          summary: r.draft.summary,
+          sources: r.draft.sources,
+          pricing: r.draft.pricing as ModelPricing | null,
+          limits: r.draft.limits as ModelLimit[] | null,
+          trainingParams: null,
+          matchAliases: r.draft.matchAliases,
+          verified: 'auto',
+        }, trx)
+        const modelId = (await trx
+          .selectFrom('model_archive')
+          .select('id')
+          .where('provider', '=', def.id)
+          .where('official_id', '=', r.draft.officialId)
+          .executeTakeFirstOrThrow())!.id
+        await trx
+          .insertInto('model_events')
+          .values({
+            model_id: modelId,
+            kind: 'updated',
+            occurred_on: clue.occurredOn,
+            title: clue.title,
+            source_url: clue.sourceUrl,
+            created_at: nowIso(),
+          })
+          .onConflict((oc) => oc.columns(['model_id', 'kind', 'occurred_on', 'source_url']).doNothing())
+          .execute()
       })
-      const modelId = (await this.db
-        .selectFrom('model_archive')
-        .select('id')
-        .where('provider', '=', def.id)
-        .where('official_id', '=', r.draft.officialId)
-        .executeTakeFirstOrThrow())!.id
-      await this.db
-        .insertInto('model_events')
-        .values({
-          model_id: modelId,
-          kind: 'updated',
-          occurred_on: clue.occurredOn,
-          title: clue.title,
-          source_url: clue.sourceUrl,
-          created_at: nowIso(),
-        })
-        .onConflict((oc) =>
-          oc
-            .columns(['model_id', 'kind', 'occurred_on', 'source_url'])
-            .doNothing(),
-        )
-        .execute()
-      await this.ledger.settle(def.id, clue.modelKey, 'accepted')
     }
   }
 

@@ -185,6 +185,26 @@ describe('auto 核验:service 集成(线索 → auto 行 + 事件 + 状态,零�
     expect(a.pendingClues.some((c) => c.title.includes('GLM-9.9'))).toBe(false) // accepted 不再待办
   })
 
+  it('accept 原子性:动态写失败时档案与 accepted 一并回滚', async () => {
+    const llm = JSON.stringify({
+      isNoise: false,
+      reason: '智谱自家新旗舰',
+      draft: {
+        officialId: 'glm-9.9', name: 'GLM-9.9', kind: 'text', stage: 'ga', availability: ['api'], summary: '未来旗舰模型',
+        sources: [{ title: '模型文档', url: 'https://docs.bigmodel.cn/cn/guide/models/text/glm-9.9' }],
+        pricing: null, limits: null, matchAliases: ['GLM-9.9'],
+      },
+    })
+    const { sqlite, db } = openDb(':memory:')
+    sqlite.exec(`CREATE TRIGGER fail_glm99_event BEFORE INSERT ON model_events
+      WHEN NEW.title LIKE '%GLM-9.9%' BEGIN SELECT RAISE(FAIL, 'fixture event insert failure'); END`)
+    const svc = new ModelTrackingService(db, makeDeps(llm), '')
+    await svc.pollProvider('zhipu')
+    expect(await db.selectFrom('model_archive').select('id').where('official_id', '=', 'glm-9.9').executeTakeFirst()).toBeUndefined()
+    const clue = await db.selectFrom('model_pending_clues').select('verify_state').executeTakeFirstOrThrow()
+    expect(clue.verify_state).toBeNull()
+  })
+
   it('reject(LLM 判噪音):线索 rejected 留表触人(读侧可见),无档案行;判定理由落库', async () => {
     const llm = JSON.stringify({ isNoise: true, reason: '平台功能条目', draft: null })
     const { db } = openDb(':memory:')

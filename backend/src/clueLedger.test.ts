@@ -4,8 +4,8 @@ import { makeClueLedger } from './clueLedger'
 import type { PendingClue } from './providers/def'
 
 /**
- * 线索账本策略直测(票 .scratch/线索账本/01):五态 × 三窗 × 冻结/重试/触人集,
- * 全部经账本 interface(ingest/settle)播种——Kysely 只作**存储真值断言**(行数/
+ * 线索账本策略直测(票 .scratch/线索账本/01):六态 × 摄入/活动两窗 × 冻结/重试/触人集,
+ * 全部经账本 interface(ingest/recordVerification)播种——Kysely 只作**存储真值断言**(行数/
  * 列值,house style 同 modelVerify.test.ts),唯一例外是轴判别用例的单点 last_seen
  * 直写(旧轴形态经 interface 不可表达,判别性断言所必需)。
  */
@@ -60,14 +60,14 @@ describe('线索账本:ingest(30 天窗 + 幂等 upsert + 完结冻结)', () => 
     }
   })
 
-  it('完结行冻结:re-ingest 不再刷新 occurred_on/title/last_seen(生产首发教训:常态噪音 reject 后仍被刷新,7 天窗内恒占徽标)', async () => {
+  it('已有核验结果的行冻结:error 可重试但 re-ingest 不刷新 occurred_on/title/last_seen', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
     try {
       const { db } = openDb(':memory:')
       const ledger = makeClueLedger(db)
       await ledger.ingest('zhipu', [baseClue({ title: 'GLM-9.9 初版' })])
-      await ledger.settle('zhipu', baseClue().modelKey, 'rejected', 'fixture')
+      await ledger.recordVerification('zhipu', baseClue().modelKey, 'error', 'fixture')
       vi.setSystemTime(new Date('2026-02-07T02:41:00Z'))
       await ledger.ingest('zhipu', [baseClue({ occurredOn: '2026-02-06', title: 'GLM-9.9 修订' })])
       const stored = await rows(db)
@@ -81,7 +81,7 @@ describe('线索账本:ingest(30 天窗 + 幂等 upsert + 完结冻结)', () => 
   })
 })
 
-describe('线索账本:两窗两集(dueClues 重试集 / visibleClues 触人集)', () => {
+describe('线索账本:共同活动窗两集(dueClues 重试集 / visibleClues 触人集)', () => {
   /** 五态同窗种子:02-03 各一条 + 一条 pending 但 occurred_on 出核验窗(01-20,ingest 窗内)。 */
   async function seedFiveStates() {
     const { db } = openDb(':memory:')
@@ -97,11 +97,11 @@ describe('线索账本:两窗两集(dueClues 重试集 / visibleClues 触人集)
       mk('insufficient'),
       mk('old-window', '2026-01-20'), // >7 天核验/徽标窗、<30 天 ingest 窗
     ])
-    await ledger.settle('zhipu', 'accepted', 'accepted')
-    await ledger.settle('zhipu', 'rejected', 'rejected', 'r')
-    await ledger.settle('zhipu', 'noise', 'noise')
-    await ledger.settle('zhipu', 'error', 'error', 'e')
-    await ledger.settle('zhipu', 'insufficient', 'insufficient', 'i')
+    await ledger.recordVerification('zhipu', 'accepted', 'accepted')
+    await ledger.recordVerification('zhipu', 'rejected', 'rejected', 'r')
+    await ledger.recordVerification('zhipu', 'noise', 'noise')
+    await ledger.recordVerification('zhipu', 'error', 'error', 'e')
+    await ledger.recordVerification('zhipu', 'insufficient', 'insufficient', 'i')
     return { db, ledger, mk }
   }
 
@@ -137,14 +137,17 @@ describe('线索账本:两窗两集(dueClues 重试集 / visibleClues 触人集)
     }
   })
 
-  it('occurred_on 滑出 7 天窗:pending 亦滚出两窗(读侧与核验窗同轴,ADR-0058 注记 2026-09-10)', async () => {
+  it('occurred_on 活动窗:第 7 天仍有效,第 8 天滚出核验与触达两集', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
     try {
       const { db } = openDb(':memory:')
       const ledger = makeClueLedger(db)
       await ledger.ingest('zhipu', [baseClue()]) // 02-03
-      vi.setSystemTime(new Date('2026-02-13T02:41:00Z')) // +8 天:02-03 出 7 天窗
+      vi.setSystemTime(new Date('2026-02-10T02:41:00Z')) // 第 7 天仍在窗
+      expect(await ledger.dueClues('zhipu')).toHaveLength(1)
+      expect(await ledger.visibleClues()).toHaveLength(1)
+      vi.setSystemTime(new Date('2026-02-11T02:41:00Z')) // 第 8 天淡出
       expect(await ledger.dueClues('zhipu')).toHaveLength(0)
       expect(await ledger.visibleClues()).toHaveLength(0)
       expect((await rows(db))).toHaveLength(1) // 行保留:滚出读侧 ≠ 删行
@@ -164,7 +167,7 @@ describe('线索账本:两窗两集(dueClues 重试集 / visibleClues 触人集)
       const { db } = openDb(':memory:')
       const ledger = makeClueLedger(db)
       await ledger.ingest('zhipu', [baseClue()]) // occurred_on 02-03,窗内可见
-      await ledger.settle('zhipu', baseClue().modelKey, 'rejected') // 完结:reject 留表触人
+      await ledger.recordVerification('zhipu', baseClue().modelKey, 'rejected') // 完结:reject 留表触人
       // 时间到 03-01(occurred_on 已老 26 天),但 last_seen 人为保持新鲜——旧轴判活,新轴判出
       vi.setSystemTime(new Date('2026-03-01T02:41:00Z'))
       await db
@@ -180,19 +183,23 @@ describe('线索账本:两窗两集(dueClues 重试集 / visibleClues 触人集)
   })
 })
 
-describe('线索账本:settle(reason 落库与清残)', () => {
-  it('reason 落库;后续不带 reason 的 settle 清残(error 重试成功后旧失败理由不残留误导归因)', async () => {
+describe('线索账本:recordVerification(reason 落库与终态守卫)', () => {
+  it('error 可重试转 accepted 并清除旧 reason;终态不可覆盖', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
     try {
       const { db } = openDb(':memory:')
       const ledger = makeClueLedger(db)
       await ledger.ingest('zhipu', [baseClue()])
-      await ledger.settle('zhipu', baseClue().modelKey, 'error', '网关 502')
+      expect(await ledger.recordVerification('zhipu', baseClue().modelKey, 'error', '网关 502')).toBe(true)
       let stored = (await rows(db))[0]!
       expect(stored.verify_state).toBe('error')
       expect(stored.verify_reason).toBe('网关 502')
-      await ledger.settle('zhipu', baseClue().modelKey, 'accepted')
+      expect(await ledger.recordVerification('zhipu', baseClue().modelKey, 'accepted')).toBe(true)
+      stored = (await rows(db))[0]!
+      expect(stored.verify_state).toBe('accepted')
+      expect(stored.verify_reason).toBeNull()
+      expect(await ledger.recordVerification('zhipu', baseClue().modelKey, 'rejected', '迟到改判')).toBe(false)
       stored = (await rows(db))[0]!
       expect(stored.verify_state).toBe('accepted')
       expect(stored.verify_reason).toBeNull()
