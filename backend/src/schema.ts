@@ -212,7 +212,7 @@ CREATE TABLE IF NOT EXISTS model_pending_clues (
     model_key     TEXT NOT NULL, -- 条目最强标识(千问=模型ID串、智谱=文档链接),provider 内唯一
     title         TEXT NOT NULL,
     source_url    TEXT NOT NULL,
-    verify_state  TEXT, -- ADR-0058 auto 核验状态见 clueLedger.ts 的 ClueState:NULL=未核验,'accepted'=已入档,'rejected'=噪音/低置信(留表触人),'noise'=确定性噪音(不触人);'error'=核验链失败(下轮重试,不触人)与 'insufficient'=判自家但草稿校验不过(触人等人工,不重试)为信息智能化试点新增(spec 1.2/1.5),旧读侧不含两值,回滚即静默
+    verify_state  TEXT, -- ADR-0058 auto 核验状态见 clueLedger.ts 的 ClueState:NULL=未核验,'accepted'=已入档,'rejected'=噪音/低置信(留表触人),'noise'=确定性噪音(不触人);'error'=核验链失败(下轮重试,不触人)与 'insufficient'=判自家但草稿校验不过(活动窗内触人,不重试)为信息智能化试点新增(spec 1.2/1.5),旧读侧不含两值,回滚即静默
     verify_reason TEXT, -- 判定理由:reject/insufficient/error 落库(误拒可归因是判别还是信源);accepted/noise 无理由为 NULL
     first_seen_at TEXT NOT NULL,
     last_seen_at  TEXT NOT NULL,
