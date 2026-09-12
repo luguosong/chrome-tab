@@ -2,18 +2,19 @@ import { useState } from 'react'
 import { NEWS_SOURCES, newsSourceLabel } from 'chrome-tab-shared'
 import type { NewsSourceId } from 'chrome-tab-shared'
 import { useNewsFeed, useSetNewsSources } from '../hooks/useNews'
-import { normalizeTab, paneState } from '../lib/detailModalState'
+import { paneState, settleTabs } from '../lib/detailModalState'
 import { timeAgo } from '../lib/timeAgo'
 import { isFreshRow } from '../lib/tileBody'
 import DetailModal, { retryButtonClass } from './DetailModal'
+import InfoRow from './InfoRow'
 
 /**
  * 新闻详情 Modal(见 CONTEXT.md「新闻」):tab = 全部(默认,混合流)→ 各勾选源 →
- * 管理。条目行 = 标题两行截断 + 源名·相对时间(无时间条目省缺),24h 红点仅限有
- * 时间条目,整条外跳原文。管理 tab = 15 源平铺复选清单(failing 标红注记),勾选
+ * 管理。条目行 = 信息流行壳 InfoRow(标题两行截断 + 源名·相对时间,24h 红点仅限
+ * 有时间条目,整条外跳原文)。管理 tab = 15 源平铺复选清单(failing 标红注记),勾选
  * 即整份提交(改即保存,对齐布局设置哲学;新勾源由后端异步首取)。容器:详情
- * Modal 骨架(ADR-0040;tab 悬空回落与查询状态机由骨架持有,管理 tab 主体自持
- * ——不依赖 feed 数据,失败仍可达)。
+ * Modal 骨架(ADR-0040;tab 派生仪式收编 settleTabs——追加管理 + 归一 + 门控
+ * 一括,管理 tab 主体自持——不依赖 feed 数据,失败仍可达)。
  */
 type Tab = 'all' | `src-${NewsSourceId}` | 'manage'
 
@@ -23,12 +24,14 @@ export default function NewsModal({ onClose }: { onClose: () => void }) {
 
   const items = feed.data?.items ?? []
   const sources = feed.data?.sources ?? []
-  const tabs: Array<{ key: Tab; label: string }> = [
-    { key: 'all', label: '全部' },
-    ...sources.map((s) => ({ key: `src-${s.id}` as Tab, label: newsSourceLabel(s.id) })),
-    { key: 'manage', label: '管理' },
-  ]
-  const active = normalizeTab(tabs, tab)
+  const { tabs, active, isManage } = settleTabs(
+    [
+      { key: 'all' as const, label: '全部' },
+      ...sources.map((s) => ({ key: `src-${s.id}` as Tab, label: newsSourceLabel(s.id) })),
+    ],
+    tab,
+    '管理',
+  )
   const shown = active === 'all' ? items : items.filter((i) => `src-${i.source}` === active)
 
   return (
@@ -44,7 +47,7 @@ export default function NewsModal({ onClose }: { onClose: () => void }) {
       onTabChange={setTab}
       onOpen={() => void feed.refetch()}
       pane={
-        active === 'manage'
+        isManage
           ? null
           : paneState({
               isError: feed.isError,
@@ -56,33 +59,25 @@ export default function NewsModal({ onClose }: { onClose: () => void }) {
             })
       }
     >
-      {active === 'manage' ? (
+      {isManage ? (
         <ManagePane />
       ) : (
         <ul className="space-y-1">
           {shown.map((n) => (
-            <li key={n.id}>
-              <a
-                href={n.url}
-                target="_blank"
-                rel="noreferrer"
-                className="block rounded-xl p-2 hover:bg-white/10 transition-colors"
-              >
-                <span className="flex items-start gap-1.5">
-                  {isFreshRow(n.publishedAt) && (
-                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" aria-hidden="true" />
-                  )}
-                  {/* 译文主行,悬停 title 属性恒英文原文供核对(ADR-0029) */}
-                  <span className="text-sm text-white/90 line-clamp-2 break-all" title={n.title}>
-                    {n.titleZh ?? n.title}
-                  </span>
-                </span>
-                <span className="mt-0.5 block text-xs text-white/45">
+            <InfoRow
+              key={n.id}
+              href={n.url}
+              titleLines={2}
+              fresh={isFreshRow(n.publishedAt)}
+              // 译文主行,悬停 title 属性恒英文原文供核对(ADR-0029)
+              title={<span title={n.title}>{n.titleZh ?? n.title}</span>}
+              meta={
+                <>
                   {newsSourceLabel(n.source)}
                   {n.publishedAt !== null && ` · ${timeAgo(new Date(n.publishedAt * 1000).toISOString())}`}
-                </span>
-              </a>
-            </li>
+                </>
+              }
+            />
           ))}
         </ul>
       )}

@@ -109,10 +109,14 @@ export function TileRowLink({
   )
 }
 
-/** 24h 红点(baseline 行用 self-center;items-center 行里是 no-op)。判据由调用方传入:常规行用 lib isFreshRow,模型行动态鲜度用 isFreshModelEvent(域规则)。 */
-export function FreshDot({ show }: { show: boolean }) {
+/** 24h 红点(baseline 行用 self-center;items-center 行里是 no-op;两行钳制标题行
+ *  用 mt-1.5 顶对齐——InfoRow 传)。判据由调用方传入:常规行用 lib isFreshRow,
+ *  模型行动态鲜度用 isFreshModelEvent(域规则)。className 只调定位,形色尺寸恒定。 */
+export function FreshDot({ show, className = 'self-center' }: { show: boolean; className?: string }) {
   if (!show) return null
-  return <span className="h-1.5 w-1.5 shrink-0 self-center rounded-full bg-red-400" aria-hidden="true" />
+  return (
+    <span className={`h-1.5 w-1.5 shrink-0 rounded-full bg-red-400 ${className}`} aria-hidden="true" />
+  )
 }
 
 /** 已了解勾标(CONTEXT.md「已了解」;行级视觉零件,语义与判据归域——同 FreshDot 分工)。 */

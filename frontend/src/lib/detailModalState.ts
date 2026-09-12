@@ -21,6 +21,36 @@ export function normalizeTab<T extends string>(tabs: readonly TabItem<T>[], sele
   return tabs.some((t) => t.key === selected) ? selected : (tabs[0]?.key ?? selected)
 }
 
+/** 数据派生 tab 域(新闻/视频更新/服务器状态)的「派生 → 归一 → 门控」一括结算结果:
+ *  tabs 给骨架渲染,active 给内容过滤,isManage 给 pane 门控(管理 tab 不依赖
+ *  数据查询,pane 置 null 主体自持)。 */
+export interface SettledTabs<T extends string> {
+  readonly tabs: readonly TabItem<T>[]
+  readonly active: T
+  readonly isManage: boolean
+}
+
+/** 管理tab 的 key 惯例(新闻/视频更新两域既有字面量;不进类型——无管理tab 的域
+ *  (如服务器状态)的 T 不含它也照用,门控只认 isManage 返回值)。 */
+const MANAGE_KEY = 'manage'
+
+/**
+ * tab 派生仪式收编(行壳票,ADR-0040 注记):base = 域从数据派生的 tab 列
+ * (全部/各源/各分类/各机器……),manageLabel 传入则追加管理tab 在尾,再归一。
+ * 调用方不再手抄「追加 + normalizeTab + active === "manage" 判断」三步
+ * (收编前 NewsModal/VideoModal/ServersModal 三家各持一份)。
+ */
+export function settleTabs<T extends string>(
+  base: readonly TabItem<T>[],
+  tab: T,
+  manageLabel?: string,
+): SettledTabs<T> {
+  const tabs =
+    manageLabel === undefined ? [...base] : [...base, { key: MANAGE_KEY as T, label: manageLabel }]
+  const active = normalizeTab(tabs, tab)
+  return { tabs, active, isManage: active === (MANAGE_KEY as T) }
+}
+
 /** 主体查询状态机的四态;error/empty 文案由域声明,loading 可选域文案(默认「加载中…」;
  *  有等待语义 worth 说的域带上,如趋势榜非默认组合现拉「正在抓取该组合的趋势榜…」)。 */
 export type PaneState =

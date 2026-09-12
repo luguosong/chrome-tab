@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeTab, paneState, type TabItem } from './detailModalState'
+import { normalizeTab, paneState, settleTabs, type TabItem } from './detailModalState'
 
-/** ADR-0040:详情 Modal 骨架的纯决策函数——tab 归一(悬空回落)与查询状态机归约。 */
+/** ADR-0040:详情 Modal 骨架的纯决策函数——tab 归一(悬空回落)与查询状态机归约。
+ *  settleTabs(行壳票 01):数据派生 tab 域的「派生 + 管理追加 + 归一 + 门控」仪式收编。 */
 
 describe('normalizeTab', () => {
   const tabs: TabItem[] = [
@@ -51,5 +52,51 @@ describe('paneState', () => {
 
   it('其余 → content 态', () => {
     expect(paneState(base)).toEqual({ kind: 'content' })
+  })
+})
+
+describe('settleTabs', () => {
+  // 形如新闻/视频的数据派生域:全部 → 各实体(源/分类)……;manage 由惯例追加
+  const base: TabItem<'all' | `src-${number}` | 'manage'>[] = [
+    { key: 'all', label: '全部' },
+    { key: 'src-1', label: '源一' },
+    { key: 'src-2', label: '源二' },
+  ]
+
+  it('manageLabel 传入 → 管理tab 追加在尾,选中归一', () => {
+    const s = settleTabs(base, 'src-1', '管理')
+    expect(s.tabs).toEqual([...base, { key: 'manage', label: '管理' }])
+    expect(s.active).toBe('src-1')
+    expect(s.isManage).toBe(false)
+  })
+
+  it('选中管理tab → isManage 真(pane 门控信号)', () => {
+    expect(settleTabs(base, 'manage', '管理').isManage).toBe(true)
+  })
+
+  it('选中悬空(所指实体被删)→ 回落首个 tab,isManage 假', () => {
+    const s = settleTabs(base, 'src-7', '管理')
+    expect(s.active).toBe('all')
+    expect(s.isManage).toBe(false)
+  })
+
+  it('manageLabel 缺省(服务器状态等无管理tab 域)→ 原样,不追加', () => {
+    const s = settleTabs(base, 'src-2')
+    expect(s.tabs).toEqual(base)
+    expect(s.active).toBe('src-2')
+    expect(s.isManage).toBe(false)
+  })
+
+  it('空 base + manageLabel → 仅管理tab(数据未到时管理仍可达,pane 恒 null 形)', () => {
+    const s = settleTabs([], 'all', '管理')
+    expect(s.tabs).toEqual([{ key: 'manage', label: '管理' }])
+    expect(s.active).toBe('manage')
+    expect(s.isManage).toBe(true)
+  })
+
+  it('不修改入参(base 只读,追加走拷贝)', () => {
+    const frozen = Object.freeze([...base])
+    expect(() => settleTabs(frozen, 'all', '管理')).not.toThrow()
+    expect(frozen).toEqual(base)
   })
 })

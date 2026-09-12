@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { VideoBlogger, VideoFeedItem } from 'chrome-tab-shared'
+import type { VideoBlogger } from 'chrome-tab-shared'
 import {
   useAddVideoBlogger,
   useCreateVideoCategory,
@@ -12,14 +12,14 @@ import {
   useVideoCategories,
   useVideoFeed,
 } from '../hooks/useVideoUpdates'
-import { normalizeTab, paneState } from '../lib/detailModalState'
+import { paneState, settleTabs } from '../lib/detailModalState'
+import { swallowEscape } from '../lib/escStack'
 import { timeAgo } from '../lib/timeAgo'
 import { isFreshRow } from '../lib/tileBody'
 import ConfirmButton from './ConfirmButton'
 import DetailModal from './DetailModal'
+import InfoRow from './InfoRow'
 
-// 红点判据与 VideoIconBody 同口径 = isFreshRow(「块内主体」24h 红点窗唯一执行口径)
-const isNew = (v: VideoFeedItem) => isFreshRow(v.publishedAt)
 const iso = (sec: number) => new Date(sec * 1000).toISOString()
 const fmtDuration = (sec: number) => {
   const h = Math.floor(sec / 3600)
@@ -33,12 +33,13 @@ const platformLabel = (p: string) => (p === 'youtube' ? 'YouTube' : 'B站')
 
 /**
  * 视频更新详情 Modal(见 CONTEXT.md「视频更新」):tab = 全部(默认,混合时间流)→
- * 未分类(仅当桶内有博主)→ 各分类(sort_order)→ 管理。视频条目 = 缩略图(no-referrer
- * 直连,B站 hdslb 防盗链实测自家域 Referer 必 403)+ 右下时长角标(无时长则无角标,
- * 无 key 降级口径)+ 标题两行截断 + 博主名·相对时间,整条外跳原平台。管理 tab:分类
- * 增删改排序(删 → 博主回未分类)与博主添加/归类/删除(status='failing' 标红)。
- * 容器:详情 Modal 骨架(ADR-0040;管理里删掉当前分类后 tab 悬空回落「全部」,
- * 管理 tab 主体自持——feed 失败仍可达)。
+ * 未分类(仅当桶内有博主)→ 各分类(sort_order)→ 管理。视频条目 = 信息流行壳
+ * InfoRow(缩略图前置槽 no-referrer 直连,B站 hdslb 防盗链实测自家域 Referer 必
+ * 403 + 右下时长角标,无时长则无角标,无 key 降级口径 + 标题两行截断 + 博主名·
+ * 相对时间,整条外跳原平台)。管理 tab:分类增删改排序(删 → 博主回未分类)与
+ * 博主添加/归类/删除(status='failing' 标红)。容器:详情 Modal 骨架(ADR-0040;
+ * tab 派生仪式收编 settleTabs,管理里删掉当前分类后 tab 悬空回落「全部」,管理
+ * tab 主体自持——feed 失败仍可达)。
  */
 type Tab = 'all' | 'uncategorized' | `cat-${number}` | 'manage'
 
@@ -49,15 +50,17 @@ export default function VideoModal({ onClose }: { onClose: () => void }) {
 
   const videos = feed.data ?? []
   const categories = cats.data?.categories ?? []
-  const tabs: Array<{ key: Tab; label: string }> = [
-    { key: 'all', label: '全部' },
-    ...(cats.data && cats.data.uncategorizedCount > 0
-      ? [{ key: 'uncategorized' as Tab, label: '未分类' }]
-      : []),
-    ...categories.map((c) => ({ key: `cat-${c.id}` as Tab, label: c.name })),
-    { key: 'manage', label: '管理' },
-  ]
-  const active = normalizeTab(tabs, tab)
+  const { tabs, active, isManage } = settleTabs(
+    [
+      { key: 'all' as const, label: '全部' },
+      ...(cats.data && cats.data.uncategorizedCount > 0
+        ? [{ key: 'uncategorized' as Tab, label: '未分类' }]
+        : []),
+      ...categories.map((c) => ({ key: `cat-${c.id}` as Tab, label: c.name })),
+    ],
+    tab,
+    '管理',
+  )
   const shown =
     active === 'all'
       ? videos
@@ -80,7 +83,7 @@ export default function VideoModal({ onClose }: { onClose: () => void }) {
       onTabChange={setTab}
       onOpen={() => void feed.refetch()}
       pane={
-        active === 'manage'
+        isManage
           ? null
           : paneState({
               isError: feed.isError,
@@ -92,58 +95,42 @@ export default function VideoModal({ onClose }: { onClose: () => void }) {
             })
       }
     >
-      {active === 'manage' ? (
+      {isManage ? (
         <ManagePane />
       ) : (
         <ul className="space-y-1">
           {shown.map((v) => (
-            <VideoRow key={v.id} video={v} />
+            <InfoRow
+              key={v.id}
+              href={v.url}
+              titleLines={2}
+              // 红点判据与 VideoIconBody 同口径 = isFreshRow(「块内主体」24h 红点窗唯一执行口径)
+              fresh={isFreshRow(v.publishedAt)}
+              title={<span title={v.title}>{v.title}</span>}
+              leading={
+                <span className="relative shrink-0 w-32 aspect-video rounded-lg overflow-hidden bg-white/10">
+                  {v.thumbnailUrl && (
+                    <img
+                      src={v.thumbnailUrl}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      loading="lazy"
+                      className="absolute inset-0 w-full h-full object-cover"
+                    />
+                  )}
+                  {!!v.durationSeconds && (
+                    <span className="absolute right-1 bottom-1 rounded bg-black/70 px-1 font-mono text-meta text-white/90">
+                      {fmtDuration(v.durationSeconds)}
+                    </span>
+                  )}
+                </span>
+              }
+              meta={`${v.bloggerName} · ${timeAgo(iso(v.publishedAt))} · ${platformLabel(v.platform)}`}
+            />
           ))}
         </ul>
       )}
     </DetailModal>
-  )
-}
-
-/** 单条视频:整条外跳原平台(新标签);缩略图 no-referrer(B站防盗链);时长角标缺时长则无。 */
-function VideoRow({ video: v }: { video: VideoFeedItem }) {
-  return (
-    <li>
-      <a
-        href={v.url}
-        target="_blank"
-        rel="noreferrer"
-        className="flex gap-3 rounded-xl p-2 hover:bg-white/10 transition-colors"
-      >
-        <span className="relative shrink-0 w-32 aspect-video rounded-lg overflow-hidden bg-white/10">
-          {v.thumbnailUrl && (
-            <img
-              src={v.thumbnailUrl}
-              alt=""
-              referrerPolicy="no-referrer"
-              loading="lazy"
-              className="absolute inset-0 w-full h-full object-cover"
-            />
-          )}
-          {!!v.durationSeconds && (
-            <span className="absolute right-1 bottom-1 rounded bg-black/70 px-1 font-mono text-meta text-white/90">
-              {fmtDuration(v.durationSeconds)}
-            </span>
-          )}
-        </span>
-        <span className="flex-1 min-w-0 flex flex-col py-0.5">
-          <span className="flex items-start gap-1.5">
-            {isNew(v) && <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" aria-hidden="true" />}
-            <span className="text-sm text-white/90 line-clamp-2 break-all" title={v.title}>
-              {v.title}
-            </span>
-          </span>
-          <span className="mt-auto pt-1 text-xs text-white/45">
-            {v.bloggerName} · {timeAgo(iso(v.publishedAt))} · {platformLabel(v.platform)}
-          </span>
-        </span>
-      </a>
-    </li>
   )
 }
 
@@ -202,11 +189,8 @@ function ManagePane() {
                       renameCategory.mutate({ id: c.id, name: renameDraft.trim() })
                       setRenamingId(null)
                     }
-                    if (e.key === 'Escape') {
-                      // 取消重命名的 Esc 不得冒泡到 escStack 把整个 Modal 关掉(ADR-0040 漂移⑦)
-                      e.stopPropagation()
-                      setRenamingId(null)
-                    }
+                    // 取消重命名的 Esc 就地消化,不冒泡关 Modal(ADR-0040 漂移⑦ → swallowEscape 单点)
+                    swallowEscape(() => setRenamingId(null))(e)
                   }}
                   onBlur={() => setRenamingId(null)}
                   className="flex-1 min-w-0 rounded-lg bg-white/10 px-2 py-1 text-sm text-white/90 outline-none focus:ring-1 focus:ring-accent"
@@ -262,11 +246,7 @@ function ManagePane() {
             onChange={(e) => setCatDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') submitCategory()
-              // Esc 就地清草稿,不冒泡到 escStack 关 Modal(ADR-0040 漂移⑦,同重命名 input)
-              if (e.key === 'Escape') {
-                e.stopPropagation()
-                setCatDraft('')
-              }
+              swallowEscape(() => setCatDraft(''))(e)
             }}
             placeholder="新分类名称"
             className="flex-1 min-w-0 rounded-xl bg-white/10 px-3 py-2 text-sm text-white/90 placeholder:text-white/35 outline-none focus:ring-1 focus:ring-accent"
@@ -304,11 +284,7 @@ function ManagePane() {
             onChange={(e) => setUrlDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') submitBlogger()
-              // Esc 就地清草稿,不冒泡到 escStack 关 Modal(ADR-0040 漂移⑦,同重命名 input)
-              if (e.key === 'Escape') {
-                e.stopPropagation()
-                setUrlDraft('')
-              }
+              swallowEscape(() => setUrlDraft(''))(e)
             }}
             placeholder={addBlogger.isPending ? '解析博主信息…' : 'https://www.youtube.com/@… 或 https://space.bilibili.com/…'}
             disabled={addBlogger.isPending}

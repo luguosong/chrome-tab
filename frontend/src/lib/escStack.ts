@@ -31,3 +31,20 @@ export function registerEscHandler(onEscape: () => void): () => void {
 export function dispatchEscape(): void {
   stack[stack.length - 1]?.onEscape()
 }
+
+/**
+ * 「Esc 就地消化」keydown handler 工厂(行壳票 01,ADR-0040 漂移⑦的 idiom
+ * 单点化):输入框/内嵌面板按 Esc 只取消本地状态(清草稿/退出重命名/关面板),
+ * stopPropagation 挡住冒泡到本模块的 window 监听——否则 escStack 把整个 Modal
+ * 关掉。非 Escape 键零副作用,可与 Enter 提交等分支并列挂同一 input。收编前
+ * 五处手抄(VideoModal 管理 ×3、Icon 块内重命名、GroupOverlay 改名)。
+ * 参数结构类型(非 React 类型):纯函数零 React 依赖,测试面即本文件。
+ */
+export function swallowEscape(consume: () => void) {
+  return (e: { key: string; stopPropagation(): void }): void => {
+    if (e.key === 'Escape') {
+      e.stopPropagation()
+      consume()
+    }
+  }
+}

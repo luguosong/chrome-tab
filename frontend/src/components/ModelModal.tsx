@@ -9,6 +9,7 @@ import { useModelArchive } from '../hooks/useModelArchive'
 import { paneState } from '../lib/detailModalState'
 import { timeAgo } from '../lib/timeAgo'
 import DetailModal, { Chip, QueryPane } from './DetailModal'
+import { FreshDot } from './TileBody'
 import LeaderboardPanel from './LeaderboardPanel'
 import {
   AVAILABILITY_LABELS,
@@ -212,9 +213,7 @@ function ModelList({
             >
               <span className="flex items-baseline justify-between gap-3 min-w-0">
                 <span className="flex min-w-0 items-center gap-1.5">
-                  {latest && isFreshModelEvent(latest.occurredOn) && (
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" aria-hidden="true" />
-                  )}
+                  <FreshDot show={latest !== undefined && isFreshModelEvent(latest.occurredOn)} />
                   <span className="truncate text-sm text-white/90">{m.name}</span>
                   {m.verified === 'auto' && (
                     <span

@@ -8,9 +8,9 @@ import { type PaneState, type TabItem, normalizeTab } from '../lib/detailModalSt
  * tab 条(含悬空回落)、主体查询状态机、打开即对账。各域只声明 tab 派生、
  * 空态/失败文案与内容;内容主体(管理 pane、图表、列表)永远留域。
  *
- * 双出口:DetailModal(复合,九家消费——批 1:新闻/视频更新/服务器状态,批 2:
- * 待办/模型追踪/股票/天气/更新日志/趋势)+ QueryPane(状态机零件,per-tab 各持
- * 查询态的域——「AI 热点」三 tab——与域内自持三态的分段域用,DetailModal 内部
+ * 双出口:DetailModal(复合,十家消费——新闻/视频更新/服务器状态/待办/模型追踪/
+ * 股票/天气/更新日志/趋势/AI 热点)+ QueryPane(状态机零件,per-tab 各持查询态的
+ * 域——「AI 热点」picks/daily 面板——与域内自持三态的分段域用,DetailModal 内部
  * 亦消费它)。
  */
 

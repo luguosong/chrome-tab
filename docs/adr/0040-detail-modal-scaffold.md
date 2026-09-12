@@ -11,3 +11,7 @@
 5. **两批迁移、批间不排期**:批 1 = 新闻 + 视频更新 + 服务器状态(顺修漂移 ②③④⑥⑦,可独立验收);批 2 = 其余七家(AiHot/Todo/Model/Stock/Weather/Changelog/Trending)等价替换(骨架补 subtitle 副行与 TabItem.label 放宽 ReactNode——待办计数徽标)——批 1 验收通过即连做批 2,同一轮动工收口,不留长期新旧并存。每批验收 = tsc 零错 + 既有测试全绿 + 副本 db 截图比对(6c2bc5b 先例)。**批 2 已知非等价**(骨架形态统一所致,终审补记):副行间距 mb-4→mb-3(股票/天气)、加载态文案统一「加载中…」(趋势原「正在抓取该组合的趋势榜…」,后经 loadingMessage 参数找回)、待办分栏 tab 条钉面板顶不随左列滚(长列表下 tab 常驻,改进)、待办「完成失败」提示移至 tab 条下、待办失败判定含 isError&&data 时不渲染 tab 条(旧计数配错误块是误导)。
 
 **代价与取舍。** 换来:横切十域的结构决定一处生效——下次「触达审计」式改动从改 N 家变改一处,后继新 Modal 出生即带裁决;tab 悬空类 bug 从「各 Modal 自查」变结构免疫;components 层首获(纯函数形式的)语义测试面。付出:DetailModal 的 props 是新 interface,批间新旧并存;Todo 的宽度切换、Model 的过滤胶囊等异质主体仍留域——深度止于「标头 + tab + 状态机」,内容永远留域(同 ADR-0039「表字面量留域」取向)。
+
+---
+
+**增量注记(2026-09-12,行壳票):** 上段「内容永远留域」在**行层**再裁决为结构/内容两层——行的结构三件套(pill 容器、主行 = 红点槽 + 前置槽 + 标题、次行 meta)收进 `components/InfoRow.tsx` 行壳,「留域」对象从整块内容主体细化为「槽位内容」(字段选择、缩略图/排名具象、meta 分段、可选主跳、summary 段;前置槽与方言 className/行尾 children 为逃生口)。配套收编:tab 派生仪式(追加管理 + 归一 + 门控)进 `lib/detailModalState.ts` 的 `settleTabs`(骨架 props 零变化;manage 仍为域 key 字面量惯例,不升格类型 token),NewsModal/VideoModal/ServersModal 三家手抄退役;本 ADR 漂移⑦的 Esc 就地消化 idiom 收编 `lib/escStack.ts` 的 `swallowEscape`(视频管理 ×3 + Icon 块内编辑面板 + GroupOverlay 改名,五处);红点 markup 三份手抄退役,`FreshDot`(TileBody)唯一正宗并加定位参数(items-center 行 no-op 的 self-center 缺省;两行钳制标题行传 mt-1.5;判据本就单点 isFreshRow)。**已知非等价**(收壳所致,截图比对口径):AI 热点族行 padding 改经 className 轴向前缀覆盖默认 p-2(渲染等价)、picks/daily 次行间距 mt-1→mt-0.5(2px)、hot 行内容列 +py-0.5(4px)、transition→transition-colors(行内仅背景色过渡,视觉等价)。

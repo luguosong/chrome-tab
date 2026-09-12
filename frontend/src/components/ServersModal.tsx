@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { ServerMonEntry, ServerMonHistoryPoint } from 'chrome-tab-shared'
-import { normalizeTab, paneState } from '../lib/detailModalState'
+import { paneState, settleTabs } from '../lib/detailModalState'
 import { timeAgo } from '../lib/timeAgo'
 import { fmtBytes, fmtUptime, useServerHistory, useServers } from '../hooks/useServers'
 import DetailModal from './DetailModal'
@@ -18,11 +18,14 @@ export default function ServersModal({ onClose }: { onClose: () => void }) {
   const { data, isError, isPending, isFetching, refetch } = useServers()
   const entries = data ?? []
   // tab 初值随首波数据回落(entries 到达前 active 为 undefined → 空态;空列 =
-  // 无 tab 形态由骨架吸收)
+  // 无 tab 形态由骨架吸收);机器 tab 数据派生,无管理tab,归一走 settleTabs
   const [tab, setTab] = useState('')
-  const tabs = entries.map((e) => ({ key: e.machine, label: e.machine }))
-  const active = entries.find((e) => e.machine === normalizeTab(tabs, tab))
-  const hist = useServerHistory(active?.machine ?? '')
+  const { tabs, active } = settleTabs(
+    entries.map((e) => ({ key: e.machine, label: e.machine })),
+    tab,
+  )
+  const entry = entries.find((e) => e.machine === active)
+  const hist = useServerHistory(entry?.machine ?? '')
 
   return (
     <DetailModal
@@ -32,7 +35,7 @@ export default function ServersModal({ onClose }: { onClose: () => void }) {
       className="p-5"
       busy={isFetching}
       tabs={tabs}
-      tab={active?.machine}
+      tab={active}
       onTabChange={setTab}
       pane={
         entries.length > 0
@@ -47,7 +50,7 @@ export default function ServersModal({ onClose }: { onClose: () => void }) {
       }
       onRetry={() => void refetch()}
     >
-      {active && <MachinePane entry={active} points={hist.data?.points ?? []} />}
+      {entry && <MachinePane entry={entry} points={hist.data?.points ?? []} />}
     </DetailModal>
   )
 }
