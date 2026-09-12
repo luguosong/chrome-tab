@@ -6,6 +6,7 @@ import {
   getChangelogSource,
   isPrereleaseVersion,
   type ChangelogSourceId,
+  type SortAxis,
 } from 'chrome-tab-shared'
 import type { Db } from './db'
 import type { AuthEnv } from './auth'
@@ -92,15 +93,16 @@ const NOISE_SECTIONS = /^(?:Changelog|Contributors)$/
 const VERSION_LIKE_RE = /^\d+(\.\d+)*(?:-\S+)?$/
 
 /** 合成原文源(ADR-0050,如 codex)的版本块合成:GitHub Releases API 响应 → `## 版本`
- *  + 正文的 markdown。转换:① 杂项 tag 滤除(VERSION_LIKE_RE);② 按 published_at 倒排——
- *  **不保 API 序**:API 按 created_at 排,实测 18/100 的 published_at 倒置,时间线与
- *  latest 判定都要真发布序;③ 行首 `## ` 降 `### `(release 小节是 ## 级,而 ## 是版本块
+ *  + 正文的 markdown。转换:① 杂项 tag 滤除(VERSION_LIKE_RE);② 按源声明排序轴降排
+ *  (GitHub 形态即 published:「published_at 倒排——**不保 API 序**:API 按 created_at
+ *  排,实测 18/100 的 published_at 倒置,时间线与 latest 判定都要真发布序」);③ 行首 `## ` 降 `### `(release 小节是 ## 级,而 ## 是版本块
  *  边界,不降级会被 splitBlocks 切成独立版本块;``` 围栏内不降不判标题);④ 噪音小节
  *  整节剔除(到下一标题止);⑤ 无条目行(无小节标题且无 bullet)仅输出标题行——含占位
  *  正文与纯 prose:parseChangelog 只渲染条目行,空块判定与前端渲染语义对齐,上游占位
  *  措辞变化自愈。**含预发布**(Modal 全览位消费;块内滚动榜在前端过滤)。 */
 export function composeReleasesMarkdown(
   releases: ReadonlyArray<{ tag_name?: string; published_at?: string; body?: string | null }>,
+  axis: SortAxis,
 ): string {
   return releases
     .filter(
@@ -109,7 +111,7 @@ export function composeReleasesMarkdown(
     )
     .map((r) => ({ version: versionOfTag(r.tag_name), at: r.published_at ?? '', body: r.body ?? '' }))
     .filter((r) => VERSION_LIKE_RE.test(r.version))
-    .sort((a, b) => b.at.localeCompare(a.at))
+    .sort(byAxis(axis))
     .map((r) => {
       const lines: string[] = []
       let inNoise = false
@@ -146,8 +148,8 @@ export function composeReleasesMarkdown(
 /** Data Services release 条目关心面:version/date/whatsnew;downloads/patches 等大字段忽略。 */
 type JetbrainsRelease = { version?: unknown; date?: unknown; whatsnew?: unknown }
 
-/** 版本号升序比较器(数值段逐段比,缺段作 0):IDEA 展示轴。字典序在 2026.10 vs 2026.2
- *  会错,必须数值比。 */
+/** 版本号升序比较器(数值段逐段比,缺段作 0):version 轴的比较本体。字典序在 2026.10
+ *  vs 2026.2 会错,必须数值比。 */
 const compareVersion = (a: string, b: string): number => {
   const pa = a.split('.')
   const pb = b.split('.')
@@ -157,6 +159,14 @@ const compareVersion = (a: string, b: string): number => {
   }
   return 0
 }
+
+/** 排序轴 → 条目降序比较器(轴单点:声明在 shared 注册表 sortAxis,合成器的列表排序
+ *  与发布信息的 latest 折叠共用):published 键取发布时间串(npm time / GitHub
+ *  published_at 均等长 ISO,字典序即时间序),version 键取版本号(compareVersion)。 */
+const byAxis = (
+  axis: SortAxis,
+): ((a: { version: string; at: string }, b: { version: string; at: string }) => number) =>
+  axis === 'published' ? (a, b) => b.at.localeCompare(a.at) : (a, b) => compareVersion(b.version, a.version)
 
 /** HTML 实体解码(正则抽 RSS 标题的通道——标题不走 cheerio,无 text() 自带解码)。 */
 const NAMED_ENTITIES: Record<string, string> = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }
@@ -226,8 +236,8 @@ const inlineWhatsnew = ($: cheerio.CheerioAPI, node: unknown): string => {
 }
 
 /** 版本块原文合成(IDEA):Data Services releases 条目 → `## 版本` + whatsnew 摘要 bullet。
- *  ① 杂项滤除(version 缺失/非版本样态);② **版本号降排**(2026-09-03 用户定案,替代
- *  此前的 date 倒排):LTS 分支(2025.3.x)补丁晚于主线 2026.2 发布,时间序会让两线交错
+ *  ① 杂项滤除(version 缺失/非版本样态);② 按源声明排序轴降排(IDEA 即 version,
+ *  2026-09-03 用户定案,替代此前的 date 倒排):LTS 分支(2025.3.x)补丁晚于主线 2026.2 发布,时间序会让两线交错
  *  (2025.3.6.1 插在 2026.2.1 与 2026.2 之间),版本号序按版本线聚集、LTS 归尾——latest
  *  判定同轴(jetbrainsInfo);③ 首个 p 是「…is out with the following improvements:」
  *  模板句,与版本行冗余,剔(同 ADR-0050 噪音剔除取向);其余 p(尾段 blog post 链接、
@@ -236,6 +246,7 @@ const inlineWhatsnew = ($: cheerio.CheerioAPI, node: unknown): string => {
  *  语义。含全部正式版(块内滚动榜在前端过滤)。 */
 export function composeWhatsnewMarkdown(
   releases: ReadonlyArray<JetbrainsRelease>,
+  axis: SortAxis,
   blogByVersion?: ReadonlyMap<string, string>,
 ): string {
   return releases
@@ -248,7 +259,7 @@ export function composeWhatsnewMarkdown(
       (r): r is { version: string; at: string; html: string } =>
         typeof r.version === 'string' && VERSION_LIKE_RE.test(r.version),
     )
-    .sort((a, b) => compareVersion(b.version, a.version))
+    .sort(byAxis(axis))
     .map((r) => {
       // fragment 模式(第三参 false):默认 document 模式会把顶层 p/ul 包进 <html>,
       // $.root().children() 拿到的就是 html 元素而非顶层段落
@@ -282,10 +293,13 @@ export function composeWhatsnewMarkdown(
 
 // ---- 编排(Java ChangelogService)----
 
-/** 外源发布信息:latest(稳定轴)+ times(版本号→ISO,大 tile 版本榜单一行一版本带时间)。 */
+/** 外源发布信息:latest(稳定轴)+ times(版本号→ISO,大 tile 版本榜单一行一版本带时间)。
+ *  stable 仅 npm 源声明(dist-tags.stable 稳定通道版本,可落后 latest 甚多,如 claude-code)——
+ *  缺省 = 该源无稳定通道概念(GitHub/JetBrains 源、npm 无 stable tag),前端不渲染药丸。 */
 export interface ReleaseInfo {
   latest: string | null
   times: Record<string, string>
+  stable?: string | null
 }
 
 /** IO 协作器,测试注入假实现(Java 的函数式接口对应物)。 */
@@ -323,6 +337,8 @@ export interface Snapshot {
   /** 每版本发布时间(版本号→ISO);发布信息失败/版本号错位为空条目,前端行级降级不显示。 */
   releaseTimes: Record<string, string>
   translatedVersions: string[]
+  /** npm dist-tags.stable(稳定通道版本,Modal 行级「稳定」药丸);非 npm 源/未取到 null。 */
+  stableVersion: string | null
   /** 供按需补译免重切 */
   blocks: Blocks
 }
@@ -386,6 +402,7 @@ export class ChangelogService {
       await this.translations.load(blocks.blocks.map((b) => b.raw)),
       row.released_at,
       parseTimes(row.release_times),
+      row.stable_version,
     )
   }
 
@@ -398,12 +415,12 @@ export class ChangelogService {
   async translateVersions(titles: string[]): Promise<Snapshot> {
     return this.exclusive(async () => {
       if (!this.memory) await this.doRefresh() // 冷启动兜底(锁内,不可走加锁版防自锁)
-      const { blocks, releasedAt, releaseTimes } = this.memory!
+      const { blocks, releasedAt, releaseTimes, stableVersion } = this.memory!
       const byRaw = await this.translations.load(blocks.blocks.map((b) => b.raw))
       for (const b of blocks.blocks) {
         if (titles.includes(b.title)) await this.translateIfMissing(b, byRaw)
       }
-      this.memory = this.assemble(blocks, byRaw, releasedAt, releaseTimes)
+      this.memory = this.assemble(blocks, byRaw, releasedAt, releaseTimes, stableVersion)
       return this.memory
     })
   }
@@ -423,7 +440,7 @@ export class ChangelogService {
     // 落库,日期钉死到下个 6h cron 窗(2026-08-31 二次线上消失的另一半洞)。
     const prev = await this.db
       .selectFrom('changelog_snapshots')
-      .select(['release_times', 'released_at'])
+      .select(['release_times', 'released_at', 'stable_version'])
       .where('source', '=', this.source)
       .executeTakeFirst()
     const releaseTimes = { ...parseTimes(prev?.release_times), ...(info?.times ?? {}) }
@@ -431,6 +448,8 @@ export class ChangelogService {
     // 发布信息失败时保留旧值而非 null(同「一旦取到不丢」取向)
     const latestTime = info?.latest ? (info.times[info.latest] ?? '') : ''
     const releasedAt = latestTime.trim() ? latestTime : (prev?.released_at ?? null)
+    // stableVersion 同款合并:本轮发布信息失败(不含 stable)保留旧值
+    const stableVersion = info?.stable?.trim() ? info.stable : (prev?.stable_version ?? null)
     const fetchedAt = nowIso()
     await this.db
       .insertInto('changelog_snapshots')
@@ -439,6 +458,7 @@ export class ChangelogService {
         raw_markdown: raw,
         released_at: releasedAt,
         release_times: JSON.stringify(releaseTimes),
+        stable_version: stableVersion,
         fetched_at: fetchedAt,
       })
       .onConflict((oc) =>
@@ -446,11 +466,12 @@ export class ChangelogService {
           raw_markdown: raw,
           released_at: releasedAt,
           release_times: JSON.stringify(releaseTimes),
+          stable_version: stableVersion,
           fetched_at: fetchedAt,
         }),
       )
       .execute()
-    this.memory = this.assemble(blocks, byRaw, releasedAt, releaseTimes)
+    this.memory = this.assemble(blocks, byRaw, releasedAt, releaseTimes, stableVersion)
   }
 
   private exclusive<T>(fn: () => Promise<T>): Promise<T> {
@@ -494,6 +515,7 @@ export class ChangelogService {
     byRaw: Map<string, string>,
     releasedAt: string | null,
     releaseTimes: Record<string, string>,
+    stableVersion: string | null,
   ): Snapshot {
     let markdown = blocks.prefix
     const translatedVersions: string[] = []
@@ -506,7 +528,7 @@ export class ChangelogService {
         markdown += b.raw
       }
     }
-    return { markdown, releasedAt, releaseTimes, translatedVersions, blocks }
+    return { markdown, releasedAt, releaseTimes, translatedVersions, stableVersion, blocks }
   }
 }
 
@@ -524,6 +546,7 @@ export function changelogRoutes(services: ChangelogServices): Hono<AuthEnv> {
     markdown: s.markdown,
     releasedAt: s.releasedAt, // 失败时显式 null(输出不省略),前端日期行降级「—」
     releaseTimes: s.releaseTimes, // 空表 = 发布信息失败/重启恢复窗口,前端版本行时间降级不显示
+    stableVersion: s.stableVersion, // null = 非 npm 源/未取到,前端「稳定」药丸不渲染
     translatedVersions: s.translatedVersions,
   })
   return new Hono<AuthEnv>()
@@ -572,13 +595,14 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
         headers: githubToken ? { Authorization: `Bearer ${githubToken}` } : undefined,
       }),
     )
-  /** times(版本→ISO/日期)→ 最新稳定版(比较器参数化,轴随源):全量最新可能是预发布
-   *  (codex alpha 日均 2-3 个),稳定轴与 npm dist-tags.latest 同。GitHub/tag 源时间序
-   *  (等长 ISO 串字典序即时间序),IDEA 版本号序(与列表同轴,LTS 补丁 date 更晚也不夺 latest)。 */
-  const latestStable = (times: Record<string, string>, desc: (a: string, b: string) => number): string | null =>
-    Object.keys(times)
-      .filter((v) => !isPrereleaseVersion(v))
-      .sort(desc)[0] ?? null
+  /** times(版本→ISO/日期)→ 最新稳定版(轴 = 源声明 sortAxis,与列表排序同一声明、
+   *  比较器同一单点 byAxis):全量最新可能是预发布(codex alpha 日均 2-3 个),稳定轴
+   *  与 npm dist-tags.latest 同。 */
+  const latestStable = (times: Record<string, string>, axis: SortAxis): string | null =>
+    Object.entries(times)
+      .map(([version, at]) => ({ version, at }))
+      .filter((e) => !isPrereleaseVersion(e.version))
+      .sort(byAxis(axis))[0]?.version ?? null
   /** Releases → 发布信息:tag 去前缀、版本样态过滤;latest = 最新稳定版:releasedAt 供
    *  块内鲜度回退,取全量最新会把预发布时间戳算到稳定版头上(codex alpha 日均 2-3 个)。 */
   const releasesInfo = (releases: Awaited<ReturnType<typeof fetchGithubReleases>>): ReleaseInfo => {
@@ -589,7 +613,7 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
         if (VERSION_LIKE_RE.test(v)) times[v] = release.published_at
       }
     }
-    return { latest: latestStable(times, (a, b) => times[b]!.localeCompare(times[a]!)), times }
+    return { latest: latestStable(times, def.sortAxis), times }
   }
   /** npm 日期源(降级语义住此):失败吞错返回 null——调用方 merge 沿用旧值,不阻塞主链路。
    *  npmPackage 缺失(IDEA 非 npm 发行)是注册表配置错误,上抛不吞:该函数唯一消费方是
@@ -601,10 +625,14 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
       const root = JSON.parse(
         await fetchText(`https://registry.npmjs.org/${npmPackage}`, 30_000),
       ) as {
-        'dist-tags'?: { latest?: string }
+        'dist-tags'?: { latest?: string; stable?: string }
         time?: Record<string, string>
       }
-      return { latest: root['dist-tags']?.latest ?? null, times: root.time ?? {} }
+      return {
+        latest: root['dist-tags']?.latest ?? null,
+        times: root.time ?? {},
+        stable: root['dist-tags']?.stable ?? null,
+      }
     } catch (e) {
       console.warn('拉取发布信息失败,版本时间降级:', e)
       return null
@@ -640,9 +668,9 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
     }
     return byVersion
   }
-  /** releases → 发布信息:version/date 直用(无 tag 前缀问题);latest 稳定轴取版本号
-   *  最大(与列表同轴,compareVersion)——上游数组按产品分支序排,数组序/date 序都不
-   *  作为轴(LTS 补丁 date 可以晚于主线,2025.3.6.2 实测 date 2026-09-03)。 */
+  /** releases → 发布信息:version/date 直用(无 tag 前缀问题);latest 稳定轴 = 源声明
+   *  sortAxis(IDEA 即 version,与列表同轴)——上游数组按产品分支序排,数组序/date 序
+   *  都不作为轴(LTS 补丁 date 可以晚于主线,2025.3.6.2 实测 date 2026-09-03)。 */
   const jetbrainsInfo = (releases: JetbrainsRelease[]): ReleaseInfo => {
     const times: Record<string, string> = {}
     for (const r of releases) {
@@ -650,7 +678,7 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
         times[r.version] = r.date
       }
     }
-    return { latest: latestStable(times, (a, b) => compareVersion(b, a)), times }
+    return { latest: latestStable(times, def.sortAxis), times }
   }
   // 取数单 adapter(ADR-0053):原文四形态(ADR-0050——changelogUrl 直取 raw CHANGELOG.md;
   // githubReleasesApiUrl 合成 release 正文;jetbrainsReleasesApiUrl 合成 whatsnew 摘要;
@@ -671,12 +699,12 @@ export function prodChangelogDeps(source: ChangelogSourceId = DEFAULT_CHANGELOG_
     }
     if (releasesApiUrl) {
       const releases = await fetchGithubReleases()
-      return { markdown: composeReleasesMarkdown(releases), releaseInfo: releasesInfo(releases) }
+      return { markdown: composeReleasesMarkdown(releases, def.sortAxis), releaseInfo: releasesInfo(releases) }
     }
     if (jetbrainsApiUrl) {
       const releases = await fetchJetbrainsReleases()
       const blogByVersion = await fetchJetbrainsBlogPosts()
-      return { markdown: composeWhatsnewMarkdown(releases, blogByVersion), releaseInfo: jetbrainsInfo(releases) }
+      return { markdown: composeWhatsnewMarkdown(releases, def.sortAxis, blogByVersion), releaseInfo: jetbrainsInfo(releases) }
     }
     const info = await fetchNpmReleaseInfo()
     if (!info) throw new Error(`npm packument(${def.npmPackage}) 拉取失败,无法合成版本流`)

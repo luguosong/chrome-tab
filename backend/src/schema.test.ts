@@ -64,6 +64,7 @@ const CHANGELOG_SNAPSHOTS: Col[] = [
   ['raw_markdown', 'TEXT', 1, null, 0],
   ['released_at', 'TEXT', 0, null, 0],
   ['release_times', 'TEXT', 1, "'{}'", 0],
+  ['stable_version', 'TEXT', 0, null, 0],
   ['fetched_at', 'TEXT', 1, null, 0],
 ]
 const SESSIONS: Col[] = [

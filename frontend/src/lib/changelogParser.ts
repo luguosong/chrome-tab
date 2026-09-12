@@ -1,3 +1,5 @@
+import { isPrereleaseVersion } from 'chrome-tab-shared'
+
 export type ChangelogSection = { name: string; items: string[] }
 export type ChangelogVersion = { title: string; sections: ChangelogSection[]; top: string[] }
 
@@ -53,4 +55,15 @@ export function inline(s: string): string {
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
+}
+
+/** 「最新稳定版」= 列表序中首个稳定版号(ADR-0050 稳定轴):全览位列表含预发布占位
+ *  行,但「最新」只认正式版——同一源对「最新」只给一个答案;Modal 副标题/「最新」
+ *  药丸与图标块内榜首共用。
+ *  跨层协议:依赖后端列表序 = 源声明排序轴(shared sortAxis)降序,直取源信上游文件
+ *  惯例(通常同轴)。曾考虑后端透传 ReleaseInfo.latest 消除协议——否决:改 API 契约
+ *  + 快照落库的面,且推算语义与渲染天然一致(latest 必在列表中);若上游文件序乱掉
+ *  的事故发生再升级。 */
+export function latestStableTitle(versions: readonly { title: string }[]): string | undefined {
+  return versions.find((v) => !isPrereleaseVersion(v.title))?.title
 }

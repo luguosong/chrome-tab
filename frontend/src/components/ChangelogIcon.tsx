@@ -1,5 +1,6 @@
 import { changelogSourceOf, getChangelogSource, isLtsVersion, isPrereleaseVersion } from 'chrome-tab-shared'
 import { useChangelog } from '../hooks/useChangelog'
+import { latestStableTitle } from '../lib/changelogParser'
 import { timeAgo } from '../lib/timeAgo'
 import { isFreshRow } from '../lib/tileBody'
 import { ICON_SCALE, tileFont } from '../lib/iconLayout'
@@ -37,8 +38,11 @@ export default function ChangelogIconBody({
   // 块内信号位剔预发布(ADR-0050):预发布发布频繁(如 codex alpha 日均 2-3 个)近乎常亮
   // 红点,稀释「正式版更新了」的信号;Modal 全览位仍全量。最新版/鲜度随过滤后口径。
   const versions = (data?.versions ?? []).filter((v) => !isPrereleaseVersion(v.title))
-  const latest = versions[0]
-  const fresh = latest ? (times[latest.title] ?? data?.releasedAt ?? null) : null
+  // 榜首 = 最新稳定版(与 Modal「最新」同一答案;单点与跨层协议见 latestStableTitle doc)
+  const latest = latestStableTitle(versions)
+  // npm stable 通道版本(与 Modal 同一答案):与「最新」不同才另标,文字缀形态与 LTS 同
+  const stable = data?.stableVersion ?? null
+  const fresh = latest ? (times[latest] ?? data?.releasedAt ?? null) : null
   const fontSize = tileFont(ICON_SCALE, 'secondary')
   const sourceDef = getChangelogSource(source)
 
@@ -74,6 +78,17 @@ export default function ChangelogIconBody({
                   {isLtsVersion(v.title, sourceDef) && (
                     <span className="shrink-0 text-white/40" style={{ fontSize }}>
                       LTS
+                    </span>
+                  )}
+                  {/* stable 通道标记:与「最新」同版本时不重复标(accent 已表达);
+                      title 补语义——「稳定」裸词在行内无上下文 */}
+                  {v.title === stable && stable !== latest && (
+                    <span
+                      className="shrink-0 text-white/40"
+                      style={{ fontSize }}
+                      title="npm stable 通道当前指向的版本"
+                    >
+                      稳定
                     </span>
                   )}
                 </span>

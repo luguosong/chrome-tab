@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_CHANGELOG_SOURCE, type ChangelogSourceId } from 'chrome-tab-shared'
+import { CHANGELOG_SOURCES, DEFAULT_CHANGELOG_SOURCE, type ChangelogSourceId } from 'chrome-tab-shared'
 import { createApp } from './app'
 import { openDb, type Db } from './db'
 import { bootstrap } from './seed'
@@ -153,7 +153,7 @@ describe('composeReleasesMarkdown(GitHub Releases 正文合成,ADR-0050)', () =>
   ]
 
   it('published_at 倒排(不保 API 序);rust-v 剥离;杂项 tag 滤除;占位/空正文仅标题;## 降 ###;噪音小节整节剔除', () => {
-    expect(composeReleasesMarkdown(RELEASES)).toBe(
+    expect(composeReleasesMarkdown(RELEASES, 'published')).toBe(
       '## 0.152.0-alpha.6\n' +
         '## 0.151.5\n' +
         '## 0.151.0\n### New Features\n- Added a grace period for MCP tools.\n\n### Bug Fixes\n- Fixed a crash.\n',
@@ -161,22 +161,27 @@ describe('composeReleasesMarkdown(GitHub Releases 正文合成,ADR-0050)', () =>
   })
 
   it('纯 prose 正文(无条目行)仅标题——空块判定与 parseChangelog 渲染语义对齐,占位措辞变化自愈', () => {
-    expect(composeReleasesMarkdown([{ tag_name: 'v1.0.0', body: 'Misc polish.\nSecond line.' }])).toBe('## 1.0.0\n')
+    expect(composeReleasesMarkdown([{ tag_name: 'v1.0.0', body: 'Misc polish.\nSecond line.' }], 'published')).toBe(
+      '## 1.0.0\n',
+    )
   })
 
   it('``` 围栏内的 ## 行原样(不降级);噪音小节后的 #### 标题恢复内容', () => {
     expect(
-      composeReleasesMarkdown([
-        {
-          tag_name: 'v2.0.0',
-          body: '## Setup\n```\n## not a heading\n```\n\n## Changelog\n- diff link\n\n#### Notes\n- real content\n',
-        },
-      ]),
+      composeReleasesMarkdown(
+        [
+          {
+            tag_name: 'v2.0.0',
+            body: '## Setup\n```\n## not a heading\n```\n\n## Changelog\n- diff link\n\n#### Notes\n- real content\n',
+          },
+        ],
+        'published',
+      ),
     ).toBe('## 2.0.0\n### Setup\n```\n## not a heading\n```\n\n#### Notes\n- real content\n')
   })
 
   it('空表 → 空串', () => {
-    expect(composeReleasesMarkdown([])).toBe('')
+    expect(composeReleasesMarkdown([], 'published')).toBe('')
   })
 })
 
@@ -191,7 +196,9 @@ describe('composeWhatsnewMarkdown(IDEA:Data Services whatsnew 摘要合成版本
   ].join('\n')
 
   it('li→bullet、a→markdown 链接(链接文本剥方括号)、em/code 保行内、实体解码、首段模板句剔、尾段散文段也作 bullet', () => {
-    expect(composeWhatsnewMarkdown([{ version: '2026.2.2', date: '2026-09-02', whatsnew: WHATSNEW_HTML }])).toBe(
+    expect(
+      composeWhatsnewMarkdown([{ version: '2026.2.2', date: '2026-09-02', whatsnew: WHATSNEW_HTML }], 'version'),
+    ).toBe(
       '## 2026.2.2\n' +
         '- Loading a remote OpenAPI specification no longer fails. [[IJPL-63202](https://youtrack.jetbrains.com/issue/IJPL-63202/)]\n' +
         '- Markdown *checkboxes* now have `better` contrast & visibility.\n' +
@@ -200,26 +207,42 @@ describe('composeWhatsnewMarkdown(IDEA:Data Services whatsnew 摘要合成版本
   })
 
   it('无 whatsnew(2018 前老版本)落空块仅版本行,与 codex 预发布空壳同语义', () => {
-    expect(composeWhatsnewMarkdown([{ version: '2018.3.2', date: '2018-12-01' }])).toBe('## 2018.3.2\n')
-    expect(composeWhatsnewMarkdown([{ version: '2026.2.1', date: '2026-08-10', whatsnew: '' }])).toBe('## 2026.2.1\n')
+    expect(composeWhatsnewMarkdown([{ version: '2018.3.2', date: '2018-12-01' }], 'version')).toBe('## 2018.3.2\n')
+    expect(composeWhatsnewMarkdown([{ version: '2026.2.1', date: '2026-08-10', whatsnew: '' }], 'version')).toBe(
+      '## 2026.2.1\n',
+    )
   })
 
   it('版本号降排不保 API 序;LTS 补丁线归尾——2025.3.6.1(07-29 发布)排在 2026.2(07-16)之后,与 date 序相反;杂项滤除(缺 version / 非版本样态)', () => {
-    const md = composeWhatsnewMarkdown([
-      { version: '2026.2', date: '2026-07-16', whatsnew: '<ul><li>big feature.</li></ul>' },
-      { date: '2026-08-12', whatsnew: '<ul><li>no version.</li></ul>' },
-      { version: 'EAP-blurb', date: '2026-09-01' },
-      { version: '2025.3.6.1', date: '2026-07-29', whatsnew: '<ul><li>lts patch.</li></ul>' },
-    ])
+    const md = composeWhatsnewMarkdown(
+      [
+        { version: '2026.2', date: '2026-07-16', whatsnew: '<ul><li>big feature.</li></ul>' },
+        { date: '2026-08-12', whatsnew: '<ul><li>no version.</li></ul>' },
+        { version: 'EAP-blurb', date: '2026-09-01' },
+        { version: '2025.3.6.1', date: '2026-07-29', whatsnew: '<ul><li>lts patch.</li></ul>' },
+      ],
+      'version',
+    )
     expect(md).toBe('## 2026.2\n- big feature.\n## 2025.3.6.1\n- lts patch.\n')
   })
 
   it('合成结果可被 splitBlocks 按版本切开(## 边界对齐)', () => {
-    const md = composeWhatsnewMarkdown([
-      { version: '2026.2.2', date: '2026-09-02', whatsnew: WHATSNEW_HTML },
-      { version: '2018.3.2', date: '2018-12-01' },
-    ])
+    const md = composeWhatsnewMarkdown(
+      [
+        { version: '2026.2.2', date: '2026-09-02', whatsnew: WHATSNEW_HTML },
+        { version: '2018.3.2', date: '2018-12-01' },
+      ],
+      'version',
+    )
     expect(splitBlocks(md).blocks.map((b) => b.title)).toEqual(['2026.2.2', '2018.3.2'])
+  })
+})
+
+describe('CHANGELOG_SOURCES 注册表(排序轴一致性)', () => {
+  it('配 ltsBranches 的源必须声明 version 轴——LTS「归尾」以版本号序为前提,时间轴下 LTS 补丁会与主线交错(药丸在而归尾失效)', () => {
+    const lts = CHANGELOG_SOURCES.filter((d) => d.ltsBranches?.length)
+    expect(lts.map((d) => d.id)).toContain('idea') // 前提钉:规则非空转(idea 现配 2025.3)
+    for (const def of lts) expect(def.sortAxis).toBe('version')
   })
 })
 
@@ -247,6 +270,7 @@ describe("博客文章合成(IDEA:What's New 长文 → Blog post 小节;小版�
         { version: '2026.2', date: '2026-07-16', whatsnew: '<ul><li>highlights.</li></ul>' },
         { version: '2026.1.5', date: '2026-08-12' },
       ],
+      'version',
       new Map([['2026.2', BLOG_HTML]]),
     )
     expect(md).toBe(
@@ -558,6 +582,27 @@ describe('ChangelogService 编排(ADR-0017)', () => {
     })
   })
 
+  it('stableVersion 落库只增不减:dist-tags.stable 透传,发布信息失败保留旧值,重启恢复不丢', async () => {
+    const db = openDb(':memory:').db
+    const s = makeService(db, {
+      fetchUpstream: async () => ({
+        markdown: RAW,
+        releaseInfo: { latest: '3.0', times: { '3.0': '2026-08-30T00:00:00.000Z' }, stable: '2.0' },
+      }),
+    })
+    expect((await s.get()).stableVersion).toBe('2.0')
+
+    // 下轮发布信息失败(npm 分支吞错语义):stable 保留旧值,不翻 null
+    const s2 = makeService(db, { fetchUpstream: async () => ({ markdown: RAW, releaseInfo: null }) })
+    await s2.refresh()
+    expect((await s2.get()).stableVersion).toBe('2.0')
+
+    // 重启恢复:快照表 stable_version 列重建镜像,零外呼
+    const restarted = makeService(db, { fetchUpstream: async () => { throw new Error('不可达') } })
+    await restarted.loadFromDb()
+    expect((await restarted.get()).stableVersion).toBe('2.0')
+  })
+
   it('按需补译:指定旧版 → 译一块、入库、重拼;重复请求哈希命中零 LLM', async () => {
     const db = openDb(':memory:').db
     const s = makeService(db)
@@ -818,12 +863,40 @@ describe('codex prodChangelogDeps:fetchUpstream 走 GitHub Releases 合成(ADR-0
   })
 })
 
-describe('Matt Skills prodChangelogDeps:发布日期走 GitHub Releases', () => {
+describe('claude-code prodChangelogDeps:发布信息走 npm dist-tags(stable 通道透传)', () => {
   const realFetch = globalThis.fetch
   afterEach(() => {
     globalThis.fetch = realFetch
   })
 
+  it('CHANGELOG.md 直取 + dist-tags.latest/stable、time 表透传', async () => {
+    globalThis.fetch = vi.fn(async (url: unknown) => {
+      if (String(url).includes('registry.npmjs')) {
+        return new Response(
+          JSON.stringify({
+            'dist-tags': { latest: '2.1.263', stable: '2.1.236' },
+            time: { '2.1.263': '2026-09-06T02:07:58.391Z', '2.1.236': '2026-08-19T18:45:14.539Z' },
+          }),
+        )
+      }
+      return new Response('# Changelog\n\n## 2.1.263\n- a\n')
+    }) as typeof fetch
+    await expect(prodChangelogDeps('claude-code').fetchUpstream()).resolves.toEqual({
+      markdown: '# Changelog\n\n## 2.1.263\n- a\n',
+      releaseInfo: {
+        latest: '2.1.263',
+        times: { '2.1.263': '2026-09-06T02:07:58.391Z', '2.1.236': '2026-08-19T18:45:14.539Z' },
+        stable: '2.1.236',
+      },
+    })
+  })
+})
+
+describe('Matt Skills prodChangelogDeps:发布日期走 GitHub Releases', () => {
+  const realFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = realFetch
+  })
   it('v 前缀标签映射为 CHANGELOG 版本号', async () => {
     // matt 形态 = changelogUrl 直取 + GitHub 日期:fetchUpstream 内两路各拉各的,mock 按 URL 分流
     globalThis.fetch = vi.fn(async (url: unknown) => {
@@ -889,6 +962,7 @@ describe('GET /api/changelog', () => {
       markdown: '# Changelog\n\n## 3.0\n- 三\n\n## 2.0\n- 二\n\n## 1.0\n- one\n',
       releasedAt: null, // npm 拉失败 → 显式 null(输出不省略),前端日期行降级「—」
       releaseTimes: {},
+      stableVersion: null, // 发布信息失败/非 npm 源 → 显式 null,前端「稳定」药丸不渲染
       translatedVersions: ['3.0', '2.0'],
     })
   })

@@ -12,6 +12,9 @@
  */
 export type ChangelogSourceId = 'claude-code' | 'matt-skills' | 'codex' | 'idea'
 
+/** 版本列表序与「最新稳定版」判定的共用排序维度(源定义的显式字段)。 */
+export type SortAxis = 'published' | 'version'
+
 export interface ChangelogSourceDef {
   id: ChangelogSourceId
   /** 图标名称行 / Drawer 标题的显示名。 */
@@ -36,9 +39,16 @@ export interface ChangelogSourceDef {
   changelogUrl?: string
   /** 无原文源的详情外链(GitHub Releases 列表页);有原文的源不设。 */
   releasesUrl?: string
+  /** 排序轴——列表序与「最新稳定版」判定的共用排序维度(后端比较器单点消费,声明与
+   *  消费过同一 seam):'published' 按发布时间(npm time / GitHub published_at 均等长
+   *  ISO 串,字典序即时间序);'version' 按版本号数值段逐段比较(2026.10 > 2026.2,
+   *  字典序会错)。直取源(changelogUrl)的列表序信上游文件惯例(通常同轴),latest
+   *  判定仍按轴。 */
+  sortAxis: SortAxis
   /** LTS 分支清单(如 ['2025.3']):上游 API 无 LTS 标志,人工维护(每多一个 LTS 年度分支
    *  追加一项)。命中版本号(分支号本身或其补丁版)的列表行尾标 LTS 药丸——版本号序下
-   *  LTS 补丁线归尾,与主线 2026.x 按版本线聚集,标记消「2025 系怎么排这么靠后」之惑。 */
+   *  LTS 补丁线归尾,与主线 2026.x 按版本线聚集,标记消「2025 系怎么排这么靠后」之惑
+   *  (前提 sortAxis = 'version',时间轴下 LTS 补丁会与主线交错;注册表一致性测试把关)。 */
   ltsBranches?: string[]
 }
 
@@ -68,6 +78,7 @@ export const CHANGELOG_SOURCES: readonly ChangelogSourceDef[] = [
     repositoryUrl: 'https://github.com/anthropics/claude-code',
     npmPackage: '@anthropic-ai/claude-code',
     changelogUrl: 'https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md',
+    sortAxis: 'published',
   },
   {
     id: 'matt-skills',
@@ -76,6 +87,7 @@ export const CHANGELOG_SOURCES: readonly ChangelogSourceDef[] = [
     npmPackage: 'mattpocock-skills',
     githubReleasesApiUrl: 'https://api.github.com/repos/mattpocock/skills/releases?per_page=100',
     changelogUrl: 'https://raw.githubusercontent.com/mattpocock/skills/main/CHANGELOG.md',
+    sortAxis: 'published',
   },
   {
     id: 'codex',
@@ -83,6 +95,7 @@ export const CHANGELOG_SOURCES: readonly ChangelogSourceDef[] = [
     repositoryUrl: 'https://github.com/openai/codex',
     npmPackage: '@openai/codex',
     githubReleasesApiUrl: 'https://api.github.com/repos/openai/codex/releases?per_page=100',
+    sortAxis: 'published',
   },
   {
     id: 'idea',
@@ -92,6 +105,7 @@ export const CHANGELOG_SOURCES: readonly ChangelogSourceDef[] = [
     // 版本号全数字段(2026.2 / 2026.2.0.1),现有 STABLE_VERSION_RE 判别零特判。
     jetbrainsReleasesApiUrl: 'https://data.services.jetbrains.com/products/releases?code=IIU',
     blogFeedUrl: 'https://blog.jetbrains.com/idea/category/releases/feed/',
+    sortAxis: 'version',
     ltsBranches: ['2025.3'],
   },
 ]

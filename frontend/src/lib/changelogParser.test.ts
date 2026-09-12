@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { inline, parseChangelog } from './changelogParser'
+import { inline, latestStableTitle, parseChangelog } from './changelogParser'
 
 const MD = `# Changelog
 
@@ -58,5 +58,18 @@ describe('inline', () => {
 
   it('javascript: URL 不被链接化（强制 https?: 前缀）', () => {
     expect(inline('[x](javascript:alert(1))')).toBe('[x](javascript:alert(1))')
+  })
+})
+
+describe('latestStableTitle(「最新」= 列表序首个稳定版,ADR-0050 稳定轴)', () => {
+  it('预发布在前不夺 latest:列表序首个稳定版胜出', () => {
+    expect(
+      latestStableTitle([{ title: '0.152.0-alpha.6' }, { title: '0.151.0' }, { title: '0.150.0' }]),
+    ).toBe('0.151.0')
+  })
+
+  it('全预发布 / 空列表 → undefined(副标题如实报数,不永显加载中)', () => {
+    expect(latestStableTitle([{ title: '1.0.0-alpha.1' }])).toBeUndefined()
+    expect(latestStableTitle([])).toBeUndefined()
   })
 })

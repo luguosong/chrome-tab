@@ -5,11 +5,13 @@ import { DEFAULT_CHANGELOG_SOURCE, type ChangelogSourceId } from 'chrome-tab-sha
 
 /** /api/changelog 响应(ADR-0017/0022):markdown = 拼装后全文,releasedAt = 最新版
  *  发布时间,releaseTimes = 每版本发布时间全表(版本号→ISO,空表 = 发布信息失败/恢复窗口,
- *  版本行时间降级不显示),translatedVersions = 已译版本号(UI 对不在此列的版本渲染「翻译」按钮)。 */
+ *  版本行时间降级不显示),stableVersion = npm stable 通道版本(可落后「最新」,null =
+ *  非 npm 源/未取到,「稳定」药丸不渲染),translatedVersions = 已译版本号(UI 对不在此列的版本渲染「翻译」按钮)。 */
 type ChangelogResponse = {
   markdown: string
   releasedAt: string | null
   releaseTimes: Record<string, string>
+  stableVersion?: string | null
   translatedVersions: string[]
 }
 
@@ -17,6 +19,7 @@ export type ChangelogData = {
   versions: ChangelogVersion[]
   releasedAt: string | null
   releaseTimes: Record<string, string>
+  stableVersion: string | null
   translatedVersions: string[]
 }
 
@@ -44,6 +47,7 @@ export function useChangelog(source: ChangelogSourceId = DEFAULT_CHANGELOG_SOURC
         versions: parseChangelog(body.markdown ?? ''),
         releasedAt: body.releasedAt ?? null,
         releaseTimes: body.releaseTimes ?? {},
+        stableVersion: body.stableVersion ?? null,
         translatedVersions: body.translatedVersions ?? [],
       }
     },

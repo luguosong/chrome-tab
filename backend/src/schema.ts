@@ -71,11 +71,12 @@ CREATE TABLE IF NOT EXISTS changelog_translations (
 -- 多源快照(ADR-0020):每源一行。前身 changelog_snapshot(id=1 单行)已废弃——
 -- SQLite 改不了已存表的 CHECK,旧库中该表原地留存为孤儿缓存,不迁移(快照可重建)。
 CREATE TABLE IF NOT EXISTS changelog_snapshots (
-    source        TEXT PRIMARY KEY NOT NULL,
-    raw_markdown  TEXT NOT NULL,
-    released_at   TEXT,
-    release_times TEXT NOT NULL DEFAULT '{}',
-    fetched_at    TEXT NOT NULL
+    source         TEXT PRIMARY KEY NOT NULL,
+    raw_markdown   TEXT NOT NULL,
+    released_at    TEXT,
+    release_times  TEXT NOT NULL DEFAULT '{}',
+    stable_version TEXT,
+    fetched_at     TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
     session_id  TEXT PRIMARY KEY NOT NULL,
@@ -306,6 +307,9 @@ export function migrate(sqlite: SqliteConnection) {
   // releaseTimes 落库(81888ea 曾以「迁移重」不动,2026-08-31 二次线上消失推翻):JSON
   // 存量行 '{}' = 重启恢复空表,等首轮刷新补齐——不回填,日期 immutable 无历史可补。
   addMissingColumns(sqlite, 'changelog_snapshots', { release_times: "TEXT NOT NULL DEFAULT '{}'" })
+  // stable 药丸(npm dist-tags.stable,2026-09-07):存量行 NULL = 重启恢复窗口暂无标记,
+  // 等首轮刷新补齐——与 released_at 同款「一旦取到不丢」。
+  addMissingColumns(sqlite, 'changelog_snapshots', { stable_version: 'TEXT' })
   // iconScale 撤除用户调节(ADR-0033):存量列删除;新库 DDL 无此列,天然 no-op。
   dropLegacyColumns(sqlite, 'layout_settings', ['icon_scale'])
 }
@@ -396,6 +400,8 @@ export interface ChangelogSnapshotsTable {
   released_at: string | null
   /** 版本号→ISO 的 JSON;发布时间 immutable,落库只增不减 */
   release_times: string
+  /** npm dist-tags.stable(稳定通道版本);非 npm 源/未取到为 NULL */
+  stable_version: string | null
   fetched_at: string
 }
 

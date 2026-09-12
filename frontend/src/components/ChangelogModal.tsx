@@ -1,13 +1,7 @@
 import { useMemo } from 'react'
-import {
-  getChangelogSource,
-  hasChangelogRaw,
-  isLtsVersion,
-  isPrereleaseVersion,
-  type ChangelogSourceId,
-} from 'chrome-tab-shared'
+import { getChangelogSource, hasChangelogRaw, isLtsVersion, type ChangelogSourceId } from 'chrome-tab-shared'
 import { useChangelog, useTranslateStatus, useTranslateVersions } from '../hooks/useChangelog'
-import { inline } from '../lib/changelogParser'
+import { inline, latestStableTitle } from '../lib/changelogParser'
 import DetailModal, { QueryPane } from './DetailModal'
 
 /**
@@ -17,7 +11,9 @@ import DetailModal, { QueryPane } from './DetailModal'
  * staleTime,与网格图标共享同源 queryKey 缓存),展示完整版本列表(纵向滚动)。
  * 真实 CHANGELOG 无日期、无 ### 小节,条目直接挂在版本下,故按「发布时间线」呈现:
  * 左侧连续细轨 + 每版本一个节点,最新版 accent 高亮 + 「最新」药丸,旧版弱化;每版本
- * 日期 = 后端 releaseTimes 全表(ADR-0022)绝对日期,失败/错位降级不显示。
+ * 日期 = 后端 releaseTimes 全表(ADR-0022)绝对日期,失败/错位降级不显示。npm stable
+ * 通道版本(stableVersion,可落后「最新」)行尾加中性「稳定」药丸——与「最新」同版本
+ * 时只留「最新」一个答案;副标题同步提示,免滚动半屏才见标记。
  * 未译版本(不在 translatedVersions 内)显示「翻译」按钮 → POST /translate 按需补译,
  * 译毕后端持久化、invalidate 重拉即变中文(ADR-0017)。pending 期间轮询译制阶段
  * (GET /translate/status):按钮显「译中 Ns…/排队中…」,hover 显当前候选模型——
@@ -57,9 +53,11 @@ export default function ChangelogModal({
 
   const versions = data?.versions ?? []
   const times = data?.releaseTimes ?? {}
-  // 「最新」= 最新稳定版(与块内滚动榜同轴,ADR-0050):全览位列表含预发布占位行,但
-  // accent/药丸不给 alpha——同一源对「最新」只给一个答案
-  const latest = versions.find((v) => !isPrereleaseVersion(v.title))?.title
+  // 「最新」= 列表序首个稳定版(ADR-0050 稳定轴;单点与跨层协议见 latestStableTitle doc)
+  const latest = latestStableTitle(versions)
+  // npm stable 通道版本(后端 dist-tags.stable):与「最新」不同才有第二个标记可说
+  const stable = data?.stableVersion ?? null
+  const stableDistinct = stable != null && stable !== latest
   const translated = useMemo(() => new Set(data?.translatedVersions ?? []), [data?.translatedVersions])
 
   // 译制失败感知:后端译制失败仅记日志、保持英文仍返 200(如 LLM 网关不可达),
@@ -90,7 +88,7 @@ export default function ChangelogModal({
               {data === undefined
                 ? '加载中…'
                 : latest
-                  ? `共 ${versions.length} 个版本 · 最新 ${latest}`
+                  ? `共 ${versions.length} 个版本 · 最新 ${latest}` + (stableDistinct ? ` · 稳定 ${stable}` : '')
                   : `共 ${versions.length} 个版本`}
             </p>
           </div>
@@ -160,6 +158,17 @@ export default function ChangelogModal({
                           {isLatest && (
                             <span className="rounded-full bg-accent/20 px-2 py-0.5 text-meta font-medium leading-none text-accent">
                               最新
+                            </span>
+                          )}
+                          {/* stable 通道标记:中性描边(非 accent——强调位只归「最新」一个),
+                              与 LTS 药丸同形态;stableVersion 与行标题相等匹配(直取源标题
+                              即裸版本号,与 npm dist-tag 同形) */}
+                          {stableDistinct && v.title === stable && (
+                            <span
+                              title="npm stable 通道当前指向的版本"
+                              className="rounded-full border border-white/25 px-2 py-0.5 text-meta leading-none text-white/55"
+                            >
+                              稳定
                             </span>
                           )}
                           {isLtsVersion(v.title, def) && (
