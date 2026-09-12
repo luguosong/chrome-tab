@@ -1,5 +1,5 @@
 import type { PendingClue, ProviderDef } from './providers/def'
-import { callModel, isCandidateExhausted, modelCandidates } from './translate'
+import { callModel, CandidateExhausted, modelCandidates, runCandidateChain } from './translate'
 
 /**
  * LLM 自动核验(ADR-0058,2026-09-05「当天时效」grill 定案):待核验线索 → 抓厂家
@@ -31,7 +31,7 @@ export interface VerifiedDraft {
 /**
  * 一次核验的四态:accept(入档)/ reject(噪音或低置信,留线索触人)/ error(调用失败,
  * 下轮重试)/ insufficient(判自家新模型但草稿校验不过——判别与抽取解耦,spec 1.5 裁决 7:
- * 触人等人工裁决,不重试;信源 7 天窗内更新概率低,重试 = 每轮烧强模型看同一页)。
+ * 活动窗内触人供人工判断,不重试;信源 7 天窗内更新概率低,重试 = 每轮烧强模型看同一页)。
  */
 export type VerifyOutcome =
   | { outcome: 'accept'; draft: VerifiedDraft }
@@ -64,8 +64,8 @@ const SYSTEM_PROMPT = `你是 AI 模型档案核验员。给你一条来自某�
 
 /**
  * 核验一条线索。fetchText/llm 环境经参数注入(测试零真网);LLM 走 callModel 网关
- * (ADR-0037 限流闸自动生效),候选链逐个尝试(同 makeBatchTranslator 口径:可换路
- * 错误换下一候选,不可换路(401/断网)直接 error)。
+ * (ADR-0037 限流闸自动生效),候选链经 runCandidateChain(ADR-0060:软失效哨兵 ∪
+ * isCandidateExhausted 两源换路;不可换路(401/断网)直接 error)。
  */
 export async function verifyClue(
   def: ProviderDef<unknown>,
@@ -89,35 +89,27 @@ export async function verifyClue(
     }
   }
   const user = `厂家:${def.label}\n线索:${clue.title}\n线索信源页:${clue.sourceUrl}\n线索唯一键:${clue.modelKey}\n\n${sources.join('\n\n')}`
-  let lastErr: unknown = null
   // 核验固定强模型(票 07,裁决 11):VERIFY_LLM_MODEL 单值即链长 1,语义自锁「不降级」
   // ——判定质量不被译制链 free 弱模型拖累;缺省/空串(compose 缺键注入 '')回退译制候选链
   const fixedModel = env.VERIFY_LLM_MODEL?.trim()
   const models = fixedModel ? [fixedModel] : modelCandidates(env)
-  for (const model of models) {
-    try {
-      const { content } = await call(model, apiKey, SYSTEM_PROMPT, user)
-      if (content === null) {
-        lastErr = new Error('LLM 响应无 content')
-        continue
-      }
-      const parsed = parseLlmJson(content)
-      if (parsed === null) {
-        lastErr = new Error(`LLM 输出非 JSON:${content.slice(0, 200)}`)
-        continue
-      }
-      if (parsed.isNoise === true) return { outcome: 'reject', reason: typeof parsed.reason === 'string' ? parsed.reason : 'LLM 判定非自家新模型' }
-      const draft = validateDraft(parsed.draft, urls)
-      if (draft !== null) return { outcome: 'accept', draft }
-      // isNoise !== true 但草稿校验不过:判别(自家新模型)与抽取(规格证据)解耦,
-      // 不伪装 reject(spec 1.5)——留 insufficient 触人等人工,不重试
-      return { outcome: 'insufficient', reason: typeof parsed.reason === 'string' ? parsed.reason : '草稿字段校验未过(信源依据不足)' }
-    } catch (e) {
-      if (!isCandidateExhausted(e)) return { outcome: 'error', reason: String(e) }
-      lastErr = e
-    }
-  }
-  return { outcome: 'error', reason: `全候选失效:${lastErr}` }
+  // 软失效(200 无 content / 非 JSON)抛哨兵换下一候选,与硬错误两源合一(ADR-0060);
+  // reject/insufficient 是确定答案(answer 停链),不换候选
+  const verdict = await runCandidateChain<Exclude<VerifyOutcome, { outcome: 'error' }>>(models, async (model) => {
+    const { content } = await call(model, apiKey, SYSTEM_PROMPT, user)
+    if (content === null) throw new CandidateExhausted('LLM 响应无 content')
+    const parsed = parseLlmJson(content)
+    if (parsed === null) throw new CandidateExhausted(`LLM 输出非 JSON:${content.slice(0, 200)}`)
+    if (parsed.isNoise === true) return { outcome: 'reject', reason: typeof parsed.reason === 'string' ? parsed.reason : 'LLM 判定非自家新模型' }
+    const draft = validateDraft(parsed.draft, urls)
+    if (draft !== null) return { outcome: 'accept', draft }
+    // isNoise !== true 但草稿校验不过:判别(自家新模型)与抽取(规格证据)解耦,
+    // 不伪装 reject(spec 1.5)——留 insufficient 在活动窗内触人,不重试
+    return { outcome: 'insufficient', reason: typeof parsed.reason === 'string' ? parsed.reason : '草稿字段校验未过(信源依据不足)' }
+  })
+  if (verdict.status === 'answer') return verdict.value
+  if (verdict.status === 'fatal') return { outcome: 'error', reason: String(verdict.err) }
+  return { outcome: 'error', reason: `全候选失效:${verdict.lastErr}` }
 }
 
 /** LLM 输出 → JSON 对象;剥 markdown 围栏与前后杂文(取首个 { 到末个 })。 */

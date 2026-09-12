@@ -58,6 +58,55 @@ export function isCandidateExhausted(e: unknown): boolean {
   )
 }
 
+// ---- 候选链 runner(ADR-0060:三份手抄循环的骨架与两源换路分类单点)----
+
+/** 软失效哨兵:200 但产物不可用(批量的「配对数 0」、块的「空 content」、核验的「非
+ *  JSON」)。什么算不可用是调用方域知识,住各 attempt 内以 throw 表达;runner 将本哨兵
+ *  与 isCandidateExhausted 两源合一判「此候选没戏,换下一个」。 */
+export class CandidateExhausted extends Error {}
+
+/** 候选链一次运行的终局三态:answer = 某候选给出确定答案(含核验 reject/insufficient
+ *  这类「确定否定」);exhausted = 全链疲竭,带 lastErr(空链时为 null,对齐核验
+ *  「全候选失效:null」现状);fatal = 不可换路错误停链,带候选上下文(调用方致命
+ *  日志行含「候选 i/N model」前缀,不携带则零 diff 验收破功)。index 为 1 基序数,
+ *  对齐日志/onPhase 口径。 */
+export type ChainVerdict<T> =
+  | { status: 'answer'; value: T }
+  | { status: 'exhausted'; lastErr: unknown }
+  | { status: 'fatal'; err: unknown; model: string; index: number }
+
+/** 两源换路判定的合一式(哨兵软失效 ∪ 网关硬错误):runner 的分类核心,本文件各
+ *  attempt 的逐候选「换下一」日志同用一式——分类单点,永不双写。 */
+function isChainExhausted(e: unknown): boolean {
+  return e instanceof CandidateExhausted || isCandidateExhausted(e)
+}
+
+/**
+ * 候选链 runner(ADR-0060,修订 ADR-0032 决策二的保留范围:循环骨架与换路分类收编,
+ * 出口映射仍留调用方):候选迭代 + 两源分类 + lastErr 记账 + 链尽聚合。attempt 是
+ * 调用方域闭包(callModel + 软失效判定 + 自产成败日志);onAttempt 每候选尝试前上报
+ * (块译制 onPhase 专用,其余调用方不传)。runner 自身零日志(ADR-0032「原语不打印
+ * 日志」纪律);链构造(含核验 VERIFY_LLM_MODEL 单值)在调用方,runner 只迭代传入
+ * 数组,永不自行补链。
+ */
+export async function runCandidateChain<T>(
+  models: string[],
+  attempt: (model: string, index: number, total: number) => Promise<T>,
+  onAttempt?: (model: string, index: number, total: number) => void,
+): Promise<ChainVerdict<T>> {
+  let lastErr: unknown = null // null 非 undefined:空链时核验侧拼「全候选失效:null」,对齐改线前现状
+  for (const [i, model] of models.entries()) {
+    onAttempt?.(model, i + 1, models.length)
+    try {
+      return { status: 'answer', value: await attempt(model, i + 1, models.length) }
+    } catch (e) {
+      if (!isChainExhausted(e)) return { status: 'fatal', err: e, model, index: i + 1 }
+      lastErr = e
+    }
+  }
+  return { status: 'exhausted', lastErr }
+}
+
 /**
  * 发请求闸门(free 渠道限额 2026-08-27 告示:5 次/分钟、500 次/天、100 万 Token/天):
  * 进程级单例,连续网关请求至少间隔 env LLM_MIN_REQUEST_INTERVAL_MS(0/空/非数回默认
@@ -171,8 +220,8 @@ export function parseNumberedTranslations(output: string, count: number): (strin
 
 /**
  * 生产译制器:无 Key 恒返全 null(Service 据此保持原文,同 changelog「Key 缺失拒绝」)。
- * 候选链逐模型尝试(换路判定 isCandidateExhausted,见本文件地基区);一批全链失效上抛
- * 由 warn 吞掉(条目哈希未写下轮重试),部分成功即接受——漏行条目下轮再来。
+ * 候选链经 runCandidateChain(ADR-0060:软失效哨兵 ∪ isCandidateExhausted 两源换路);
+ * 一批全链失效由 warn 吞掉(条目哈希未写下轮重试),部分成功即接受——漏行条目下轮再来。
  */
 export function makeBatchTranslator(
   systemPrompt: string,
@@ -194,44 +243,41 @@ export function makeBatchTranslator(
       // 批内重新编号 1..N(非全局连续):解析器按批内序号配对,全局编号会让第 2 批起
       // 恒解析为空(code-review 复现确认)
       const user = buildNumberedList(batch)
-      let lastErr: unknown
-      let fatal = false // key/网络类错(401 等):换模型无益,终止后续批,但已得成果照常返回
-      for (const [i, model] of models.entries()) {
+      const verdict = await runCandidateChain(models, async (model, i, total) => {
         // 逐候选一行结果日志(changelog 同款,2026-08-25 静默事故的血泪:无日志无法区分
-        // 限流/内容过滤/模型禁用)
+        // 限流/内容过滤/模型禁用);成败日志住 attempt——runner 零日志(ADR-0032 纪律)
         const log = (outcome: string, extra = '') =>
-          console.warn(`[${logTag}] 批 ${start / BATCH_SIZE + 1} 候选 ${i + 1}/${models.length} ${model} ${outcome}${extra}`)
+          console.warn(`[${logTag}] 批 ${start / BATCH_SIZE + 1} 候选 ${i}/${total} ${model} ${outcome}${extra}`)
+        const beganAt = Date.now()
         try {
-          const beganAt = Date.now()
           const { content, resp } = await callModel(model, apiKey, systemPrompt, user)
           // 200 但拿不到 content / 解析零配对:视同候选失效换下一个(changelog 同款静默失败形态)
           const parsed = content == null ? [] : parseNumberedTranslations(content, batch.length)
           const paired = parsed.filter((t) => t != null).length
           if (paired === 0) {
             // || 而非 ??:content 为空串时 ''?.slice 产 '' 且 '' ?? _ 不回落,排障切片两头皆丢
-            lastErr = new Error(`响应无可配对译文:${content?.slice(0, 200) || resp.slice(0, 200)}`)
+            const err = new CandidateExhausted(`响应无可配对译文:${content?.slice(0, 200) || resp.slice(0, 200)}`)
             log(`失败(${Date.now() - beganAt}ms),换下一候选`)
-            continue
+            throw err
           }
-          for (const [j, t] of parsed.entries()) if (t != null) out[start + j] = t
           log(`成功 ${paired}/${batch.length} 条(${Date.now() - beganAt}ms)`)
-          break // 本批已有产出即止(漏行下轮重试,不换候选重试——限流友好)
+          return parsed // 本批已有产出即止(runner answer 即停,不换候选重试——限流友好)
         } catch (e) {
-          if (!isCandidateExhausted(e)) {
-            // 上抛会把前面批次已付 token 的成果一并丢弃——warn 后终止,带着成果返回
-            log(`不可换路错误,终止本批后续: ${e}`)
-            lastErr = e
-            fatal = true
-            break
-          }
-          lastErr = e
-          log(`候选失效,换下一: ${e}`)
+          if (e instanceof CandidateExhausted) throw e // 软失效日志已记,不双写
+          // 上抛会把前面批次已付 token 的成果一并丢弃——warn 后由映射终止,带着成果返回
+          if (isChainExhausted(e)) log(`候选失效,换下一: ${e}`)
+          else log(`不可换路错误,终止本批后续: ${e}`)
+          throw e
         }
-      }
-      if (fatal) break // 全局性错误(401/断网)对后续批同样成立,不再无谓尝试
-      // 本批全链失效不上抛:前面批次成果照常返回入库,本批条目保持 null 下轮重试
-      if (!batch.some((_, j) => out[start + j] != null)) {
-        console.warn(`[${logTag}] 批 ${start / BATCH_SIZE + 1} 全候选失效:`, lastErr)
+      })
+      if (verdict.status === 'answer') {
+        // 部分配对即收:漏行条目保持 null,调用方下轮免费重试
+        for (const [j, t] of verdict.value.entries()) if (t != null) out[start + j] = t
+      } else if (verdict.status === 'fatal') {
+        break // 全局性错误(401/断网)对后续批同样成立,不再无谓尝试
+      } else if (!batch.some((_, j) => out[start + j] != null)) {
+        // 本批全链失效不上抛:前面批次成果照常返回入库,本批条目保持 null 下轮重试
+        console.warn(`[${logTag}] 批 ${start / BATCH_SIZE + 1} 全候选失效:`, verdict.lastErr)
       }
     }
     return out
@@ -249,8 +295,8 @@ export type BlockTranslator = (
 ) => Promise<string | null>
 
 /**
- * 单块分段译制 maker:块切段(splitSegments)→ 串行逐段过候选链(换路判定
- * isCandidateExhausted,与 makeBatchTranslator 同构)→ 段序拼接。Key 缺失恒返 null。
+ * 单块分段译制 maker:块切段(splitSegments)→ 串行逐段过候选链(runCandidateChain,
+ * ADR-0060)→ 段序拼接。Key 缺失恒返 null。
  * 串行逐段(free 渠道限流敏感,不并发);非末段译文补尾换行——LLM 偶尔丢,缺了会与
  * 下段粘行(末段不补:单段块行为不变,块级兜底在调用方 assemble)。
  */
@@ -266,38 +312,36 @@ export function makeBlockTranslator(
     const segments = splitSegments(block)
     /** 单段走候选链:候选失效换下一个,全链失效上抛(整块失败,调用方 warn 降级)。 */
     const translateSegment = async (seg: string, si: number): Promise<string> => {
-      let lastErr: unknown
-      for (const [i, model] of models.entries()) {
-        onPhase?.(model, i + 1, models.length)
-        const startedAt = Date.now()
-        // 每次尝试一行结果日志(线上排障:段/模型/序号/耗时/status+body/走向,全部收容器 stdout)
-        const log = (outcome: string, extra = '') =>
-          console.warn(
-            `[${logTag}] 段${si + 1}/${segments.length} 候选 ${i + 1}/${models.length} ${model} ${outcome}(${Date.now() - startedAt}ms)${extra}`,
-          )
-        try {
-          const { content, resp } = await callModel(model, apiKey, systemPrompt, seg)
-          // 200 但拿不到译文(空补全/内容过滤/非 JSON 响应体)也按候选失效换下一个——
-          // 2026-08-25 线上即此形态静默失败:后台有 200 调用记录、无后续候选、译文缺位。
-          // 空串同判:空译文会以哈希主键终身缓存,该版本永久渲染成空行(批量路径
-          // parseNumberedTranslations 的 !text 守卫同款)
-          if (content == null || !content.trim()) {
-            lastErr = new Error(`HTTP 200 但响应无 content:${resp.slice(0, 200)}`)
-            log(`失败: ${lastErr}`, ',换下一候选')
-            continue
-          }
-          log(`成功: ${content.length} 字符`)
-          return content
-        } catch (e) {
-          if (!isCandidateExhausted(e)) {
-            log(`失败: ${e}`, ',换模型无益,放弃本次译制')
+      const verdict = await runCandidateChain(
+        models,
+        async (model, i, total) => {
+          const startedAt = Date.now()
+          // 每次尝试一行结果日志(线上排障:段/模型/序号/耗时/status+body/走向,全部收容器 stdout)
+          const log = (outcome: string, extra = '') =>
+            console.warn(
+              `[${logTag}] 段${si + 1}/${segments.length} 候选 ${i}/${total} ${model} ${outcome}(${Date.now() - startedAt}ms)${extra}`,
+            )
+          try {
+            const { content, resp } = await callModel(model, apiKey, systemPrompt, seg)
+            // 200 但拿不到译文(空补全/内容过滤/非 JSON 响应体)也按候选失效换下一个——
+            // 2026-08-25 线上即此形态静默失败:后台有 200 调用记录、无后续候选、译文缺位。
+            // 空串同判:空译文会以哈希主键终身缓存,该版本永久渲染成空行(批量路径
+            // parseNumberedTranslations 的 !text 守卫同款)
+            if (content == null || !content.trim()) throw new CandidateExhausted(`HTTP 200 但响应无 content:${resp.slice(0, 200)}`)
+            log(`成功: ${content.length} 字符`)
+            return content
+          } catch (e) {
+            if (e instanceof CandidateExhausted) log(`失败: ${e}`, ',换下一候选') // 软失效日志在此,不双写
+            else if (isChainExhausted(e)) log(`失败: ${e} ${(e as { body?: string }).body ?? ''}`, ',换下一候选')
+            else log(`失败: ${e}`, ',换模型无益,放弃本次译制')
             throw e
           }
-          lastErr = e
-          log(`失败: ${e} ${(e as { body?: string }).body ?? ''}`, ',换下一候选')
-        }
-      }
-      throw lastErr
+        },
+        onPhase,
+      )
+      if (verdict.status === 'answer') return verdict.value
+      if (verdict.status === 'fatal') throw verdict.err
+      throw verdict.lastErr
     }
     const out: string[] = []
     for (const [si, seg] of segments.entries()) out.push(await translateSegment(seg, si))

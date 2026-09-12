@@ -1,0 +1,14 @@
+# 候选链循环单点化 runCandidateChain:verdict 三态收编骨架,出口映射留调用方(修订 ADR-0032 决策二)
+
+背景:架构评审 2026-09-12 候选 3——「候选链循环 + 疲竭分类 + 致命/继续」骨架手抄三份(`makeBatchTranslator` 批内候选循环、`makeBlockTranslator.translateSegment`、`verifyClue` 候选循环,~25 行 ×3)。ADR-0032 决策二当年**有意**只收编「调一次模型」原语,把成功判定、失败策略、onPhase、日志全部留外层(「两种译制器的契约差异是真实域需求」)——循环骨架与换路分类从此无唯一 owner:真正三抄的不是循环本身,而是 `catch → isCandidateExhausted(e) → 换/停` 这个分类决策加 lastErr 记账,链语义一变(如新增可重试状态)三处齐改,是 drifting 温床。grilling 定案(2026-09-12,两轮 11 问,`.scratch/候选链/issues/01`):verdict 联合类型 runner,而非评审原案的出口策略声明式——批量的致命处理跨外层批循环(批 N 致命停批 N+1),声明式策略要么表达不了、要么退化成回调配置(伪抽象)。
+
+**决策:translate.ts 增 `runCandidateChain(models, attempt, onAttempt?) → ChainVerdict<T>`,收编循环骨架与两源换路分类;出口映射留调用方薄壳;严格零行为变化。**
+
+1. **两源分类单点**:「换下一个候选」有两个来源——①软失效(200 但产物不可用:批量「配对数 0」、块「空 content」、核验「非 JSON」),判定是**调用方域知识**,住各 attempt 内以 `throw new CandidateExhausted(...)`(哨兵类)表达;②硬错误(403/404/429/5xx/超时/no_available_channel),判定是**网关知识**(isCandidateExhausted)。合一式 `isChainExhausted(e) = e instanceof CandidateExhausted || isCandidateExhausted(e)` 为 runner 分类核心,各 attempt 的逐候选「换下一/放弃」日志分支同用一式——分类永不双写。
+2. **verdict 三态**:`answer`(某候选给出确定答案——含核验 reject/insufficient 这类「确定否定」,停链)/ `exhausted`(全链疲竭,带 lastErr;空链时为 **null** 非 undefined,保核验「全候选失效:null」字符串现状)/ `fatal`(不可换路错误停链,携带 `{err, model, index(1 基)}` 候选上下文——序数 1 基对齐日志/onPhase 口径;该上下文当前映射不消费,签名按票面钉死备用)。
+3. **逐候选日志住 attempt**:致命日志行的耗时上下文(`startedAt`)只在 attempt 闭包可达,故 attempt 内 `catch → 分类 → 记日志 → 原样 rethrow`(软失效哨兵先记后抛,catch 里 `instanceof` 直通防双写);出口映射是纯控制流——批量 answer 部分配对入槽、exhausted warn 续批、fatal break 外层批循环带部分成果;块 answer 返译文、exhausted/fatal 皆 throw;核验 answer 即返、exhausted/fatal 同归 `{outcome:'error'}`。runner 自身零日志,延续 ADR-0032 决策三纪律;onAttempt 每候选尝试前上报(块 onPhase 专用)。
+4. **出口 = 两种域语义 × 三种实现形态**(ADR-0032「契约差异留外层」的准确化):**吞错待重试**——批量(warn「全候选失效」+ 本批留 null 续批;致命 warn + 停后续批带成果返回)与核验(error 落表下轮重试)是**同一域语义、不同账本**(译文表 null 槽 vs 线索 verify_state='error');**致命上抛**——仅版本块(exhausted throw lastErr / fatal throw err,调用方 warn 整块降级)。
+5. **验收 = 零行为变化(ADR-0032 先例)**:三侧既有真链路测试(translate.test.ts 批量链 / changelog.test.ts 候选链+分段 12 用例 / modelVerify.test.ts 链与环境)**零修改**全绿——实测 134/134,全量 588/588,tsc 零错;「任何既有用例须改动才能绿」即切分切错的红旗。runner 新增 5 条契约单测(软失效换路 tracer / 两源同链混跑链尽带末次 lastErr / fatal 上下文 1 基序数 / 空链 lastErr=null / onAttempt 与 attempt 同口径),落 translate.test.ts(ADR-0032 决策五「测试跟 interface 走」)。
+6. **固定强模型不受影响**:链构造(核验 VERIFY_LLM_MODEL 单值 = 链长 1,票 07 裁决 11「不降级」)在调用方、runner 之前完成;runner 只迭代传入数组,永不自行补链。
+
+**代价与取舍。** 换来:链语义(换路判定、lastErr 记账、链尽聚合)修正改一处;未来第 4 个链消费者拿 runner + attempt 闭包即可,不再复制分类骨架。付出:attempt 闭包里 catch/rethrow 的少量样板(为保逐候选日志零 diff 的必要代价);软失效走异常控制流(哨兵类,消息沿现状);verdict.fatal 的候选上下文字段暂无消费者。CONTEXT.md 立独立词条「候选链」(网关级术语,服务译制与核验——「更新日志」词条内既有散文句仍准确,不改写)。**未来候选:网关模块拆分**——ADR-0032 判「第二用途真出现时再拆不迟」,现消费者已有四家(批量/块/核验/ai-agent),拆 llm.ts 单独立项。附记:本 ADR 编号原定 0059,动工时并行会话已有在途草稿 0059(icon codec),让位改 0060;CONTEXT.md 词条因在途批占用文件,随其后提交(见票 01 Comments)。

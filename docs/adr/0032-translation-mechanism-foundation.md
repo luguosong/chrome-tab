@@ -11,3 +11,5 @@
 5. **测试随符号迁**:`extractContent`/`modelCandidates` 的纯函数用例随符号迁入 translate.test.ts;changelog 候选链真链路测试留 changelog.test.ts——测试跟着它所穿过的 interface 走(prodChangelogDeps 是 changelog 的组装),不跟着符号的出生地走。
 
 **代价与取舍。** 换来:LLM 网关纪律(换候选判定、超时、响应解析、哈希派生)修正改一处;changelog.ts 恢复纯域身份(478→423 行);下次网关事故只打一份补丁。付出:无运行时代价(纯归位 + 内层函数提取,调用序列与日志逐字节不变);translate.ts 从 127 行增至 189 行(地基 + 原语 + 批量协议同居一文件,深度即目的)。code-review 随本 ADR 落地三项修正:①changelog 直译路径补空串守卫(`content: ""` 曾会以哈希主键终身缓存、该版本永久空白——批量路径的 `!text` 守卫同款);②`modelCandidates` 纯分隔符(如 `","`)过滤后回默认,候选链恒空曾会让调用方 `throw undefined`;③`ai/agent.ts` 的私有网关地址副本改 import 本文件(它本是网关的第二个消费者,证明「搬家而非新层」的判断只对了一半——但接线后反而是本决策的单点收益)。后续候选:译文表三份读写的收敛与 `TRANSLATED_SOURCES` 清单进编译器视野(架构评审候选 5)仍在域侧,不在本 ADR 范围。
+
+**注记(2026-09-12,ADR-0060):决策二的保留范围收窄——「循环骨架 + 换路分类」收编进 `runCandidateChain`(软失效哨兵 `CandidateExhausted` ∪ `isCandidateExhausted` 两源合一),三份手抄循环(批量/块/核验)改经 runner。成功判定与出口映射仍留外层(verbatim:两种域语义 × 三种实现形态),逐候选日志住各 attempt(致命行的耗时上下文只在 attempt 闭包可达),runner 维持决策三的零日志纪律。零行为变化验收:三侧既有测试零修改全绿。**

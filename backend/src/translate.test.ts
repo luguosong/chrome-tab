@@ -2,12 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDb } from './db'
 import {
   buildNumberedList,
+  CandidateExhausted,
   extractContent,
   makeBatchTranslator,
   makeBlockTranslator,
   makeTranslationStore,
   modelCandidates,
   parseNumberedTranslations,
+  runCandidateChain,
   sha256,
   splitSegments,
 } from './translate'
@@ -103,6 +105,66 @@ describe('modelCandidates(free 优先,CHANGELOG_LLM_MODEL 逗号分隔覆盖)', 
 
   it('纯分隔符(如 ",")过滤后为空 → 回默认:候选链恒空会让调用方 throw undefined', () => {
     expect(modelCandidates({ CHANGELOG_LLM_MODEL: ',,,' } as NodeJS.ProcessEnv)).toEqual(modelCandidates())
+  })
+})
+
+describe('runCandidateChain(两源换路分类单点,ADR-0060;attempt 注入零真网)', () => {
+  it('软失效哨兵换下一候选,拿到答案即停链', async () => {
+    const seen: string[] = []
+    const verdict = await runCandidateChain(['m1', 'm2'], async (model) => {
+      seen.push(model)
+      if (model === 'm1') throw new CandidateExhausted('200 但产物不可用')
+      return `答案@${model}`
+    })
+    expect(seen).toEqual(['m1', 'm2'])
+    expect(verdict).toEqual({ status: 'answer', value: '答案@m2' })
+  })
+
+  it('两源同链混跑:软失效与硬错误(429)都换路,链尽 exhausted 带末次 lastErr', async () => {
+    const attempts: string[] = []
+    const verdict = await runCandidateChain(['m1', 'm2'], async (model) => {
+      attempts.push(model)
+      if (model === 'm1') throw new CandidateExhausted('200 但产物不可用')
+      const e = new Error('限流')
+      ;(e as { status?: number }).status = 429
+      throw e
+    })
+    expect(attempts).toEqual(['m1', 'm2'])
+    expect(verdict).toMatchObject({ status: 'exhausted', lastErr: { message: '限流' } })
+  })
+
+  it('不可换路错误即停链:fatal 带候选上下文(1 基序数),前序软失效不干扰', async () => {
+    const err = new Error('key 无效')
+    const verdict = await runCandidateChain(['m1', 'm2'], async (model) => {
+      if (model === 'm1') throw new CandidateExhausted('软')
+      throw err
+    })
+    expect(verdict).toEqual({ status: 'fatal', err, model: 'm2', index: 2 })
+  })
+
+  it('空链:exhausted 且 lastErr 为 null(对齐核验「全候选失效:null」现状)', async () => {
+    const verdict = await runCandidateChain([], async () => 'x')
+    expect(verdict).toEqual({ status: 'exhausted', lastErr: null })
+  })
+
+  it('onAttempt 每候选尝试前上报(1 基序数/总数);attempt 收同口径参数', async () => {
+    const phases: Array<[string, number, number]> = []
+    const attemptParams: Array<[string, number, number]> = []
+    const verdict = await runCandidateChain(
+      ['m1', 'm2'],
+      async (model, index, total) => {
+        attemptParams.push([model, index, total])
+        if (model === 'm1') throw new CandidateExhausted('软')
+        return 'ok'
+      },
+      (model, index, total) => phases.push([model, index, total]),
+    )
+    expect(phases).toEqual([
+      ['m1', 1, 2],
+      ['m2', 2, 2],
+    ])
+    expect(attemptParams).toEqual(phases)
+    expect(verdict).toEqual({ status: 'answer', value: 'ok' })
   })
 })
 
