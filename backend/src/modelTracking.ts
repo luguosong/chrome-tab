@@ -25,20 +25,7 @@ import { MOONSHOT_DEF } from './providers/moonshot'
 import { OPENAI_DEF } from './providers/openai'
 import { ALIBABA_DEF } from './providers/alibaba'
 import type { BaselineRow, MatchedHit, PendingClue, ProviderDef } from './providers/def'
-import {
-  AA_EVALUATOR,
-  AA_EVALUATOR_LABEL,
-  AA_LLM_URL,
-  AA_MEDIA_ENDPOINTS,
-  aaAutoMappings,
-  aaMappingIndex,
-  aaRowsFromLlms,
-  aaRowsFromMedia,
-  beijingToday,
-  type AaBaselineRef,
-  type AaEvalRow,
-  type AaMappingRow,
-} from './aaEvaluations'
+import { makeAaEvaluations, type AaEvaluations } from './aaEvaluations'
 import { verifyClue } from './modelVerify'
 import { makeClueLedger, type ClueLedger } from './clueLedger'
 
@@ -91,11 +78,8 @@ export interface BaselineModel {
   events?: Array<Omit<ModelEvent, 'id'>>
 }
 
-/** 种子快照(2026-09-05 由七个代码基线 + AA_MODEL_MAP 一次性生成;空库首启用,此后不再更新)。 */
-const SEED = seed as {
-  models: BaselineModel[]
-  aaMapping: Array<{ slug: string; provider: ModelProviderId; officialId: string }>
-}
+/** 种子快照的 models 段(2026-09-05 由七个代码基线 + AA_MODEL_MAP 一次性生成;空库首启用,此后不再更新;aaMapping 段归 aaEvaluations.ts 读)。 */
+const SEED = seed as { models: BaselineModel[] }
 
 /**
  * 全部跟踪厂家的 provider 定义(取数差异面,ADR-0038):pollProvider 轮询入口的
@@ -138,14 +122,17 @@ const nowIso = () => new Date().toISOString()
 export class ModelTrackingService {
   /** 线索账本(票 .scratch/线索账本/01):model_pending_clues 域行为的单点(入库/核验结果/活动窗)。 */
   private readonly ledger: ClueLedger
+  /** 评测接入(票 .scratch/评测生命周期/01):六路取数、映射、快照、状态与读侧投影的单点。 */
+  private readonly aa: AaEvaluations
 
   constructor(
     private readonly db: Db,
     private readonly deps: ModelTrackingDeps,
-    /** Artificial Analysis API Key(issues/08);空串 = 未配置:评测轮询整体跳过,读侧 configured=false。 */
-    private readonly aaApiKey = '',
+    /** Artificial Analysis API Key(issues/08);语义单点在 aaEvaluations 工厂(未配置 = 轮询 no-op、读侧 configured=false)。 */
+    aaApiKey = '',
   ) {
     this.ledger = makeClueLedger(db)
+    this.aa = makeAaEvaluations(db, deps.fetchText, aaApiKey)
   }
 
   /** deps 注入 env 或进程 env(auto 核验用)。 */
@@ -160,6 +147,7 @@ export class ModelTrackingService {
    */
   async init(): Promise<void> {
     await this.bootstrapFromSeed()
+    await this.aa.ensureSeeded()
     void this.pollProvider()
   }
 
@@ -242,22 +230,6 @@ export class ModelTrackingService {
           .execute()
       }
     }
-    const aaExisting = await this.db.selectFrom('model_aa_mapping').select('slug').execute()
-    if (aaExisting.length === 0) {
-      for (const m of SEED.aaMapping) {
-        await this.db
-          .insertInto('model_aa_mapping')
-          .values({
-            slug: m.slug,
-            provider: m.provider,
-            official_id: m.officialId,
-            verified: 'manual',
-            created_at: nowIso(),
-            updated_at: nowIso(),
-          })
-          .execute()
-      }
-    }
   }
 
   /** 种子/auto 行入库共用:insert 行(verified 区分);冲突(已存在)静默跳过——修订不覆盖。 */
@@ -316,30 +288,9 @@ export class ModelTrackingService {
       byModel.set(e.model_id, list)
     }
     const sources = await this.db.selectFrom('model_fetch_status').selectAll().execute()
-    // 评测快照行(issues/08):按模型聚合;状态行与厂家信源状态隔离(model_evaluation_status)
-    const evalRows = await this.db
-      .selectFrom('model_evaluations')
-      .selectAll()
-      .where('evaluator', '=', AA_EVALUATOR)
-      .execute()
-    const evalsByModel = new Map<number, TrackedModel['evaluations']>()
-    for (const r of evalRows) {
-      const list = evalsByModel.get(r.model_id) ?? []
-      list.push({
-        evaluator: AA_EVALUATOR_LABEL,
-        benchmark: r.benchmark,
-        score: r.score,
-        version: r.version,
-        date: r.snapshot_date,
-        url: r.url,
-      })
-      evalsByModel.set(r.model_id, list)
-    }
-    const evalStatus = await this.db
-      .selectFrom('model_evaluation_status')
-      .selectAll()
-      .where('evaluator', '=', AA_EVALUATOR)
-      .executeTakeFirst()
+    // 评测读侧经模块(aaEvaluations.ts):行投影与信封是评测方知识,wire 形态直出
+    const evalsByModel = await this.aa.byModel()
+    const evalStatus = await this.aa.status()
     // 线索读侧经「线索账本」(徽标窗 × 触人集,ADR-0058 注记 2026-09-10 轴对齐——
     // 窗口与集合策略单点于 clueLedger.ts);此处只做 wire 投影(date/url)
     const clues = await this.ledger.visibleClues()
@@ -372,11 +323,7 @@ export class ModelTrackingService {
         stale: s.stale === 1,
         lastSuccessAt: s.last_success_at ?? null,
       })),
-      evaluations: {
-        configured: this.aaApiKey !== '',
-        stale: evalStatus === undefined ? false : evalStatus.stale === 1,
-        lastSuccessAt: evalStatus?.last_success_at ?? null,
-      },
+      evaluations: evalStatus,
     }
   }
 
@@ -396,7 +343,7 @@ export class ModelTrackingService {
       this.runPoll(def).catch((e) => console.error(`模型追踪(${def.label})取数失败:`, e)),
     )
     jobs.push(
-      this.pollEvaluations().catch((e) => console.error('模型追踪(评测)取数失败:', e)),
+      this.aa.poll().catch((e) => console.error('模型追踪(评测)取数失败:', e)),
     )
     await Promise.all(jobs)
   }
@@ -604,140 +551,6 @@ export class ModelTrackingService {
     }
   }
 
-  /**
-   * 评测一轮(issues/08):LLM 主表 + 五个媒体榜单六路取数(单 Key 限额 1000/日,ADR-0058 起
-   * 2h 节奏 ×6 路 ≈ 72 请求/日,远低于限额;结果落库即缓存,满足 API 缓存要求)。任一路
-   * 失败 → 整轮按评测源失败处理:保留最后成功快照、只标评测陈旧,不影响任何厂家档案。
-   * 未配置 Key 时整体 no-op(不取数、不写状态)。分数漂移只更新快照行(不产动态);
-   * 唯产动态的口径 = 运行期模型首次获得评测行(kind 'evaluated',首配接入整轮静默;
-   * Benchmark 方法/版本变化免费 API 不暴露、不可检测,为已知上限)。
-   */
-  async pollEvaluations(): Promise<void> {
-    if (this.aaApiKey === '') return
-    try {
-      const headers = { 'x-api-key': this.aaApiKey }
-      const llmJson = await this.deps.fetchText(AA_LLM_URL, 30_000, { headers })
-      // 同名自动映射(ADR-0058,formerly aaUnmappedClues 落线索):LLM 主表条目 slug
-      // 归一与基线行同名且不在映射表 → 直接 upsert(verified='auto')——媒体端点不参与
-      // (无 creator 且 slug 带厂商前缀,同名误配风险)。upsert 失败只记日志不炸评测轮。
-      const mappingRows = await this.readAaMappings()
-      const archiveRefs = await this.db
-        .selectFrom('model_archive')
-        .select(['provider', 'official_id', 'match_aliases'])
-        .execute()
-      const refs: AaBaselineRef[] = archiveRefs.map((r) => ({
-        provider: r.provider as ModelProviderId,
-        officialId: r.official_id,
-        matchAliases: JSON.parse(r.match_aliases) as string[],
-      }))
-      const autos = aaAutoMappings(llmJson, refs, new Map(mappingRows.map((r) => [r.slug, `${r.provider}|${r.officialId}`])))
-      for (const m of autos) {
-        await this.db
-          .insertInto('model_aa_mapping')
-          .values({
-            slug: m.slug,
-            provider: m.provider,
-            official_id: m.officialId,
-            verified: 'auto',
-            created_at: nowIso(),
-            updated_at: nowIso(),
-          })
-          .onConflict((oc) => oc.column('slug').doNothing())
-          .execute()
-          .catch((e: unknown) => console.warn(`模型追踪 AA 自动映射 ${m.slug} 落库失败:`, e))
-      }
-      // 映射(含本轮自动新增)→ 评测行;自动映射的 slug 当轮即带上分数
-      const mapping = aaMappingIndex([...mappingRows, ...autos])
-      const rows: AaEvalRow[] = [...aaRowsFromLlms(llmJson, mapping)]
-      for (const ep of AA_MEDIA_ENDPOINTS) {
-        rows.push(...aaRowsFromMedia(await this.deps.fetchText(ep.url, 30_000, { headers }), ep.benchmark, mapping))
-      }
-      await this.replaceEvaluationSnapshot(rows)
-      await this.markEvalStatus(true)
-    } catch (e) {
-      await this.markEvalStatus(false).catch(() => {})
-      throw e
-    }
-  }
-
-  /** AA 映射表全量读(model_aa_mapping;pollEvaluations 每轮一次)。 */
-  private async readAaMappings(): Promise<AaMappingRow[]> {
-    const rows = await this.db
-      .selectFrom('model_aa_mapping')
-      .select(['slug', 'provider', 'official_id'])
-      .execute()
-    return rows.map((r) => ({
-      slug: r.slug,
-      provider: r.provider as ModelProviderId,
-      officialId: r.official_id,
-    }))
-  }
-
-  /** 快照整表替换(单事务:删旧插新 + 运行期首入评测动态;首配接入静默),幂等。 */
-  private async replaceEvaluationSnapshot(rows: AaEvalRow[]): Promise<void> {
-    const archive = await this.db
-      .selectFrom('model_archive')
-      .select(['id', 'provider', 'official_id'])
-      .execute()
-    const idOf = new Map(archive.map((r) => [`${r.provider}|${r.official_id}`, r.id]))
-    const snapshotDate = beijingToday()
-    const inserts = rows.flatMap((r) => {
-      const modelId = idOf.get(`${r.provider}|${r.officialId}`)
-      return modelId === undefined
-        ? [] // 映射指向的基线行不存在(基线演进滞后)→ 跳过,不炸轮询
-        : [{
-            model_id: modelId,
-            evaluator: AA_EVALUATOR,
-            benchmark: r.benchmark,
-            score: r.score,
-            version: r.version,
-            url: r.url,
-            snapshot_date: snapshotDate,
-          }]
-    })
-    const newModelIds = new Set(inserts.map((r) => r.model_id))
-    const existing = await this.db
-      .selectFrom('model_evaluations')
-      .select('model_id')
-      .where('evaluator', '=', AA_EVALUATOR)
-      .execute()
-    const existingIds = new Set(existing.map((r) => r.model_id))
-    // 首配接入(替换前快照表无任何 AA 行而本轮有行):映射内模型早已被 AA 收录,
-    // 真实「首次进入评测」日期不可考——occurred_on 只会得到取数日的伪日期(issues/08
-    // 部署回灌教训:83 模型同日伪动态集体顶掉真实时间线)。接入是系统事件而非模型
-    // 动态,整轮静默;此后运行期新出现的模型才以发现日为 occurred_on 产动态。
-    const eventModelIds = existingIds.size === 0 && inserts.length > 0 ? [] : newModelIds
-    const firstUrlOf = new Map(
-      rows.flatMap((r) => {
-        const modelId = idOf.get(`${r.provider}|${r.officialId}`)
-        return modelId === undefined ? [] : ([[modelId, r.url] as const] as const)
-      }),
-    )
-    await this.db.transaction().execute(async (trx) => {
-      await trx.deleteFrom('model_evaluations').where('evaluator', '=', AA_EVALUATOR).execute()
-      if (inserts.length > 0) {
-        await trx.insertInto('model_evaluations').values(inserts).execute()
-      }
-      for (const modelId of eventModelIds) {
-        if (existingIds.has(modelId)) continue
-        await trx
-          .insertInto('model_events')
-          .values({
-            model_id: modelId,
-            kind: 'evaluated',
-            occurred_on: snapshotDate,
-            title: `进入 ${AA_EVALUATOR_LABEL} 评测`,
-            source_url: firstUrlOf.get(modelId)!,
-            created_at: nowIso(),
-          })
-          .onConflict((oc) =>
-            oc.columns(['model_id', 'kind', 'occurred_on', 'source_url']).doNothing(),
-          )
-          .execute()
-      }
-    })
-  }
-
   private async markSource(provider: ModelProviderId, ok: boolean): Promise<void> {
     const now = nowIso()
     await this.db
@@ -750,27 +563,6 @@ export class ModelTrackingService {
       })
       .onConflict((oc) =>
         oc.column('provider').doUpdateSet({
-          stale: ok ? 0 : 1,
-          ...(ok ? { last_success_at: now } : {}),
-          last_attempt_at: now,
-        }),
-      )
-      .execute()
-  }
-
-  /** 评测源状态(独立于厂家信源的 model_fetch_status;同 upsert 口径)。 */
-  private async markEvalStatus(ok: boolean): Promise<void> {
-    const now = nowIso()
-    await this.db
-      .insertInto('model_evaluation_status')
-      .values({
-        evaluator: AA_EVALUATOR,
-        stale: ok ? 0 : 1,
-        last_success_at: ok ? now : null,
-        last_attempt_at: now,
-      })
-      .onConflict((oc) =>
-        oc.column('evaluator').doUpdateSet({
           stale: ok ? 0 : 1,
           ...(ok ? { last_success_at: now } : {}),
           last_attempt_at: now,

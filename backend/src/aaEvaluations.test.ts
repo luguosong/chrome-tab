@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { ModelEvent, TrackedModel } from 'chrome-tab-shared'
+import type { TrackedModel } from 'chrome-tab-shared'
 import { openDb, type Db } from './db'
-import { ModelTrackingService, type BaselineModel, type ModelTrackingDeps } from './modelTracking'
+import { ModelTrackingService, type BaselineModel } from './modelTracking'
 import { STUB_UPSTREAM_KEY } from './testUtils'
 import seedJson from './modelBaselineSeed.json'
 import {
@@ -13,6 +13,7 @@ import {
   aaRowsFromLlms,
   aaRowsFromMedia,
   beijingToday,
+  makeAaEvaluations,
   type AaMappingRow,
 } from './aaEvaluations'
 
@@ -20,7 +21,8 @@ import {
  * 评测接入自动检查(issues/08,CONTEXT.md「评测结果」):解析透传、slug 精确映射
  * (变体/快照不认领)、同名自动映射(ADR-0058)、快照替换、首入评测动态、漂移不产
  * 动态、未配置 no-op、失败保留快照且只标评测陈旧(与厂家信源分表互不影响)。
- * IO 全经假 fetchText,零真网。基线/映射自种子快照派生(ADR-0058 基线 DB 化)。
+ * IO 全经假 fetchText,零真网;集成用例穿生命周期模块直测(.scratch/评测生命周期/01)。
+ * 基线/映射自种子快照派生(ADR-0058 基线 DB 化)。
  */
 
 const SEED = seedJson as { models: BaselineModel[]; aaMapping: AaMappingRow[] }
@@ -76,15 +78,11 @@ const AA_T2I_JSON = JSON.stringify({
 
 const EMPTY_MEDIA_JSON = JSON.stringify({ status: 200, data: [] })
 
-/** 六路端点全就位的 deps(其余 URL 一律 404,厂家源状态与本文件断言无关;auto 核验 env 关闭)。 */
-function aaDeps(pages: Record<string, string>): ModelTrackingDeps {
-  return {
-    fetchText: async (url) => {
-      const page = pages[url]
-      if (page === undefined) throw new Error('HTTP 404')
-      return page
-    },
-  }
+/** 假 fetchText(未就位 URL 一律 404,厂家源状态与本文件断言无关;零真网)。 */
+const fetchOf = (pages: Record<string, string>) => async (url: string): Promise<string> => {
+  const page = pages[url]
+  if (page === undefined) throw new Error('HTTP 404')
+  return page
 }
 
 function fullPages(): Record<string, string> {
@@ -96,14 +94,34 @@ function fullPages(): Record<string, string> {
   }
 }
 
-async function makeService(db: Db, deps: ModelTrackingDeps, aaApiKey = STUB_UPSTREAM_KEY) {
-  const svc = new ModelTrackingService(db, deps, aaApiKey)
-  await svc.init()
-  return svc
+/** 模块直测入口:档案模型与 aaMapping 种子先经 service.init 落库(model_archive 行是
+ * 模块的只读输入;aaMapping 种子在 service 侧编排内完成;厂家轮询 404 与断言无关),
+ * 再构造被测模块。 */
+async function makeModule(db: Db, pages: Record<string, string>, aaApiKey = STUB_UPSTREAM_KEY) {
+  await new ModelTrackingService(db, { fetchText: fetchOf({}) }, '').init()
+  return makeAaEvaluations(db, fetchOf(pages), aaApiKey)
 }
 
-const evalsOf = (m: { evaluations: TrackedModel['evaluations'] }, benchmark: string) =>
-  m.evaluations.find((e) => e.benchmark === benchmark)
+type Sqlite = ReturnType<typeof openDb>['sqlite']
+
+/** model_archive 行 id(评测按模型聚合的键)。 */
+const modelIdOf = (sqlite: Sqlite, officialId: string): number =>
+  (sqlite.prepare('SELECT id FROM model_archive WHERE official_id = ?').get(officialId) as { id: number }).id
+
+/** 某模型的 evaluated 动态(评测生命周期写 model_events 的唯一形态;直查表观察)。 */
+const evaluatedOf = (sqlite: Sqlite, officialId: string): Array<{ occurred_on: string; title: string; source_url: string }> =>
+  sqlite
+    .prepare(
+      "SELECT e.occurred_on, e.title, e.source_url FROM model_events e JOIN model_archive a ON a.id = e.model_id WHERE e.kind = 'evaluated' AND a.official_id = ?",
+    )
+    .all(officialId) as Array<{ occurred_on: string; title: string; source_url: string }>
+
+/** 某厂家线索行数(「不再落 aa: 线索」的直查观察——模块不触线索域)。 */
+const cluesOf = (sqlite: Sqlite, provider: string): number =>
+  (sqlite.prepare('SELECT COUNT(*) c FROM model_pending_clues WHERE provider = ?').get(provider) as { c: number }).c
+
+const evalsOf = (list: TrackedModel['evaluations'] | undefined, benchmark: string) =>
+  list?.find((e) => e.benchmark === benchmark)
 
 describe('评测:解析与映射(纯函数)', () => {
   it('LLM 端点:映射内 slug 逐 Benchmark 透传,携带版本名与模型页链接;null 分跳过', () => {
@@ -222,24 +240,24 @@ describe('评测:解析与映射(纯函数)', () => {
   })
 })
 
-describe('评测:轮询与快照(服务集成,零真网)', () => {
+describe('评测:轮询与快照(模块集成,零真网)', () => {
   it('配置 Key:评测行入档、信封 configured=true;首配接入不产 evaluated 动态(真实首入日不可考)', async () => {
-    const { db } = openDb(':memory:')
-    const svc = await makeService(db, aaDeps(fullPages()))
-    await svc.pollEvaluations()
-    const a = await svc.archive()
-    expect(a.evaluations).toMatchObject({ configured: true, stale: false })
-    expect(a.evaluations.lastSuccessAt).not.toBeNull()
-    const glm47 = a.models.find((m) => m.officialId === 'glm-4.7')!
+    const { sqlite, db } = openDb(':memory:')
+    const aa = await makeModule(db, fullPages())
+    await aa.poll()
+    const st = await aa.status()
+    expect(st).toMatchObject({ configured: true, stale: false })
+    expect(st.lastSuccessAt).not.toBeNull()
+    const evals = await aa.byModel()
+    const glm47 = evals.get(modelIdOf(sqlite, 'glm-4.7'))!
     expect(evalsOf(glm47, 'mmlu_pro')!.score).toBe(0.791)
     expect(evalsOf(glm47, 'mmlu_pro')!.version).toBe('GLM-4.7')
     expect(evalsOf(glm47, 'mmlu_pro')!.url).toBe(aaModelUrl('glm-4-7'))
     expect(evalsOf(glm47, 'mmlu_pro')!.evaluator).toBe('Artificial Analysis')
-    expect(evalsOf(a.models.find((m) => m.officialId === 'gpt-image-2')!, 'text_to_image_elo')!.score).toBe(1250)
+    expect(evalsOf(evals.get(modelIdOf(sqlite, 'gpt-image-2'))!, 'text_to_image_elo')!.score).toBe(1250)
     // 首配接入(Key 首次生效、快照表从空到满)是系统事件而非模型动态:不产 evaluated
-    const kinds = (m: { events: ModelEvent[] }) => m.events.filter((e) => e.kind === 'evaluated')
-    expect(kinds(glm47)).toHaveLength(0)
-    expect(kinds(a.models.find((m) => m.officialId === 'gpt-image-2')!)).toHaveLength(0)
+    expect(evaluatedOf(sqlite, 'glm-4.7')).toHaveLength(0)
+    expect(evaluatedOf(sqlite, 'gpt-image-2')).toHaveLength(0)
   })
 
   it('同名自动映射(ADR-0058):未映射同名条目随轮询直接进映射表(verified=auto),不再落 aa: 线索', async ({ }) => {
@@ -252,20 +270,20 @@ describe('评测:轮询与快照(服务集成,零真网)', () => {
         { id: 'u9', name: 'GLM-5-Turbo', slug: 'glm-5-turbo', model_creator: { id: 'c1', name: 'Z AI', slug: 'zai' }, evaluations: { mmlu_pro: 0.6 } },
       ],
     })
-    const svc = await makeService(db, aaDeps(pages))
-    await svc.pollEvaluations()
+    const aa = await makeModule(db, pages)
+    await aa.poll()
     const mapping = sqlite.prepare("SELECT * FROM model_aa_mapping WHERE slug = 'glm-5-turbo'").get() as { provider: string; official_id: string; verified: string }
     expect(mapping).toMatchObject({ provider: 'zhipu', official_id: 'glm-5-turbo', verified: 'auto' })
-    // 当轮映射即生效:评测行带上分数;线索表不落 aa: 键
-    const a = await svc.archive()
-    expect(evalsOf(a.models.find((m) => m.officialId === 'glm-5-turbo')!, 'mmlu_pro')!.score).toBe(0.6)
-    expect(a.pendingClues.some((c) => c.provider === 'zhipu')).toBe(false)
+    // 当轮映射即生效:评测行带上分数;线索表不落 aa: 键(直查表观察——模块不触线索域)
+    const evals = await aa.byModel()
+    expect(evalsOf(evals.get(modelIdOf(sqlite, 'glm-5-turbo'))!, 'mmlu_pro')!.score).toBe(0.6)
+    expect(cluesOf(sqlite, 'zhipu')).toBe(0)
   })
 
   it('运行期 AA 新收录:仅新模型产 evaluated 动态(occurred_on=发现日),老模型不产', async () => {
-    const { db } = openDb(':memory:')
-    const svc = await makeService(db, aaDeps(fullPages()))
-    await svc.pollEvaluations() // 首配:静默
+    const { sqlite, db } = openDb(':memory:')
+    const aa = await makeModule(db, fullPages())
+    await aa.poll() // 首配:静默
     const pages2 = fullPages()
     pages2[AA_LLM_URL] = JSON.stringify({
       status: 200,
@@ -274,64 +292,60 @@ describe('评测:轮询与快照(服务集成,零真网)', () => {
         { id: 'u4', name: 'GLM-4.6', slug: 'glm-4-6', model_creator: { id: 'c1', name: 'Zhipu', slug: 'zhipu' }, evaluations: { mmlu_pro: 0.75 } },
       ],
     })
-    const svc2 = new ModelTrackingService(db, aaDeps(pages2), STUB_UPSTREAM_KEY) // 免 init:不触发厂家轮询
-    await svc2.pollEvaluations()
-    const a = await svc.archive()
-    const kinds = (m: { events: ModelEvent[] }) => m.events.filter((e) => e.kind === 'evaluated')
-    const glm46 = a.models.find((m) => m.officialId === 'glm-4.6')!
-    expect(kinds(glm46).map((e) => e.title)).toEqual(['进入 Artificial Analysis 评测'])
-    expect(kinds(glm46)[0]!.occurredOn).toBe(beijingToday())
-    expect(kinds(glm46)[0]!.sourceUrl).toBe(aaModelUrl('glm-4-6'))
-    expect(kinds(a.models.find((m) => m.officialId === 'glm-4.7')!)).toHaveLength(0)
+    const aa2 = makeAaEvaluations(db, fetchOf(pages2), STUB_UPSTREAM_KEY) // 免 init:档案种子已就位
+    await aa2.poll()
+    const events = evaluatedOf(sqlite, 'glm-4.6')
+    expect(events.map((e) => e.title)).toEqual(['进入 Artificial Analysis 评测'])
+    expect(events[0]!.occurred_on).toBe(beijingToday())
+    expect(events[0]!.source_url).toBe(aaModelUrl('glm-4-6'))
+    expect(evaluatedOf(sqlite, 'glm-4.7')).toHaveLength(0)
   })
 
   it('分数漂移:快照行更新,不产生新动态;快照日期随轮刷新', async () => {
     const { sqlite, db } = openDb(':memory:')
-    const svc = await makeService(db, aaDeps(fullPages()))
-    await svc.pollEvaluations()
+    const aa = await makeModule(db, fullPages())
+    await aa.poll()
     const pages2 = fullPages()
     pages2[AA_LLM_URL] = AA_LLM_JSON.replace('0.791', '0.801')
-    const svc2 = new ModelTrackingService(db, aaDeps(pages2), STUB_UPSTREAM_KEY) // 免 init:不触发厂家轮询
-    await svc2.pollEvaluations()
-    const a = await svc.archive()
-    const glm47 = a.models.find((m) => m.officialId === 'glm-4.7')!
+    const aa2 = makeAaEvaluations(db, fetchOf(pages2), STUB_UPSTREAM_KEY) // 免 init:档案种子已就位
+    await aa2.poll()
+    const evals = await aa.byModel()
+    const glm47 = evals.get(modelIdOf(sqlite, 'glm-4.7'))!
     expect(evalsOf(glm47, 'mmlu_pro')!.score).toBe(0.801)
-    expect(glm47.events.filter((e) => e.kind === 'evaluated')).toHaveLength(0) // 首配静默 + 漂移不产动态
+    expect(evaluatedOf(sqlite, 'glm-4.7')).toHaveLength(0) // 首配静默 + 漂移不产动态
     expect(sqlite.prepare('SELECT COUNT(*) c FROM model_evaluations').get()).toMatchObject({ c: 3 })
   })
 
   it('评测源失败:保留最后成功快照、只标评测陈旧,厂家信源状态表不被触碰', async () => {
     const { sqlite, db } = openDb(':memory:')
-    const svc = await makeService(db, aaDeps(fullPages()))
-    await svc.pollEvaluations()
+    const aa = await makeModule(db, fullPages())
+    await aa.poll()
     const before = JSON.stringify(sqlite.prepare('SELECT * FROM model_fetch_status').all())
-    const svc2 = new ModelTrackingService(db, aaDeps({}), STUB_UPSTREAM_KEY)
-    await expect(svc2.pollEvaluations()).rejects.toThrow()
-    const a = await svc.archive()
-    expect(a.evaluations).toMatchObject({ configured: true, stale: true })
-    expect(evalsOf(a.models.find((m) => m.officialId === 'glm-4.7')!, 'mmlu_pro')!.score).toBe(0.791)
+    const aa2 = makeAaEvaluations(db, fetchOf({}), STUB_UPSTREAM_KEY)
+    await expect(aa2.poll()).rejects.toThrow()
+    expect(await aa.status()).toMatchObject({ configured: true, stale: true })
+    const evals = await aa.byModel()
+    expect(evalsOf(evals.get(modelIdOf(sqlite, 'glm-4.7'))!, 'mmlu_pro')!.score).toBe(0.791)
     expect(JSON.stringify(sqlite.prepare('SELECT * FROM model_fetch_status').all())).toBe(before)
   })
 
   it('未配置 Key:轮询 no-op——无评测行、无状态行,信封明确「未配置」', async () => {
     const { sqlite, db } = openDb(':memory:')
-    const svc = await makeService(db, aaDeps({}), '')
-    await svc.pollEvaluations()
-    const a = await svc.archive()
-    expect(a.evaluations).toEqual({ configured: false, stale: false, lastSuccessAt: null })
+    const aa = await makeModule(db, {}, '')
+    await aa.poll()
+    expect(await aa.status()).toEqual({ configured: false, stale: false, lastSuccessAt: null })
     expect(sqlite.prepare('SELECT COUNT(*) c FROM model_evaluations').get()).toMatchObject({ c: 0 })
     expect(sqlite.prepare('SELECT COUNT(*) c FROM model_evaluation_status').get()).toMatchObject({ c: 0 })
-    expect(a.models.every((m) => m.evaluations.length === 0)).toBe(true)
+    expect((await aa.byModel()).size).toBe(0)
   })
 
   it('映射指向的模型页 URL 均以映射 slug 收尾(可回链核验)', async () => {
     const { db } = openDb(':memory:')
-    const svc = await makeService(db, aaDeps(fullPages()))
-    await svc.pollEvaluations()
-    const a = await svc.archive()
+    const aa = await makeModule(db, fullPages())
+    await aa.poll()
     const slugs = new Set(SEED.aaMapping.map((m) => m.slug))
-    for (const m of a.models) {
-      for (const e of m.evaluations) {
+    for (const list of (await aa.byModel()).values()) {
+      for (const e of list) {
         expect(e.url.startsWith('https://artificialanalysis.ai/models/')).toBe(true)
         expect(slugs.has(e.url.split('/').pop()!)).toBe(true)
       }
