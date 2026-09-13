@@ -2,7 +2,8 @@
 // (core 经 langgraph 传递加载,无显式 import),实测常驻内存与 bundle 产物代价(门槛
 // ~28 MiB);三件套代码内联进 bundle,checkpoint-sqlite 顶层 import better-sqlite3
 // 是唯一 external(原生 ESM import,Node interop 解析到顶层 13.0.3,跨大版本兼容
-// 已实测)。票 04 核验图落地后由其模块 import 自然接管,此段删除。
+// 已实测)。核验图(issues/04,verificationGraph.ts)已落地但仅测试面消费——生产
+// bundle 尚无真实 import 链,此段保留到票 05 service 接线后由生产路径自然接管删除。
 import '@langchain/langgraph'
 import '@langchain/langgraph-checkpoint-sqlite'
 import { serve } from '@hono/node-server'

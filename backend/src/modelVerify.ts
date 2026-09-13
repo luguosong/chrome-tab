@@ -39,11 +39,14 @@ export type VerifyOutcome =
   | { outcome: 'error'; reason: string }
   | { outcome: 'insufficient'; reason: string }
 
+// 值域 Set 导出(无人值守核验图 issues/04 复用):旧链退役(issues/11)时值域的家随核验域迁移
 const MODEL_KINDS = new Set(['text', 'multimodal_understanding', 'image_generation', 'video_generation', 'audio_speech', 'embedding', 'rerank', 'moderation_classification'])
 const RELEASE_STAGES = new Set(['experimental', 'preview', 'beta', 'ga', 'deprecated', 'retired'])
 const AVAILABILITY = new Set(['api', 'first_party_app', 'open_weights'])
+export { MODEL_KINDS, RELEASE_STAGES, AVAILABILITY, SOURCE_EXCERPT }
 
-/** 单信源原文进 prompt 的截断上限(两源合计 ~24k 字符;模型文档页头部即规格区)。 */
+/** 单信源原文进 prompt 的截断上限(两源合计 ~24k 字符;模型文档页头部即规格区)。
+ *  导出供核验图(issues/04)复用:同值同义不另立。 */
 const SOURCE_EXCERPT = 12_000
 
 const SYSTEM_PROMPT = `你是 AI 模型档案核验员。给你一条来自某厂家官方发布源的「待核验线索」和该厂家的官方一手信源原文。判断该线索指向的是否为**该厂家自家新发布的独立模型型号**(独立产品差异的变体算独立型号;移动别名、latest 引用、日期快照、平台/SDK 功能条目、第三方托管模型都不算),是则从原文抽取结构化档案草稿。
@@ -163,8 +166,9 @@ export function validateDraft(raw: unknown, sourceUrls: readonly string[]): Veri
   }
 }
 
-/** pricing 形状:{entries: [{text}...]}(scope 可选);非对象/缺数组/空文本项 → null。 */
-function validPricing(raw: unknown): VerifiedDraft['pricing'] {
+/** pricing 形状:{entries: [{text}...]}(scope 可选);非对象/缺数组/空文本项 → null。
+ *  导出供核验图(issues/04)复用:提案值形态硬校验同一把尺。 */
+export function validPricing(raw: unknown): VerifiedDraft['pricing'] {
   if (raw === null || raw === undefined || typeof raw !== 'object') return null
   const entries = (raw as { entries?: unknown }).entries
   if (!Array.isArray(entries) || entries.length === 0) return null
@@ -175,8 +179,8 @@ function validPricing(raw: unknown): VerifiedDraft['pricing'] {
   return raw as VerifiedDraft['pricing']
 }
 
-/** limits 形状:[{label, text}...];非数组/缺项 → null。 */
-function validLimits(raw: unknown): VerifiedDraft['limits'] {
+/** limits 形状:[{label, text}...];非数组/缺项 → null。导出同 validPricing(核验图复用)。 */
+export function validLimits(raw: unknown): VerifiedDraft['limits'] {
   if (!Array.isArray(raw) || raw.length === 0) return null
   const ok = raw.every(
     (e) => typeof e === 'object' && e !== null && typeof (e as { label?: unknown }).label === 'string' && typeof (e as { text?: unknown }).text === 'string',
@@ -184,7 +188,8 @@ function validLimits(raw: unknown): VerifiedDraft['limits'] {
   return ok ? (raw as VerifiedDraft['limits']) : null
 }
 
-function safeHost(url: string): string | null {
+/** URL host;非法 URL → null。导出供核验图(issues/04)回链/信源标题复用。 */
+export function safeHost(url: string): string | null {
   try {
     return new URL(url).host
   } catch {

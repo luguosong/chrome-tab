@@ -131,9 +131,11 @@ export async function callModel(
   apiKey: string,
   system: string,
   user: string,
+  /** 请求超时 ms(缺省 60s = 其余消费者现状;核验图传 120s,ADR-0062 决策一「核验调用超时放宽至 120s,其余消费者维持 60s」)。 */
+  timeoutMs = 60_000,
 ): Promise<{ content: string | null; resp: string }> {
   await gateRequest()
-  const resp = await fetchText(`${LLM_BASE_URL}/chat/completions`, 60_000, {
+  const resp = await fetchText(`${LLM_BASE_URL}/chat/completions`, timeoutMs, {
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({
