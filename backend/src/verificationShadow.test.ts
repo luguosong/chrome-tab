@@ -107,8 +107,8 @@ function schedulerFingerprint(fx: Fixture): string {
 }
 
 const registryRow = (fx: Fixture) =>
-  fx.shadow.sqlite.prepare<[string, string], { state: string; thread_id: string; fingerprint: string; thread_cleaned: number; exit_json: string | null }>(
-    'SELECT state, thread_id, fingerprint, thread_cleaned, exit_json FROM shadow_runs WHERE provider = ? AND model_key = ?',
+  fx.shadow.sqlite.prepare<[string, string], { state: string; thread_id: string; fingerprint: string; thread_cleaned: number; exit_json: string | null; updated_at: string }>(
+    'SELECT state, thread_id, fingerprint, thread_cleaned, exit_json, updated_at FROM shadow_runs WHERE provider = ? AND model_key = ?',
   ).get(CLUE.provider, CLUE.modelKey)
 
 const checkpointCount = (fx: Fixture, threadId: string): number =>
@@ -495,6 +495,8 @@ describe('影子核验:指纹重开与线程清理', () => {
       const t = registryRow(fx)!
       expect(t.state).toBe('terminal')
       expect(t.thread_cleaned).toBe(1)
+      // 清理打标不 bump updated_at(裁决时刻纯净:chainStats 的「最近成功裁决」取它,票 08)
+      expect(t.updated_at).toBe(aged)
       // 退避中:同窗老仍未清理(重扫续跑依赖 checkpoint),且本轮照常重试
       expect(checkpointCount(fx, backoff.threadId)).toBeGreaterThan(0)
       const b = fx.shadow.sqlite
@@ -506,5 +508,33 @@ describe('影子核验:指纹重开与线程清理', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('影子核验:核验链状态(数据健康 UI,票 08)', () => {
+  /** 直插终态行(统计口径的输入面;round 落终态的行为归既有各测试)。 */
+  const seedTerminal = (fx: Fixture, modelKey: string, exitJson: string, updatedAt: string): void => {
+    fx.shadow.sqlite
+      .prepare(
+        `INSERT INTO shadow_runs (provider, model_key, occurred_on, title, source_url, thread_id, fingerprint, state, exit_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'terminal', ?, ?)`,
+      )
+      .run(CLUE.provider, modelKey, CLUE.occurredOn, CLUE.title, CLUE.sourceUrl, `t-${modelKey}`, `f-${modelKey}`, exitJson, updatedAt)
+  }
+
+  it('defer 计堆积、accept/noise 计最近成功;running 与坏行不计且不炸读侧', () => {
+    const fx = fixture()
+    seedTerminal(fx, 'm-defer-1', JSON.stringify({ kind: 'defer', cause: 'insufficient', reason: '证据不足' }), '2026-09-13T01:00:00Z')
+    seedTerminal(fx, 'm-defer-2', JSON.stringify({ kind: 'defer', cause: 'disagreement', reason: '复核分歧' }), '2026-09-13T02:00:00Z')
+    seedTerminal(fx, 'm-noise', JSON.stringify({ kind: 'noise', reason: '托管模型' }), '2026-09-13T03:00:00Z')
+    seedTerminal(fx, 'm-accept', JSON.stringify({ kind: 'accept', target: 'update', fields: [] }), '2026-09-12T09:00:00Z')
+    seedRunningRow(fx, 't-m-running', 'f-m-running') // 运行中:不进 terminal 查询面
+    seedTerminal(fx, 'm-bad', '{oops', '2026-09-13T04:00:00Z') // 坏行:跳过不计数
+    expect(fx.shadow.chainStats()).toEqual({ lastSuccessAt: '2026-09-13T03:00:00Z', deferredCount: 2 })
+  })
+
+  it('空注册表:尚未成功、零堆积(archive 信封缺省注入的同形态)', () => {
+    const fx = fixture()
+    expect(fx.shadow.chainStats()).toEqual({ lastSuccessAt: null, deferredCount: 0 })
   })
 })

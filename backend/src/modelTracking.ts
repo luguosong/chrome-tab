@@ -12,6 +12,7 @@ import type {
   ModelPricing,
   ModelProviderId,
   ModelTrainingParams,
+  ModelVerificationChainStatus,
   ReleaseStage,
   TrackedModel,
 } from 'chrome-tab-shared'
@@ -166,6 +167,8 @@ export class ModelTrackingService {
     private readonly deps: ModelTrackingDeps,
     /** Artificial Analysis API Key(issues/08);语义单点在 aaEvaluations 工厂(未配置 = 轮询 no-op、读侧 configured=false)。 */
     aaApiKey = '',
+    /** 核验链状态供数(数据健康 UI,ADR-0062 决策五;影子期 = verificationShadow.chainStats,切换后换生产库实现);缺省 = 尚未成功/零堆积。 */
+    private readonly verificationStats?: () => ModelVerificationChainStatus,
   ) {
     this.ledger = makeClueLedger(db)
     this.aa = makeAaEvaluations(db, deps.fetchText, aaApiKey)
@@ -323,8 +326,10 @@ export class ModelTrackingService {
       })
       byModel.set(e.model_id, list)
     }
-    // 六类健康展示归票 07;旧 wire 仍每家一条 release,避免重复 provider 键。
-    const sources = await this.db.selectFrom('model_fetch_status').selectAll().where('role', '=', 'release').execute()
+    // 六类健康行(ADR-0062 决策五,票 08):按 (provider, role) 全行直出,stale 判定按
+    // 各角色档位口径(慢档页不误报);角色登记齐全度随票 07 落地自然补全,前端按实际
+    // 存在的角色分组。行序确定性输出(wire 断言与缓存稳定性)。
+    const sources = await this.db.selectFrom('model_fetch_status').selectAll().orderBy('provider', 'asc').orderBy('role', 'asc').execute()
     // 评测读侧经模块(aaEvaluations.ts):行投影与信封是评测方知识,wire 形态直出
     const evalsByModel = await this.aa.byModel()
     const evalStatus = await this.aa.status()
@@ -357,9 +362,11 @@ export class ModelTrackingService {
       })),
       sources: sources.map((s) => ({
         provider: s.provider as ModelProviderId,
-        stale: sourceIsStale('release', s),
+        role: s.role as SourceRole,
+        stale: sourceIsStale(s.role as SourceRole, s),
         lastSuccessAt: s.last_success_at ?? null,
       })),
+      verificationChain: this.verificationStats?.() ?? { lastSuccessAt: null, deferredCount: 0 },
       evaluations: evalStatus,
     }
   }

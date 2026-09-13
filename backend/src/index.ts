@@ -46,9 +46,21 @@ const changelog = Object.fromEntries(
 ) as ChangelogServices
 // 和风天气(ADR-0009):Key/个人专用主机走环境变量、不入库;缺省未配置 → 端点 500
 const videoUpdatesService = new VideoUpdatesService(db, prodVideoDeps())
+// 无人值守核验影子链(issues/05):私有 checkpoint 库与 jsonl 落点与生产库同目录(随
+// data 卷持久);构造先于模型追踪 service——核验链状态(chainStats,数据健康 UI 票 08)
+// 注入档案信封,影子期数据源即影子注册表(暂缓是新链出口,主库无此语义)
+const shadowVerification = makeShadowVerification(db, prodModelDeps(), {
+  checkpointDbPath: resolve(dirname(dbPath), 'verification.db'),
+  jsonlPath: resolve(dirname(dbPath), 'verification-shadow.jsonl'),
+})
 // 模型追踪(CONTEXT.md「模型追踪」,issues/01):init 同步完成基线入档(本地写,毫秒级),
 // 首轮取数异步进行——失败照陈旧口径降级,基线数据已保证 tile 即有内容
-const modelTrackingService = new ModelTrackingService(db, prodModelDeps(), process.env.ARTIFICIALANALYSIS_API_KEY ?? '')
+const modelTrackingService = new ModelTrackingService(
+  db,
+  prodModelDeps(),
+  process.env.ARTIFICIALANALYSIS_API_KEY ?? '',
+  shadowVerification.chainStats,
+)
 await modelTrackingService.init()
 // 新闻(CONTEXT.md「新闻」,ADR-0027):匿名抓取无凭据,勾选与降级口径见 news.ts
 const newsService = new NewsService(db, prodNewsDeps())
@@ -102,13 +114,8 @@ serve({ fetch: app.fetch, port }, (info) => console.log(`backend listening on :$
 startChangelogScheduler(Object.values(changelog))
 // 视频更新 1h 轮询(spec:非整点错开整点请求高峰;库即真相,无启动预热步骤)
 startVideoUpdatesScheduler(videoUpdatesService)
-// 无人值守核验影子链(issues/05):私有 checkpoint 库与 jsonl 落点与生产库同目录(随
-// data 卷持久);首轮启动即跑(写摄取划界 started_at,存量不入;round 自吞异常),
-// 此后由 2h cron 在每轮取数落定后驱动重扫——新链真流量持续运转,影子期自此积累
-const shadowVerification = makeShadowVerification(db, prodModelDeps(), {
-  checkpointDbPath: resolve(dirname(dbPath), 'verification.db'),
-  jsonlPath: resolve(dirname(dbPath), 'verification-shadow.jsonl'),
-})
+// 无人值守核验影子链(issues/05)首轮启动即跑(写摄取划界 started_at,存量不入;round
+// 自吞异常),此后由 2h cron 在每轮取数落定后驱动重扫——新链真流量持续运转,影子期自此积累
 void shadowVerification.round()
 // 模型追踪 2h 轮询(ADR-0058;失败保留库内档案并标记陈旧,下轮即重试),同 cron 驱动影子重扫
 startModelTrackingScheduler(modelTrackingService, () => void shadowVerification.round())

@@ -8,6 +8,7 @@ import {
   PROVIDER_LABELS,
   STAGE_LABELS,
   compareModelsByRelease,
+  degradedSourceCount,
   formatLatestEventBrief,
   isFreshModelEvent,
   modelEventIso,
@@ -42,13 +43,17 @@ export default function ModelIconBody({
   // 入库 id 序让单一厂家(智谱 44 个)占满截断窗,其余厂家在块内永不可见
   const models = [...(data?.models ?? [])].sort(compareModelsByRelease)
   const fresh = latestEventIso(models)
+  // 数据健康徽标(ADR-0062 决策五):降级 (provider, role) 概数,全部健康不显示——
+  // 透明度信息而非待办,「N 待核验」人工待办语义自本票退役
+  const degraded = degradedSourceCount(data?.sources ?? [])
 
   return (
     <BigTile
       title="模型追踪"
       fresh={fresh}
       freshLabel="动态"
-      alert={data && data.pendingClues.length > 0 ? `${data.pendingClues.length} 待核验` : null}
+      alert={data && degraded > 0 ? `${degraded} 源降级` : null}
+      alertTitle="部分信源降级:档案展示最近成功事实,点「更多」查看各信源健康明细(自动恢复,无需处理)"
       onOpenDetail={onOpenDetail}
       moreTitle="查看全部模型与动态"
       overlay={overlay}

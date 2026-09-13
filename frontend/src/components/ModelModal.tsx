@@ -18,6 +18,7 @@ import {
   MODEL_KIND_COLOR_CLASSES,
   MODEL_KIND_LABELS,
   PROVIDER_LABELS,
+  SOURCE_ROLE_LABELS,
   STAGE_LABELS,
   benchmarkLabel,
   compareModelsByRelease,
@@ -25,6 +26,7 @@ import {
   formatModelPricing,
   formatEvaluationScore,
   isFreshModelEvent,
+  sourceHealthByRole,
 } from '../lib/modelTracking'
 
 /**
@@ -67,7 +69,8 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
   /** 就地展开的模型行(同时只开一行,展开/收起即点击行头)。 */
   const [expandedId, setExpandedId] = useState<number | null>(null)
 
-  const staleSources = (data?.sources ?? []).filter((s) => s.stale)
+  /** 数据健康(按信源角色聚合,票 08):六类各自最近一次成功 + 降级厂家;空 = 尚未跑首轮。 */
+  const sourceHealth = sourceHealthByRole(data?.sources ?? [])
 
   return (
     <DetailModal
@@ -114,21 +117,44 @@ export default function ModelModal({ onClose }: { onClose: () => void }) {
         onRetry={() => void refetch()}
         retryBusy={isFetching}
       >
-      {/* 编译器的类型收窄守卫(陈旧/线索/列表的派生都在 data 上);QueryPane
+      {/* 编译器的类型收窄守卫(健康/线索/列表的派生都在 data 上);QueryPane
           content 态 = data 已就位 */}
       {data && (
       <>
-      {/* 陈旧标记(CONTEXT.md「模型档案」):单信源失败保留最后成功结果 */}
-            {staleSources.length > 0 && (
-              <div className="text-meta text-white/50 py-1.5">
-                {staleSources
-                  .map((s) => {
-                    const at = s.lastSuccessAt ? `更新于 ${timeAgo(s.lastSuccessAt)}` : '尚未成功同步'
-                    return `${PROVIDER_LABELS[s.provider]}源同步失败,展示最近数据(${at})`
-                  })
-                  .join('；')}
+      {/* 数据健康(CONTEXT.md「数据健康」,ADR-0062 决策五):透明度信息而非待办——
+          词条涵盖信源与核验链两面,此处分述为两行。信源行按角色聚合,六类各自最近一次
+          成功同步;降级角色 amber 标示并列厂家 + 最旧成功时间(「数据停在哪」,档案继续
+          展示该家最近成功事实、不渲染为空——全句语义在 title)。核验链行只读(最近成功
+          裁决 + 暂缓堆积,暂缓等证据指纹变化自动重开,无需处理)。 */}
+            {sourceHealth.length > 0 && (
+              <div
+                className="text-meta text-white/50 py-1.5"
+                title="各信源角色最近一次成功同步;降级角色展示最近成功事实,轮询恢复后自动清除"
+              >
+                信源健康:
+                {sourceHealth.flatMap((h, i) => [
+                  ...(i > 0 ? [<span key={`sep-${h.role}`}> · </span>] : []),
+                  h.degradedProviders.length > 0 ? (
+                    <span key={h.role} className="text-amber-200">
+                      {SOURCE_ROLE_LABELS[h.role]}(
+                      {h.degradedProviders.map((p) => PROVIDER_LABELS[p]).join('、')}降级
+                      {h.degradedLastSuccessAt ? `,数据停在 ${timeAgo(h.degradedLastSuccessAt)}` : ''})
+                    </span>
+                  ) : (
+                    <span key={h.role}>
+                      {SOURCE_ROLE_LABELS[h.role]} {h.lastSuccessAt ? timeAgo(h.lastSuccessAt) : '尚未成功'}
+                    </span>
+                  ),
+                ])}
               </div>
             )}
+            <div className="text-meta text-white/50 pb-1.5">
+              核验链:
+              {data.verificationChain.lastSuccessAt
+                ? `最近成功裁决 ${timeAgo(data.verificationChain.lastSuccessAt)}`
+                : '尚未成功裁决'}
+              {' · '}暂缓堆积 {data.verificationChain.deferredCount} 条
+            </div>
             {/* 待核验线索(ADR-0025「跳过待核验」的可见形态):发布源出现基线不认识的
                 新条目——非故障,提示人工核验纳入;核验后下轮自愈消失。 */}
             {data.pendingClues.length > 0 && (

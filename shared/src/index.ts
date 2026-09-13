@@ -174,12 +174,26 @@ export type TrackedModel = {
   events: ModelEvent[]
 }
 
-/** 信源取数状态:失败保留最后成功结果并标记陈旧(CONTEXT.md「模型档案」)。 */
+/** 六类一手信源角色(ADR-0062 决策二:release/catalog/pricing/limits/weights/retirement,各角色独立健康档位)。 */
+export type ModelSourceRole = 'release' | 'catalog' | 'pricing' | 'limits' | 'weights' | 'retirement'
+/** 六类角色的固定展示序(数据健康行渲染序;值域单源随 ModelSourceRole,扩角色时同文件两处齐改)。 */
+export const MODEL_SOURCE_ROLES: ModelSourceRole[] = ['release', 'catalog', 'pricing', 'limits', 'weights', 'retirement']
+
+/** 信源取数状态:按 (provider, role) 各自标陈旧与恢复,失败保留最后成功结果(CONTEXT.md「模型档案」「数据健康」)。 */
 export type ModelSourceStatus = {
   provider: ModelProviderId
+  role: ModelSourceRole
   stale: boolean
   /** 最近一次成功取数(ISO);null = 尚未成功过(档案为人工核验基线)。 */
   lastSuccessAt: string | null
+}
+
+/** 核验链运行状态(ADR-0062 决策五,只读透明、无人工待办语义):「最后成功」= 完成一次有效裁决(接纳或噪音)。 */
+export type ModelVerificationChainStatus = {
+  /** 核验链最近一次成功裁决(ISO);null = 尚未成功过。 */
+  lastSuccessAt: string | null
+  /** 暂缓堆积数(证据不足或复核分歧的终态线索,等证据指纹变化自动重开)。 */
+  deferredCount: number
 }
 
 /**
@@ -198,6 +212,8 @@ export type ModelArchiveResponse = {
   models: TrackedModel[]
   sources: ModelSourceStatus[]
   evaluations: ModelEvaluationsStatus
+  /** 核验链状态(数据健康,ADR-0062 决策五;只读透明,非人工待办)。 */
+  verificationChain: ModelVerificationChainStatus
   /** 待核验线索(解析出但基线未认领的条目,ADR-0025 可见形态;近 7 天仍出现的,倒序)。 */
   pendingClues: ModelPendingClue[]
 }

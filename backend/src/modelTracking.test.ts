@@ -472,7 +472,7 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
     const svc = await makeService(db, makeDeps(''))
     await expect(svc.pollProvider()).resolves.toBeUndefined()
     const sources = (await svc.archive()).sources
-    const by = (p: string) => sources.find((s) => s.provider === p)
+    const by = (p: string) => sources.find((s) => s.provider === p && s.role === 'release')
     expect(by('zhipu')?.stale).toBe(true)
     expect(by('anthropic')?.stale).toBe(false)
   })
@@ -493,7 +493,7 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
       { label: '上下文窗口', text: '1M', scope: null },
       { label: '最大输出', text: '128K', scope: null },
     ])
-    const source = (p: string) => a.sources.find((s) => s.provider === p)!
+    const source = (p: string) => a.sources.find((s) => s.provider === p && s.role === 'release')!
     expect(source('zhipu')).toMatchObject({ stale: false, lastSuccessAt: expect.any(String) })
     expect(source('anthropic')).toMatchObject({ stale: false, lastSuccessAt: expect.any(String) })
   })
@@ -606,7 +606,7 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
     const failing = new ModelTrackingService(db, failingDeps())
     await expect(failing.pollProvider('zhipu')).rejects.toThrow('HTTP 503')
     let a = await failing.archive()
-    const zhipu = () => a.sources.find((s) => s.provider === 'zhipu')!
+    const zhipu = () => a.sources.find((s) => s.provider === 'zhipu' && s.role === 'release')!
     expect(zhipu()).toMatchObject({ stale: true })
     expect((await byId(failing, 'glm-5.3'))!.events.length).toBeGreaterThan(0) // 档案保留
     const ok = new ModelTrackingService(db, makeDeps(ZHIPU_MD))
@@ -624,7 +624,7 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
     await expect(drifty.pollProvider('zhipu')).rejects.toThrow('疑似上游改版')
     await drifty.pollProvider('anthropic')
     const a = await drifty.archive()
-    const source = (p: string) => a.sources.find((s) => s.provider === p)!
+    const source = (p: string) => a.sources.find((s) => s.provider === p && s.role === 'release')!
     expect(source('zhipu')!.stale).toBe(true)
     expect(source('anthropic')!.stale).toBe(false) // 验收:单厂家陈旧不牵连另一家
     expect(a.models).toHaveLength(TOTAL_BASELINE)
@@ -721,7 +721,7 @@ Dual launch announcement.
     const failing = new ModelTrackingService(db, failingDeps())
     await expect(failing.pollProvider('anthropic')).rejects.toThrow('HTTP 503')
     const a = await failing.archive()
-    const source = (p: string) => a.sources.find((s) => s.provider === p)!
+    const source = (p: string) => a.sources.find((s) => s.provider === p && s.role === 'release')!
     expect(source('anthropic')!.stale).toBe(true)
     expect(source('zhipu')!.stale).toBe(false)
     // Anthropic 档案保留(基线在库),智谱动态不受影响
@@ -755,9 +755,32 @@ describe('模型追踪:路由', () => {
     const cookie = login.headers.getSetCookie()[0]!.split(';')[0]!
     const res = await app.request('/api/model-tracking/archive', { headers: { cookie } })
     expect(res.status).toBe(200)
-    const json = (await res.json()) as { models: unknown[]; sources: unknown[] }
+    const json = (await res.json()) as {
+      models: unknown[]
+      sources: Array<{ role: string }>
+      verificationChain: { lastSuccessAt: string | null; deferredCount: number }
+    }
     expect(json.models).toHaveLength(TOTAL_BASELINE)
-    expect(json.sources).toHaveLength(7)
+    // 六类健康行(票 08):七家 × 六角色全行直出,不再每家一条 release
+    expect(json.sources).toHaveLength(42)
+    expect(new Set(json.sources.map((s) => s.role))).toEqual(
+      new Set(['release', 'catalog', 'pricing', 'limits', 'weights', 'retirement']),
+    )
+    // 核验链状态缺省形态(无注入环境 = 尚未成功/零堆积,票 08)
+    expect(json.verificationChain).toEqual({ lastSuccessAt: null, deferredCount: 0 })
+  })
+
+  it('archive() 信封透传注入的核验链状态(影子期 = verificationShadow.chainStats,票 08)', async () => {
+    const { db } = openDb(':memory:')
+    const svc = new ModelTrackingService(db, makeDeps(''), '', () => ({
+      lastSuccessAt: '2026-09-13T08:00:00.000Z',
+      deferredCount: 3,
+    }))
+    await svc.init()
+    expect((await svc.archive()).verificationChain).toEqual({
+      lastSuccessAt: '2026-09-13T08:00:00.000Z',
+      deferredCount: 3,
+    })
   })
 })
 
@@ -1048,7 +1071,7 @@ describe('模型追踪:xAI 档案服务(轮询/厂家隔离)', () => {
     const failing = new ModelTrackingService(db, failingDeps())
     await expect(failing.pollProvider('xai')).rejects.toThrow('HTTP 503')
     const a = await failing.archive()
-    const source = (p: string) => a.sources.find((s) => s.provider === p)!
+    const source = (p: string) => a.sources.find((s) => s.provider === p && s.role === 'release')!
     expect(source('xai')!.stale).toBe(true)
     expect(source('zhipu')!.stale).toBe(false)
     expect(source('anthropic')!.stale).toBe(false)
@@ -1066,7 +1089,7 @@ describe('模型追踪:xAI 档案服务(轮询/厂家隔离)', () => {
     await svc.init()
     await expect(svc.pollProvider('xai')).rejects.toThrow('疑似上游改版')
     const a = await svc.archive()
-    expect(a.sources.find((s) => s.provider === 'xai')!.stale).toBe(true)
+    expect(a.sources.find((s) => s.provider === 'xai' && s.role === 'release')!.stale).toBe(true)
     expect(a.models).toHaveLength(TOTAL_BASELINE)
   })
 })
@@ -1282,7 +1305,7 @@ describe('模型追踪:月之暗面档案服务(轮询/去重/陈旧,issues/06)'
       expect((await byId(svc, id))!.events).toHaveLength(n)
     }
     const a = await svc.archive()
-    expect(a.sources.find((s) => s.provider === 'moonshot')).toMatchObject({ stale: false, lastSuccessAt: expect.any(String) })
+    expect(a.sources.find((s) => s.provider === 'moonshot' && s.role === 'release')).toMatchObject({ stale: false, lastSuccessAt: expect.any(String) })
   })
 
   it('单页失败标陈旧并上抛,另一页动态照常入库;恢复后陈旧清除', async () => {
@@ -1292,12 +1315,12 @@ describe('模型追踪:月之暗面档案服务(轮询/去重/陈旧,issues/06)'
     const halfFailing = new ModelTrackingService(db, kimiDeps(new Error('HTTP 503'), KIMI_BLOG_HTML))
     await expect(halfFailing.pollProvider('moonshot')).rejects.toThrow('HTTP 503')
     let a = await halfFailing.archive()
-    expect(a.sources.find((s) => s.provider === 'moonshot')!.stale).toBe(true)
+    expect(a.sources.find((s) => s.provider === 'moonshot' && s.role === 'release')!.stale).toBe(true)
     expect((await byId(halfFailing, 'kimi-k3'))!.events.length).toBeGreaterThan(0) // 档案与已入动态保留
     const ok = new ModelTrackingService(db, kimiDeps())
     await ok.pollProvider('moonshot')
     a = await ok.archive()
-    expect(a.sources.find((s) => s.provider === 'moonshot')!.stale).toBe(false)
+    expect(a.sources.find((s) => s.provider === 'moonshot' && s.role === 'release')!.stale).toBe(false)
   })
 
   it('上游改版:200 但零卡片 → 抛错标陈旧,既有档案保留', async () => {
@@ -1307,7 +1330,7 @@ describe('模型追踪:月之暗面档案服务(轮询/去重/陈旧,issues/06)'
     const drifty = new ModelTrackingService(db, kimiDeps('<html>上游改版了</html>', '<html>上游改版了</html>'))
     await expect(drifty.pollProvider('moonshot')).rejects.toThrow('疑似上游改版')
     const a = await drifty.archive()
-    expect(a.sources.find((s) => s.provider === 'moonshot')!.stale).toBe(true)
+    expect(a.sources.find((s) => s.provider === 'moonshot' && s.role === 'release')!.stale).toBe(true)
     expect(a.models.filter((m) => m.provider === 'moonshot')).toHaveLength(KIMI_BASELINE.length)
   })
 
@@ -1319,8 +1342,8 @@ describe('模型追踪:月之暗面档案服务(轮询/去重/陈旧,issues/06)'
     const failing = new ModelTrackingService(db, kimiDeps(new Error('HTTP 503'), new Error('HTTP 503')))
     await expect(failing.pollProvider('moonshot')).rejects.toThrow('HTTP 503')
     const a = await failing.archive()
-    expect(a.sources.find((s) => s.provider === 'moonshot')!.stale).toBe(true)
-    expect(a.sources.find((s) => s.provider === 'zhipu')!.stale).toBe(false)
+    expect(a.sources.find((s) => s.provider === 'moonshot' && s.role === 'release')!.stale).toBe(true)
+    expect(a.sources.find((s) => s.provider === 'zhipu' && s.role === 'release')!.stale).toBe(false)
   })
 })
 
@@ -1484,7 +1507,7 @@ describe('模型追踪:OpenAI 档案服务(轮询/历史去重/厂家隔离,issu
     ])
     const a = await svc.archive()
     expect(a.models.some((m) => m.provider === 'openai')).toBe(true)
-    expect(a.sources.find((s) => s.provider === 'openai')!.stale).toBe(false)
+    expect(a.sources.find((s) => s.provider === 'openai' && s.role === 'release')!.stale).toBe(false)
   })
 
   it('历史去重:基线事件占住同 (模型,日期,锚点) 的公告,changelog 不产 updated 重复(两轮幂等)', async () => {
@@ -1523,8 +1546,8 @@ describe('模型追踪:OpenAI 档案服务(轮询/历史去重/厂家隔离,issu
     const drifty = new ModelTrackingService(db, makeDeps({ [OPENAI_CHANGELOG_URL]: '<html>redesigned</html>' }))
     await expect(drifty.pollProvider('openai')).rejects.toThrow('疑似上游改版')
     const a = await drifty.archive()
-    expect(a.sources.find((s) => s.provider === 'openai')!.stale).toBe(true)
-    expect(a.sources.find((s) => s.provider === 'zhipu')!.stale).toBe(false)
+    expect(a.sources.find((s) => s.provider === 'openai' && s.role === 'release')!.stale).toBe(true)
+    expect(a.sources.find((s) => s.provider === 'zhipu' && s.role === 'release')!.stale).toBe(false)
     expect((await byId(drifty, 'gpt-5.6-sol'))!.events.length).toBeGreaterThan(0) // 档案保留
     expect(a.models.some((m) => m.provider === 'zhipu')).toBe(true)
   })
@@ -1677,9 +1700,9 @@ describe('模型追踪:DeepSeek 基线与服务(issues/07)', () => {
     const failing = new ModelTrackingService(db, failingDeps())
     await expect(failing.pollProvider('deepseek')).rejects.toThrow('HTTP 503')
     let a = await failing.archive()
-    expect(a.sources.find((s) => s.provider === 'deepseek')!.stale).toBe(true)
+    expect(a.sources.find((s) => s.provider === 'deepseek' && s.role === 'release')!.stale).toBe(true)
     expect((await byId(failing, 'deepseek-v4-pro'))!.events.length).toBeGreaterThan(0) // 档案保留
-    expect(a.sources.find((s) => s.provider === 'zhipu')!.stale).toBe(false)
+    expect(a.sources.find((s) => s.provider === 'zhipu' && s.role === 'release')!.stale).toBe(false)
     const drifty = new ModelTrackingService(db, makeDeps({ [DEEPSEEK_UPDATES_URL]: '<html>redesigned</html>' }))
     await expect(drifty.pollProvider('deepseek')).rejects.toThrow('疑似上游改版')
     a = await drifty.archive()
@@ -1808,7 +1831,7 @@ describe('模型追踪:通义基线形状与服务轮询(issues/09)', () => {
     expect(max.events.filter((e) => e.occurredOn === '2026-08-02')).toHaveLength(1)
     const flash = (await byId(svc, 'qwen3.7-flash'))!
     expect(flash.events.filter((e) => e.kind === 'updated')).toHaveLength(1) // 新日期 2026-07-15 入库一条
-    const source = (await svc.archive()).sources.find((s) => s.provider === 'alibaba')
+    const source = (await svc.archive()).sources.find((s) => s.provider === 'alibaba' && s.role === 'release')
     expect(source).toMatchObject({ stale: false })
   })
 
@@ -1818,8 +1841,8 @@ describe('模型追踪:通义基线形状与服务轮询(issues/09)', () => {
     await failing.pollProvider('zhipu') // 智谱显式成功就位(不靠 init 内未等待轮询的时序)
     await expect(failing.pollProvider('alibaba')).rejects.toThrow('发布源无结构化条目')
     const archive = await failing.archive()
-    expect(archive.sources.find((s) => s.provider === 'alibaba')!.stale).toBe(true)
+    expect(archive.sources.find((s) => s.provider === 'alibaba' && s.role === 'release')!.stale).toBe(true)
     expect((await byId(failing, 'qwen3.8-max'))!.events.length).toBeGreaterThan(0) // 基线在库保留
-    expect(archive.sources.find((s) => s.provider === 'zhipu')!.stale).toBe(false) // 厂家隔离
+    expect(archive.sources.find((s) => s.provider === 'zhipu' && s.role === 'release')!.stale).toBe(false) // 厂家隔离
   })
 })

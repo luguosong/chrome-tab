@@ -2,7 +2,7 @@ import Database from 'better-sqlite3'
 import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { ModelProviderId } from 'chrome-tab-shared'
+import type { ModelProviderId, ModelVerificationChainStatus } from 'chrome-tab-shared'
 import { makeEvidence } from './evidence'
 import type { Db } from './db'
 import { makeClueLedger } from './clueLedger'
@@ -176,7 +176,9 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
       `UPDATE shadow_runs SET state = @state, exit_json = @exitJson, updated_at = @updatedAt
        WHERE provider = @provider AND model_key = @modelKey`,
     ),
-    markCleaned: sqlite.prepare('UPDATE shadow_runs SET thread_cleaned = 1, updated_at = ? WHERE provider = ? AND model_key = ?'),
+    // 只打 thread_cleaned 标不 bump updated_at:terminal 行的 updated_at 是裁决时刻
+    // (chainStats 的「最近成功裁决」取它),清理打标冒充不得(Mark Cleaned ≠ 新裁决)。
+    markCleaned: sqlite.prepare('UPDATE shadow_runs SET thread_cleaned = 1 WHERE provider = ? AND model_key = ?'),
     nonTerminal: sqlite.prepare<[], ShadowRunRow>(`SELECT * FROM shadow_runs WHERE state != 'terminal' ORDER BY updated_at ASC`),
     terminalInWindow: sqlite.prepare<[string], ShadowRunRow>(
       `SELECT * FROM shadow_runs WHERE state = 'terminal' AND occurred_on >= ? ORDER BY updated_at ASC`,
@@ -356,7 +358,7 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
       // 不进此查询,永不清理(重扫要续跑)。已清理行打标防重复删。
       for (const row of q.cleanupCandidates.all(isoDaysAgo(THREAD_CLEANUP_DAYS))) {
         await saver.deleteThread(row.thread_id)
-        q.markCleaned.run(nowIso(), row.provider, row.model_key)
+        q.markCleaned.run(row.provider, row.model_key)
       }
       // 摄取划界:首轮写 started_at 且只此一次——存量线索(first_seen 早于影子链启动)
       // 不进影子集(spec 附注:存量 35 条切换首轮进待裁决集,历史补证归 issues/12)
@@ -449,6 +451,28 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
     graph,
     /** 测试接缝:私有库连接(注册表/清理断言);先例 openDb 暴露 sqlite。 */
     sqlite,
+    /**
+     * 核验链状态(ADR-0062 决策五,archive 信封供数;只读查询不算「生产写」):影子期
+     * 数据源 = 影子注册表(暂缓是新链出口,旧链/主库无此语义);切换(issues/11)后换
+     * 生产库实现,wire 形态不变。terminal 行的 exit_json 坏行跳过不计数(读侧不因
+     * 单行脏数据 500)。
+     */
+    chainStats: (): ModelVerificationChainStatus => {
+      const rows = sqlite.prepare<[], { exit_json: string | null; updated_at: string }>(
+        "SELECT exit_json, updated_at FROM shadow_runs WHERE state = 'terminal'",
+      ).all()
+      let lastSuccessAt: string | null = null
+      let deferredCount = 0
+      for (const row of rows) {
+        try {
+          const exit = JSON.parse(row.exit_json ?? 'null') as VerificationExit | null
+          if (exit === null) continue
+          if (exit.kind === 'defer') deferredCount += 1
+          else if (lastSuccessAt === null || row.updated_at > lastSuccessAt) lastSuccessAt = row.updated_at
+        } catch { /* 坏行不计 */ }
+      }
+      return { lastSuccessAt, deferredCount }
+    },
     close: () => sqlite.close(),
   }
 }

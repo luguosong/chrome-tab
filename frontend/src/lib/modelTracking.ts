@@ -5,9 +5,12 @@ import type {
   ModelKind,
   ModelPricing,
   ModelProviderId,
+  ModelSourceRole,
+  ModelSourceStatus,
   ReleaseStage,
   TrackedModel,
 } from 'chrome-tab-shared'
+import { MODEL_SOURCE_ROLES } from 'chrome-tab-shared'
 import { timeAgo } from './timeAgo'
 
 /**
@@ -84,6 +87,63 @@ export const PROVIDER_LABELS: Record<ModelProviderId, string> = {
   moonshot: '月之暗面',
   deepseek: 'DeepSeek',
   alibaba: '通义',
+}
+
+/** 六类信源角色展示名与固定序(CONTEXT.md「跟踪厂家」:发布、目录、价格、限额、模型卡、退役;序单源 shared)。 */
+export const SOURCE_ROLE_ORDER = MODEL_SOURCE_ROLES
+export const SOURCE_ROLE_LABELS: Record<ModelSourceRole, string> = {
+  release: '发布',
+  catalog: '目录',
+  pricing: '价格',
+  limits: '限额',
+  weights: '模型卡',
+  retirement: '退役',
+}
+
+/** 角色健康行(Modal「数据健康」区一行一角色的聚合形态)。 */
+export type SourceRoleHealth = {
+  role: ModelSourceRole
+  /** 该角色全部信源的最近一次成功(ISO);null = 从未成功过(与「最近一次很旧」区分)。 */
+  lastSuccessAt: string | null
+  /** 降级(陈旧)的厂家,按 wire 输入序;空 = 该角色全部健康。 */
+  degradedProviders: ModelProviderId[]
+  /** 降级家们的最近成功取最旧(木桶口径:这类事实最旧停在了什么时候);null = 至少一家从未成功。 */
+  degradedLastSuccessAt: string | null
+}
+
+/** 图标块徽标概数(ADR-0062 决策五):降级 (provider, role) 行数;0 = 全部健康,徽标不显示。 */
+export function degradedSourceCount(sources: ModelSourceStatus[]): number {
+  return sources.filter((s) => s.stale).length
+}
+
+/**
+ * 角色健康行聚合(Modal 详情,票 08):固定六类序、只输出实际存在行的角色(登记齐全度
+ * 随七家六类信源票落地自然补全);健康时间取该角色最近一次成功(这类事实有多新),降级
+ * 家平铺列出且单独给最旧成功时间(max 会掩蔽 stale 家的旧数据——最需要知道多旧的恰是降级角色)。
+ */
+export function sourceHealthByRole(sources: ModelSourceStatus[]): SourceRoleHealth[] {
+  const byRole = new Map<ModelSourceRole, SourceRoleHealth & { degradedNeverSucceeded: boolean }>()
+  for (const s of sources) {
+    const row = byRole.get(s.role) ?? {
+      role: s.role,
+      lastSuccessAt: null as string | null,
+      degradedProviders: [] as ModelProviderId[],
+      degradedLastSuccessAt: null as string | null,
+      degradedNeverSucceeded: false,
+    }
+    if (s.lastSuccessAt !== null && (row.lastSuccessAt === null || s.lastSuccessAt > row.lastSuccessAt)) row.lastSuccessAt = s.lastSuccessAt
+    if (s.stale) {
+      row.degradedProviders.push(s.provider)
+      // 从未成功比任何旧时间都旧:存在即压过别家的旧时间,输出「尚未成功」
+      if (s.lastSuccessAt === null) row.degradedNeverSucceeded = true
+      else if (row.degradedLastSuccessAt === null || s.lastSuccessAt < row.degradedLastSuccessAt) row.degradedLastSuccessAt = s.lastSuccessAt
+    }
+    byRole.set(s.role, row)
+  }
+  return SOURCE_ROLE_ORDER.filter((role) => byRole.has(role)).map((role) => {
+    const { degradedNeverSucceeded, ...row } = byRole.get(role)!
+    return degradedNeverSucceeded ? { ...row, degradedLastSuccessAt: null } : row
+  })
 }
 
 /**

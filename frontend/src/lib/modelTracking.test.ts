@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import type { TrackedModel } from 'chrome-tab-shared'
+import type { ModelProviderId, ModelSourceRole, ModelSourceStatus, TrackedModel } from 'chrome-tab-shared'
 import {
   AVAILABILITY_LABELS,
   CODING_INDEX_BENCHMARK,
   benchmarkLabel,
   codingLeaderboard,
   compareModelsByRelease,
+  degradedSourceCount,
   formatEvaluationScore,
   EVENT_KIND_LABELS,
   MODEL_KIND_COLOR_CLASSES,
   MODEL_KIND_LABELS,
   PROVIDER_LABELS,
+  SOURCE_ROLE_LABELS,
   STAGE_LABELS,
   formatModelPricing,
   formatLatestEventBrief,
@@ -18,6 +20,7 @@ import {
   isFreshModelEvent,
   leaderboardDetailLine,
   modelEventAnchorMs,
+  sourceHealthByRole,
 } from './modelTracking'
 
 /** 前端渲染最小检查(issues/01:展示语汇 + 24h 红点;issues/02:详情缺省值)。 */
@@ -329,5 +332,68 @@ describe('模型追踪:跑分榜派生(ADR-0035)', () => {
     expect(leaderboardDetailLine(full)).toBe(
       'Terminal-Bench v2.1 98.7% · Terminal-Bench Hard 81.2% · LiveCodeBench 70.3%',
     )
+  })
+})
+
+describe('数据健康聚合(票 08:徽标概数与 Modal 角色健康行)', () => {
+  const s = (provider: ModelProviderId, role: ModelSourceRole, stale: boolean, lastSuccessAt: string | null): ModelSourceStatus =>
+    ({ provider, role, stale, lastSuccessAt })
+
+  it('六类角色展示名与 CONTEXT.md「跟踪厂家」词条一致', () => {
+    expect(SOURCE_ROLE_LABELS).toEqual({
+      release: '发布', catalog: '目录', pricing: '价格', limits: '限额', weights: '模型卡', retirement: '退役',
+    })
+  })
+
+  it('徽标概数 = 降级行数;全部健康 = 0(徽标不显示)', () => {
+    expect(degradedSourceCount([
+      s('zhipu', 'release', false, '2026-09-13T02:00:00Z'),
+      s('zhipu', 'catalog', true, '2026-09-12T20:00:00Z'),
+      s('openai', 'release', true, null),
+    ])).toBe(2)
+    expect(degradedSourceCount([
+      s('zhipu', 'release', false, '2026-09-13T02:00:00Z'),
+      s('openai', 'pricing', false, '2026-09-12T02:00:00Z'),
+    ])).toBe(0)
+  })
+
+  it('角色健康行:固定六类序,只输出实际存在行的角色;健康时间取该角色最近一次成功', () => {
+    expect(sourceHealthByRole([
+      s('zhipu', 'release', false, '2026-09-13T02:00:00Z'),
+      s('openai', 'release', false, '2026-09-13T05:00:00Z'),
+      s('zhipu', 'pricing', false, '2026-09-12T02:00:00Z'),
+    ])).toEqual([
+      { role: 'release', lastSuccessAt: '2026-09-13T05:00:00Z', degradedProviders: [], degradedLastSuccessAt: null },
+      { role: 'pricing', lastSuccessAt: '2026-09-12T02:00:00Z', degradedProviders: [], degradedLastSuccessAt: null },
+    ])
+  })
+
+  it('降级角色:列厂家且给最旧成功时间(max 会掩蔽 stale 家的旧数据,恰需知道多旧)', () => {
+    expect(sourceHealthByRole([
+      s('zhipu', 'catalog', true, '2026-09-12T20:00:00Z'),
+      s('openai', 'catalog', true, '2026-09-10T05:00:00Z'),
+      s('deepseek', 'catalog', false, '2026-09-13T05:00:00Z'),
+    ])).toEqual([
+      { role: 'catalog', lastSuccessAt: '2026-09-13T05:00:00Z', degradedProviders: ['zhipu', 'openai'], degradedLastSuccessAt: '2026-09-10T05:00:00Z' },
+    ])
+  })
+
+  it('降级家含从未成功:degradedLastSuccessAt 压为 null(从未成功比任何旧时间都旧)', () => {
+    expect(sourceHealthByRole([
+      s('zhipu', 'weights', true, '2026-09-12T20:00:00Z'),
+      s('moonshot', 'weights', true, null),
+    ])).toEqual([
+      { role: 'weights', lastSuccessAt: '2026-09-12T20:00:00Z', degradedProviders: ['zhipu', 'moonshot'], degradedLastSuccessAt: null },
+    ])
+  })
+
+  it('角色全部家从未成功:lastSuccessAt 为 null(区别于「最近一次成功很旧」)', () => {
+    expect(sourceHealthByRole([s('moonshot', 'retirement', true, null)]))
+      .toEqual([{ role: 'retirement', lastSuccessAt: null, degradedProviders: ['moonshot'], degradedLastSuccessAt: null }])
+  })
+
+  it('空信源集(未跑首轮/无行):零健康行,渲染空态', () => {
+    expect(degradedSourceCount([])).toBe(0)
+    expect(sourceHealthByRole([])).toEqual([])
   })
 })

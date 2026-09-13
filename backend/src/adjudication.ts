@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
+import type { ModelSourceRole } from 'chrome-tab-shared'
 import type { FieldEvidence } from './evidence'
 
 /**
@@ -14,8 +15,8 @@ import type { FieldEvidence } from './evidence'
  * released_at 分属两字段,发布日期只认 release 信源的明确标注)。
  */
 
-/** 信源角色六类(值域事实源 = ADR-0062 决策二)。值域单源在此,票 06 信源注册表 import。 */
-export type SourceRole = 'release' | 'catalog' | 'pricing' | 'limits' | 'weights' | 'retirement'
+/** 信源角色六类(值域事实源 = ADR-0062 决策二)。值域单源随 wire 上移 shared(数据健康 UI),此处 re-export 供核验域 import。 */
+export type SourceRole = ModelSourceRole
 
 /** 一条字段裁决规则(矩阵行)。 */
 export interface FieldRule {
