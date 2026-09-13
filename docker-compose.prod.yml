@@ -40,6 +40,11 @@ services:
       # 译制链 free 弱模型拖累;可缺省,缺省容器拿空串 = 回退译制候选链(dev 同形态)。
       # 线上实配与准确模型串以网关在售名录为准(票 09 部署时核)
       VERIFY_LLM_MODEL: ${VERIFY_LLM_MODEL}
+      # 核验复核模型(ADR-0062 缺省 gpt-5.5-free,自锁不降级):影子期(issues/10)临时切
+      # 付费 glm-5.3-flash——免费日限被烧光时 gpt-5.5-free 恒 429 → defer(unavailable)
+      # 终态堆积且永不重判(2026-09-13 用户裁决;互异家族原则临时偏离,两段同族,
+      # 终验后切回)。可缺省 = 回退 ADR 缺省。
+      VERIFY_REVIEW_LLM_MODEL: ${VERIFY_REVIEW_LLM_MODEL}
       # 更新日志 GitHub Releases 日期源(matt-skills)认证,可选:未认证限额 60 req/h 按
       # 出口 IP 计,机场共享出口常态被别人耗光(2026-08-31 matt 日期 403 remaining:0);
       # 配了提至 5000/h。缺省容器拿空串 = 无 Authorization 头,行为不变
