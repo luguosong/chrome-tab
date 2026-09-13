@@ -208,3 +208,91 @@ describe('线索账本:recordVerification(reason 落库与终态守卫)', () => 
     }
   })
 })
+
+describe('线索账本:指纹重开(issues/05;影子期经接口交付,旧链调用形态零变化)', () => {
+  const FP_A = 'a'.repeat(64)
+  const FP_B = 'b'.repeat(64)
+
+  it('recordVerification 传 fingerprint 落列;不传不动列(旧链零变化)', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
+    try {
+      const { db } = openDb(':memory:')
+      const ledger = makeClueLedger(db)
+      await ledger.ingest('zhipu', [baseClue({ modelKey: 'with-fp' }), baseClue({ modelKey: 'no-fp' })])
+      await ledger.recordVerification('zhipu', 'with-fp', 'noise', undefined, FP_A)
+      await ledger.recordVerification('zhipu', 'no-fp', 'noise')
+      const byKey = new Map((await rows(db)).map((r) => [r.model_key, r]))
+      expect(byKey.get('with-fp')!.evidence_fingerprint).toBe(FP_A)
+      expect(byKey.get('no-fp')!.evidence_fingerprint).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('同指纹守终态(reopen 返回 false 状态不变);指纹变化重置为未核验且可再裁决', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
+    try {
+      const { db } = openDb(':memory:')
+      const ledger = makeClueLedger(db)
+      await ledger.ingest('zhipu', [baseClue()])
+      await ledger.recordVerification('zhipu', baseClue().modelKey, 'insufficient', '证据不足', FP_A)
+      // 同指纹:终态守住
+      expect(await ledger.reopenIfFingerprintChanged('zhipu', baseClue().modelKey, FP_A)).toBe(false)
+      let stored = (await rows(db))[0]!
+      expect(stored.verify_state).toBe('insufficient')
+      // 指纹变化:重置为未核验(三清)
+      expect(await ledger.reopenIfFingerprintChanged('zhipu', baseClue().modelKey, FP_B)).toBe(true)
+      stored = (await rows(db))[0]!
+      expect(stored.verify_state).toBeNull()
+      expect(stored.verify_reason).toBeNull()
+      expect(stored.evidence_fingerprint).toBeNull()
+      // 重开后可再裁决(新结果带新指纹)
+      expect(await ledger.recordVerification('zhipu', baseClue().modelKey, 'rejected', '复核改判', FP_B)).toBe(true)
+      stored = (await rows(db))[0]!
+      expect(stored.verify_state).toBe('rejected')
+      expect(stored.evidence_fingerprint).toBe(FP_B)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('指纹 NULL 的存量终态行保守不动(未按指纹裁决,不因无可比对全体重开);error 行不在重开面', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
+    try {
+      const { db } = openDb(':memory:')
+      const ledger = makeClueLedger(db)
+      await ledger.ingest('zhipu', [baseClue({ modelKey: 'legacy' }), baseClue({ modelKey: 'err' })])
+      await ledger.recordVerification('zhipu', 'legacy', 'rejected', '旧链裁决')
+      await ledger.recordVerification('zhipu', 'err', 'error', 'e')
+      expect(await ledger.reopenIfFingerprintChanged('zhipu', 'legacy', FP_B)).toBe(false)
+      expect(await ledger.reopenIfFingerprintChanged('zhipu', 'err', FP_B)).toBe(false)
+      const byKey = new Map((await rows(db)).map((r) => [r.model_key, r]))
+      expect(byKey.get('legacy')!.verify_state).toBe('rejected')
+      expect(byKey.get('err')!.verify_state).toBe('error')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('cluesFirstSeenSince:first_seen_at 轴、任意状态、带 provider', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
+    try {
+      const { db } = openDb(':memory:')
+      const ledger = makeClueLedger(db)
+      await ledger.ingest('zhipu', [baseClue({ modelKey: 'fresh', sourceUrl: 'https://docs.zhipu.com/fresh', title: '新线索' })])
+      await ledger.recordVerification('zhipu', 'fresh', 'rejected', 'r') // 已裁决也摄入(旧链同轮即核验)
+      vi.setSystemTime(new Date('2026-02-06T02:41:00Z'))
+      await ledger.ingest('zhipu', [baseClue({ modelKey: 'newer', occurredOn: '2026-02-06', sourceUrl: 'https://docs.zhipu.com/newer', title: '更新线索' })])
+      const since = new Date('2026-02-05T12:00:00Z').toISOString()
+      const got = await ledger.cluesFirstSeenSince(since)
+      expect(got.map((c) => c.modelKey)).toEqual(['newer'])
+      expect(got[0]).toMatchObject({ provider: 'zhipu', title: '更新线索' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

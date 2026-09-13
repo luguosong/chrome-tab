@@ -83,10 +83,11 @@ const SEED = seed as { models: BaselineModel[] }
 
 /**
  * 全部跟踪厂家的 provider 定义(取数差异面,ADR-0038):pollProvider 轮询入口的
- * 遍历/查表源。**Record 满配 = 编译期完备性**——新厂家票在 shared 的
+ * 遍历/查表源;影子核验链(verificationShadow.ts,issues/05)自此处取厂家 def 拼
+ * 核验白名单(pre-六类注册表形态)。**Record 满配 = 编译期完备性**——新厂家票在 shared 的
  * ModelProviderId 扩了枚举而漏挂此处,编译即报错;顺序与 cron 日志习惯一致。
  */
-const PROVIDERS: Record<ModelProviderId, ProviderDef<unknown>> = {
+export const PROVIDERS: Record<ModelProviderId, ProviderDef<unknown>> = {
   zhipu: ZHIPU_DEF,
   anthropic: ANTHROPIC_DEF,
   xai: XAI_DEF,
@@ -591,6 +592,11 @@ export function prodModelDeps(): ModelTrackingDeps {
 
 // ---- 定时轮询(ADR-0058「当天时效」:6h→2h;非整点错开,同 videoUpdates 口径)----
 
-export function startModelTrackingScheduler(service: ModelTrackingService): void {
-  schedule('41 */2 * * *', () => void service.pollProvider())
+/**
+ * 2h cron 既驱动轮询也驱动重扫(spec 调度与执行;ADR-0062):afterPoll 在每轮取数落定后
+ * 调用——影子核验链(verificationShadow.ts,issues/05)借此同节奏重扫,线索先经轮询入库
+ * 再进影子集。钩子缺席时行为与既往完全一致(旧链零变化)。
+ */
+export function startModelTrackingScheduler(service: ModelTrackingService, afterPoll?: () => void): void {
+  schedule('41 */2 * * *', () => void service.pollProvider().finally(() => afterPoll?.()))
 }

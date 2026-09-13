@@ -181,8 +181,9 @@ const INVESTIGATE_SYSTEM = `你是 AI 模型档案核验的调查员。给你一
 - sourceUrl 必须来自已读信源;excerpt 必须是该信源原文的连续片段(白空格可不同)——无法在原文中核实的引用会被丢弃,对应字段因证据不足暂缓。
 - 宁缺勿编:信源未明确披露的字段不填,不估不编。同一字段可多信源各引一条(目录在场可作 api 的佐证)。`
 
-/** 读取缓存行(节点内闭包持有,不进 state——checkpoint 只记摘要产物)。 */
-interface ReadRecord {
+/** 读取缓存行(节点内闭包持有,不进 state——checkpoint 只记摘要产物;调度侧
+ *  (verificationShadow.ts)预抓全部白名单信源后以同形态复用 computeEvidenceFingerprint)。 */
+export interface ReadRecord {
   role: SourceRole
   content: string
   observedAt: string
@@ -262,10 +263,11 @@ function investigationUser(
 
 /**
  * 证据指纹 = SHA-256(线索三元组 + 各信源页内容;spec 实现决策):成功读取带全文、失败带标记,
- * URL 序排序保证确定性;不含观察时刻——同页重放指纹不变。图外消费(票 05 thread_id 与账本
- * 同指纹守终态/变化重开)。
+ * URL 序排序保证确定性;不含观察时刻——同页重放指纹不变。两消费面:图内(实际读取子集,落
+ * state.fingerprint 作 jsonl 对照数据)与调度侧 verificationShadow(预抓**全部**白名单信源,
+ * issues/05——thread_id 须先于 invoke 可算且跨轮稳定,LLM 读取子集不满足)。
  */
-function computeEvidenceFingerprint(task: VerificationTask, reads: ReadonlyMap<string, ReadRecord>, failed: ReadonlySet<string>): string {
+export function computeEvidenceFingerprint(task: VerificationTask, reads: ReadonlyMap<string, ReadRecord>, failed: ReadonlySet<string>): string {
   const parts = [`${task.provider}|${task.clue.modelKey}|${task.clue.sourceUrl}`]
   for (const [url, r] of [...reads.entries()].sort(([a], [b]) => (a < b ? -1 : 1))) parts.push(`${url}\n${r.content}`)
   for (const url of [...failed].sort()) parts.push(`${url}\n(fetch-failed)`)

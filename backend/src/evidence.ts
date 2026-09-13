@@ -1,3 +1,4 @@
+import type { ModelProviderId } from 'chrome-tab-shared'
 import type { Db } from './db'
 
 /**
@@ -23,6 +24,29 @@ export interface FieldEvidence {
   decidedModel: string
   decidedAt: string
 }
+
+/** 行 → 域形状(latest/listByProvider 共用投影;结构化行类型 = select 结果两形态共用)。 */
+const toEvidence = (row: {
+  model_id: number
+  field: string
+  source_url: string
+  observed_at: string
+  excerpt: string
+  content_fingerprint: string
+  rule_version: string
+  decided_model: string
+  decided_at: string
+}): FieldEvidence => ({
+  modelId: row.model_id,
+  field: row.field,
+  sourceUrl: row.source_url,
+  observedAt: row.observed_at,
+  excerpt: row.excerpt,
+  contentFingerprint: row.content_fingerprint,
+  ruleVersion: row.rule_version,
+  decidedModel: row.decided_model,
+  decidedAt: row.decided_at,
+})
 
 export function makeEvidence(db: Pick<Db, 'insertInto' | 'selectFrom'>) {
   return {
@@ -58,17 +82,22 @@ export function makeEvidence(db: Pick<Db, 'insertInto' | 'selectFrom'>) {
         .limit(1)
         .executeTakeFirst()
       if (!row) return null
-      return {
-        modelId: row.model_id,
-        field: row.field,
-        sourceUrl: row.source_url,
-        observedAt: row.observed_at,
-        excerpt: row.excerpt,
-        contentFingerprint: row.content_fingerprint,
-        ruleVersion: row.rule_version,
-        decidedModel: row.decided_model,
-        decidedAt: row.decided_at,
-      }
+      return toEvidence(row)
+    },
+
+    /**
+     * 该家全部证据行(核验图调查上下文白名单第三件,issues/05 生产装配):按 model_archive
+     * 归属 join 到 provider,升序返回(消费侧自取各 (模型,字段) 最新行)。
+     */
+    async listByProvider(provider: ModelProviderId): Promise<FieldEvidence[]> {
+      const rows = await db
+        .selectFrom('model_field_evidence')
+        .innerJoin('model_archive', (join) => join.onRef('model_field_evidence.model_id', '=', 'model_archive.id'))
+        .selectAll('model_field_evidence')
+        .where('model_archive.provider', '=', provider)
+        .orderBy('model_field_evidence.id', 'asc')
+        .execute()
+      return rows.map(toEvidence)
     },
   }
 }

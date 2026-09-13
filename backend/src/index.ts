@@ -1,11 +1,6 @@
-// 依赖守门(无人值守数据核验 issues/01):side-effect 加载 LangGraph 三件套进启动路径
-// (core 经 langgraph 传递加载,无显式 import),实测常驻内存与 bundle 产物代价(门槛
-// ~28 MiB);三件套代码内联进 bundle,checkpoint-sqlite 顶层 import better-sqlite3
-// 是唯一 external(原生 ESM import,Node interop 解析到顶层 13.0.3,跨大版本兼容
-// 已实测)。核验图(issues/04,verificationGraph.ts)已落地但仅测试面消费——生产
-// bundle 尚无真实 import 链,此段保留到票 05 service 接线后由生产路径自然接管删除。
-import '@langchain/langgraph'
-import '@langchain/langgraph-checkpoint-sqlite'
+// LangGraph 三件套经 verificationShadow 的真实 import 链进 bundle(依赖守门 issues/01
+// 实测过闸;原 index.ts 守门 side-effect import 已由 issues/05 生产接线自然接管删除);
+// better-sqlite3 是唯一 external(原生 ESM import)。
 import { serve } from '@hono/node-server'
 import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -21,6 +16,7 @@ import { ModelTrackingService, prodModelDeps, startModelTrackingScheduler } from
 import { NewsService, prodNewsDeps, startNewsScheduler } from './news/news'
 import { ServerMonService, prodServerMonDeps, startServerMonScheduler, type ServerMonMachine } from './servermon'
 import { TrendingService, prodTrendingDeps, startTrendingScheduler } from './trending'
+import { makeShadowVerification } from './verificationShadow'
 import { VideoUpdatesService, prodVideoDeps, startVideoUpdatesScheduler } from './videoUpdates'
 
 const dbPath = resolve(process.env.DB_PATH ?? 'data/newtab.db')
@@ -106,8 +102,16 @@ serve({ fetch: app.fetch, port }, (info) => console.log(`backend listening on :$
 startChangelogScheduler(Object.values(changelog))
 // 视频更新 1h 轮询(spec:非整点错开整点请求高峰;库即真相,无启动预热步骤)
 startVideoUpdatesScheduler(videoUpdatesService)
-// 模型追踪 6h 轮询(研究 §6;失败保留库内档案并标记陈旧,下轮即重试)
-startModelTrackingScheduler(modelTrackingService)
+// 无人值守核验影子链(issues/05):私有 checkpoint 库与 jsonl 落点与生产库同目录(随
+// data 卷持久);首轮启动即跑(写摄取划界 started_at,存量不入;round 自吞异常),
+// 此后由 2h cron 在每轮取数落定后驱动重扫——新链真流量持续运转,影子期自此积累
+const shadowVerification = makeShadowVerification(db, prodModelDeps(), {
+  checkpointDbPath: resolve(dirname(dbPath), 'verification.db'),
+  jsonlPath: resolve(dirname(dbPath), 'verification-shadow.jsonl'),
+})
+void shadowVerification.round()
+// 模型追踪 2h 轮询(ADR-0058;失败保留库内档案并标记陈旧,下轮即重试),同 cron 驱动影子重扫
+startModelTrackingScheduler(modelTrackingService, () => void shadowVerification.round())
 // 新闻 30min 轮询(ADR-0027;勾选源才轮询,失败 48 轮标 failing 自愈口径见 news.ts)
 startNewsScheduler(newsService)
 // GitHub 趋势 1h 保热默认组合(ADR-0028;启动即预热,其余组合按需现抓)

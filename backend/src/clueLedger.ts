@@ -10,6 +10,10 @@ import type { PendingClue } from './providers/def'
  * 档案写入)在簿记之外(modelTracking.ts 的 verifyPendingClues)——账本不与「模型档案」域
  * 焊接。本文件是 model_pending_clues 表域行为的唯一入口;例外:bootstrapFromSeed 的
  * `aa:%` 一次性迁移清残(ADR-0058 存量残留)留原地,不为一次性调用 widening interface。
+ *
+ * 指纹重开语义(ADR-0062,issues/05):同指纹守终态、指纹变化重置为未核验——取代旧链
+ * 「终态不可覆盖 + 一次定终身」。影子期(issues/05)生产流不写账本(新链走私有注册表),
+ * 本语义经接口交付、切换(issues/11)后接管生产;旧链调用形态(不传指纹)行为零变化。
  */
 
 /**
@@ -138,16 +142,61 @@ export function makeClueLedger(db: Pick<Db, 'selectFrom' | 'insertInto' | 'updat
     /**
      * 记录核验结果。仅 pending / error 可写;终态不可覆盖。reason 无则写
      * NULL——error 重试成功后清掉旧失败理由。返回值表示本次是否完成状态转移。
+     * fingerprint(issues/05 指纹重开)可选:提供即随结果落 evidence_fingerprint 列
+     * (「本状态裁决所据的证据指纹」,reopenIfFingerprintChanged 的比对基准);缺省不触碰
+     * 该列——旧链调用形态行为零变化。
      */
-    async recordVerification(provider: ModelProviderId, modelKey: string, state: VerificationResultState, reason?: string): Promise<boolean> {
+    async recordVerification(provider: ModelProviderId, modelKey: string, state: VerificationResultState, reason?: string, fingerprint?: string): Promise<boolean> {
       const result = await db
         .updateTable('model_pending_clues')
-        .set({ verify_state: state, verify_reason: reason ?? null })
+        .set({ verify_state: state, verify_reason: reason ?? null, ...(fingerprint === undefined ? {} : { evidence_fingerprint: fingerprint }) })
         .where('provider', '=', provider)
         .where('model_key', '=', modelKey)
         .where((eb) => eb.or([eb('verify_state', 'is', null), eb('verify_state', '=', 'error')]))
         .execute()
       return result[0]!.numUpdatedRows > 0n
+    },
+
+    /**
+     * 指纹重开(issues/05;影子期经接口交付、切换后接管生产):终态行且按指纹裁决过
+     * (evidence_fingerprint 非空)且当前信源指纹已变 → 重置为未核验(state/reason/
+     * fingerprint 三清),返回 true;同指纹守终态、指纹 NULL 的存量行(旧链裁决,未按
+     * 指纹)保守不动——不因「无指纹可比」全体重开(存量集只含未核验线索,spec 附注)。
+     * error 行非终态(走重试口径),不在重开面。重开后 recordVerification 即可再写。
+     */
+    async reopenIfFingerprintChanged(provider: ModelProviderId, modelKey: string, currentFingerprint: string): Promise<boolean> {
+      const result = await db
+        .updateTable('model_pending_clues')
+        .set({ verify_state: null, verify_reason: null, evidence_fingerprint: null })
+        .where('provider', '=', provider)
+        .where('model_key', '=', modelKey)
+        .where('evidence_fingerprint', 'is not', null)
+        .where('evidence_fingerprint', '!=', currentFingerprint)
+        .where((eb) =>
+          eb.or([eb('verify_state', '=', 'accepted'), eb('verify_state', '=', 'rejected'), eb('verify_state', '=', 'noise'), eb('verify_state', '=', 'insufficient')]),
+        )
+        .execute()
+      return result[0]!.numUpdatedRows > 0n
+    },
+
+    /**
+     * first_seen_at 轴全量读(影子链摄取面,issues/05):自影子链启动时刻起新见的线索
+     * (任意状态——旧链在同一轮 poll 内即完成核验,按状态摄取会系统性漏空,真流量摄取
+     * 只能按「何时首见」划界)。与 dueClues(旧链重试面)分立,互不改写语义。
+     */
+    async cluesFirstSeenSince(sinceIso: string): Promise<Array<PendingClue & { provider: ModelProviderId }>> {
+      const rows = await db
+        .selectFrom('model_pending_clues')
+        .selectAll()
+        .where('first_seen_at', '>=', sinceIso)
+        .execute()
+      return rows.map((row) => ({
+        provider: row.provider as ModelProviderId,
+        occurredOn: row.occurred_on,
+        title: row.title,
+        sourceUrl: row.source_url,
+        modelKey: row.model_key,
+      }))
     },
   }
 }

@@ -603,6 +603,9 @@ export interface ModelPendingCluesTable {
   verify_state: string | null
   /** 判定理由(reject/insufficient/error 落库;accepted/noise 为 NULL)。 */
   verify_reason: string | null
+  /** 证据指纹(ADR-0062 决策三,issues/02 加列):本状态裁决所据的 SHA-256;影子期
+   *  新链不写账本恒 NULL,切换(issues/11)后随核验结果落列;同指纹守终态、变化重开。 */
+  evidence_fingerprint: string | null
   first_seen_at: string
   last_seen_at: string
 }
