@@ -37,10 +37,18 @@ try {
   for (let i = 0; i < 5; i++) await fetch(health) // 轻量流量,触发惰性初始化
   await fetch(`http://127.0.0.1:${port}/debug/gc`, { method: 'POST' })
   await fetch(`http://127.0.0.1:${port}/debug/gc`, { method: 'POST' })
-  await delay(5000) // 稳定窗口,同 research/01
+  // 稳定窗口:轮询 VmRSS 至收敛(连续 5 次波动 ≤0.5 MiB,上限 60s)。固定 5s 短窗
+  // (research/01 时代)在七服务启动预热时序不定时是瞬态读数,方差可达 ±70 MiB。
+  let rssKb = 0
+  let stable = 0
+  for (let i = 0; i < 30 && stable < 5; i++) {
+    await delay(2000)
+    const s = readFileSync(`/proc/${child.pid}/status`, 'utf8')
+    const v = Number(/^VmRSS:\s+(\d+) kB$/m.exec(s)?.[1])
+    stable = Math.abs(v - rssKb) <= 512 ? stable + 1 : 0
+    rssKb = v
+  }
 
-  const status = readFileSync(`/proc/${child.pid}/status`, 'utf8')
-  const rssKb = Number(/^VmRSS:\s+(\d+) kB$/m.exec(status)?.[1])
   const form = source ? 'tsx 源码直跑' : 'esbuild 打包(部署路径)'
   console.log(`RSS(${form}, 强制 GC 后)= ${(rssKb / 1024).toFixed(1)} MiB`)
 } finally {
