@@ -6,6 +6,7 @@ import { openDb, type Db } from './db'
 import { makeClueLedger } from './clueLedger'
 import { makeShadowVerification, type ShadowVerification } from './verificationShadow'
 import { ZHIPU_DEF } from './providers/zhipu'
+import { ModelTrackingService } from './modelTracking'
 import type { PendingClue } from './providers/def'
 import { computeEvidenceFingerprint, type ReadRecord, type VerificationTask } from './verificationGraph'
 
@@ -23,7 +24,7 @@ const CLUE: PendingClue & { provider: 'zhipu' } = {
   sourceUrl: 'https://docs.zhipu.com/glm-5-4',
   modelKey: 'glm-5.4',
 }
-const REL = ZHIPU_DEF.urls[0]!
+const REL = ZHIPU_DEF.sources.release.urls[0]!
 const DOC = CLUE.sourceUrl
 const RELEASE_MD = '# 智谱发布\n\nGLM-5.4 发布:新一代旗舰。2026-09-12 正式发布,上下文 200K。\n'
 const DOC_MD = '# GLM-5.4 文档\n\nGLM-5.4 已上线 API。\n'
@@ -88,15 +89,19 @@ const finalStage = JSON.stringify({
 })
 const agree = JSON.stringify({ agree: true, reason: '证据支撑' })
 
-/** 白名单(pre-注册表形态):厂家 def.urls + 线索 sourceUrl(zhipu 无 verifyUrls → 缺省)。 */
-const whitelistUrls = (): string[] => [...new Set([...ZHIPU_DEF.urls, CLUE.sourceUrl])]
+/** 白名单:六类注册页 + 线索 sourceUrl(zhipu 无 verifyUrls → 缺省)。 */
+const whitelistUrls = (): string[] => [...new Set([...Object.values(ZHIPU_DEF.sources).flatMap((s) => s.urls), CLUE.sourceUrl])]
 
 /** 与 round() 同式的调度侧指纹(预播种 thread_id 用):全部白名单信源预抓。 */
 function schedulerFingerprint(fx: Fixture): string {
   const reads = new Map<string, ReadRecord>()
-  for (const url of whitelistUrls()) reads.set(url, { role: 'release', content: fx.pages[url]!, observedAt: '2026-09-13T00:00:00Z' })
+  const failed = new Set<string>()
+  for (const url of whitelistUrls()) {
+    if (fx.pages[url] === undefined) failed.add(url)
+    else reads.set(url, { role: 'release', content: fx.pages[url]!, observedAt: '2026-09-13T00:00:00Z' })
+  }
   const task: VerificationTask = { provider: 'zhipu', clue: CLUE, sources: whitelistUrls().map((url) => ({ role: 'release' as const, url })) }
-  return computeEvidenceFingerprint(task, reads, new Set())
+  return computeEvidenceFingerprint(task, reads, failed)
 }
 
 const registryRow = (fx: Fixture) =>
@@ -251,6 +256,40 @@ describe('影子核验:cron 重扫与断点续跑', () => {
 })
 
 describe('影子核验:指纹重开与线程清理', () => {
+  it('24h 页变化为无发布线索的既有模型入重核队列，同页不烧 LLM，影子链复用快照', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-13T00:00:00Z'))
+    const fx = fixture()
+    await fx.db.insertInto('model_archive').values({
+      provider: 'zhipu', official_id: 'glm-5.4', name: 'GLM-5.4', kind: 'text', stage: 'ga',
+      availability: '["api"]', summary: null, sources: '[]', pricing: null, limits: null,
+      training_params: null, match_aliases: '[]', match_slugs: '[]', verified: 'manual',
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }).execute()
+    let price = '价格 1 元'
+    const fetchText = vi.fn(async (url: string) => url === ZHIPU_DEF.sources.pricing.urls[0] ? price : '官方资料')
+    const svc = new ModelTrackingService(fx.db, { fetchText, env: {} })
+    await svc.pollProvider()
+    await fx.shadow.round()
+    expect(fx.calls).toHaveLength(0) // 首次观察不是变化，也不提前启动补证
+    price = '价格 2 元'
+    vi.setSystemTime(new Date('2026-09-13T02:00:00Z'))
+    await svc.pollProvider()
+    await fx.shadow.round()
+    expect(fx.calls).toHaveLength(0) // 慢档尚未到期
+    vi.setSystemTime(new Date('2026-09-14T00:00:00Z'))
+    await svc.pollProvider()
+    fx.replies.push(finalNoise, agree)
+    await fx.shadow.round()
+    expect(jsonl(fx)).toHaveLength(1)
+    expect(jsonl(fx)[0]).toMatchObject({ modelKey: expect.stringMatching(/^recheck:/), exit: { kind: 'noise' } })
+    expect(fx.fetchText).not.toHaveBeenCalled() // 所有注册页由轮询缓存供给
+    await fx.shadow.round()
+    expect(fx.calls).toHaveLength(2)
+    expect(await fx.db.selectFrom('model_pending_clues').selectAll().execute()).toEqual([])
+    expect(await fx.db.selectFrom('model_field_evidence').selectAll().execute()).toEqual([])
+  })
+
   it('同指纹守终态(不再 invoke);信源页内容变化 → 重开新线程,旧 checkpoint 删除', async () => {
     const fx = fixture()
     await markerThenIngest(fx)

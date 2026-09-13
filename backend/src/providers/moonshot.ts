@@ -87,8 +87,22 @@ export const KIMI_BLOG_URL = 'https://www.kimi.com/en/blog/'
 export const MOONSHOT_DEF: ProviderDef<KimiArticle> = {
   id: 'moonshot',
   label: '月之暗面',
-  urls: [KIMI_NEWS_URL, KIMI_BLOG_URL],
-  parse: parseKimiArticles,
+  sources: {
+    release: { urls: [KIMI_NEWS_URL, KIMI_BLOG_URL], parse: parseKimiArticles },
+    catalog: { urls: ['https://platform.kimi.com/docs/pricing/chat'], parse: 'fingerprint' },
+    pricing: { urls: ['https://platform.moonshot.cn/docs/pricing/chat'], parse: 'fingerprint' },
+    limits: { urls: ['https://platform.moonshot.cn/docs/pricing/limits'], parse: 'fingerprint' },
+    weights: { urls: [
+      'https://huggingface.co/MoonshotAI/Kimi-K3/raw/main/README.md',
+      'https://huggingface.co/MoonshotAI/Kimi-K2.7-Code/raw/main/README.md',
+      'https://huggingface.co/MoonshotAI/Kimi-K2.6/raw/main/README.md',
+      'https://huggingface.co/MoonshotAI/Kimi-K2.5/raw/main/README.md',
+      'https://huggingface.co/MoonshotAI/Kimi-K2-Instruct/raw/main/README.md',
+      'https://huggingface.co/MoonshotAI/Kimi-K2-Thinking/raw/main/README.md',
+      'https://huggingface.co/MoonshotAI/Kimi-Audio-7B/raw/main/README.md',
+    ], parse: 'fingerprint' },
+    retirement: { urls: ['https://platform.moonshot.cn/docs/changelog'], parse: 'fingerprint' },
+  },
   matchEntry(a, rows) {
     const hit = matchKimiEvent(a, rows)
     return { hits: hit !== null ? [hit] : [], clues: [] }

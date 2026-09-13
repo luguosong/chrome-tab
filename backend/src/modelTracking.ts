@@ -1,4 +1,6 @@
 import { schedule } from 'node-cron'
+import { createHash } from 'node:crypto'
+import { load } from 'cheerio'
 import { Hono } from 'hono'
 import type {
   AvailabilityMode,
@@ -25,6 +27,8 @@ import { MOONSHOT_DEF } from './providers/moonshot'
 import { OPENAI_DEF } from './providers/openai'
 import { ALIBABA_DEF } from './providers/alibaba'
 import type { BaselineRow, MatchedHit, PendingClue, ProviderDef } from './providers/def'
+import { SOURCE_INTERVAL_MS, sourceIsStale } from './providers/def'
+import type { SourceRole } from './adjudication'
 import { makeAaEvaluations, type AaEvaluations } from './aaEvaluations'
 import { verifyClue } from './modelVerify'
 import { makeClueLedger, type ClueLedger } from './clueLedger'
@@ -84,7 +88,7 @@ const SEED = seed as { models: BaselineModel[] }
 /**
  * 全部跟踪厂家的 provider 定义(取数差异面,ADR-0038):pollProvider 轮询入口的
  * 遍历/查表源;影子核验链(verificationShadow.ts,issues/05)自此处取厂家 def 拼
- * 核验白名单(pre-六类注册表形态)。**Record 满配 = 编译期完备性**——新厂家票在 shared 的
+ * 六类核验白名单。**Record 满配 = 编译期完备性**——新厂家票在 shared 的
  * ModelProviderId 扩了枚举而漏挂此处,编译即报错;顺序与 cron 日志习惯一致。
  */
 export const PROVIDERS: Record<ModelProviderId, ProviderDef<unknown>> = {
@@ -125,6 +129,7 @@ export class ModelTrackingService {
   private readonly ledger: ClueLedger
   /** 评测接入(票 .scratch/评测生命周期/01):六路取数、映射、快照、状态与读侧投影的单点。 */
   private readonly aa: AaEvaluations
+  private readonly polling = new Map<ModelProviderId, Promise<void>>()
 
   constructor(
     private readonly db: Db,
@@ -288,7 +293,8 @@ export class ModelTrackingService {
       })
       byModel.set(e.model_id, list)
     }
-    const sources = await this.db.selectFrom('model_fetch_status').selectAll().execute()
+    // 六类健康展示归票 07;旧 wire 仍每家一条 release,避免重复 provider 键。
+    const sources = await this.db.selectFrom('model_fetch_status').selectAll().where('role', '=', 'release').execute()
     // 评测读侧经模块(aaEvaluations.ts):行投影与信封是评测方知识,wire 形态直出
     const evalsByModel = await this.aa.byModel()
     const evalStatus = await this.aa.status()
@@ -321,7 +327,7 @@ export class ModelTrackingService {
       })),
       sources: sources.map((s) => ({
         provider: s.provider as ModelProviderId,
-        stale: s.stale === 1,
+        stale: sourceIsStale('release', s),
         lastSuccessAt: s.last_success_at ?? null,
       })),
       evaluations: evalStatus,
@@ -337,16 +343,65 @@ export class ModelTrackingService {
    */
   async pollProvider(id?: ModelProviderId): Promise<void> {
     if (id !== undefined) {
-      await this.runPoll(PROVIDERS[id])
+      // 指定厂家是运维手动补轮,保留 release 强制刷新与失败直抛契约。
+      await this.pollSources(PROVIDERS[id], true)
       return
     }
     const jobs = Object.values(PROVIDERS).map((def) =>
-      this.runPoll(def).catch((e) => console.error(`模型追踪(${def.label})取数失败:`, e)),
+      this.pollSources(def).catch((e) => console.error(`模型追踪(${def.label})取数失败:`, e)),
     )
     jobs.push(
       this.aa.poll().catch((e) => console.error('模型追踪(评测)取数失败:', e)),
     )
     await Promise.all(jobs)
+  }
+
+  private pollSources(def: ProviderDef<unknown>, forceRelease = false): Promise<void> {
+    const active = this.polling.get(def.id)
+    if (active !== undefined) return active
+    const job = this.pollSourceRoles(def, forceRelease).finally(() => this.polling.delete(def.id))
+    this.polling.set(def.id, job)
+    return job
+  }
+
+  private async pollSourceRoles(def: ProviderDef<unknown>, forceRelease: boolean): Promise<void> {
+    // cron 精度为分钟:取本轮起点,避免抓取耗时/毫秒抖动把 2h 档拖成 4h。
+    const attemptedAt = new Date(Math.floor(Date.now() / 60_000) * 60_000).toISOString()
+    let releaseError: unknown
+    for (const role of Object.keys(SOURCE_INTERVAL_MS) as SourceRole[]) {
+      const status = await this.db.selectFrom('model_fetch_status').selectAll()
+        .where('provider', '=', def.id).where('role', '=', role).executeTakeFirst()
+      if (status !== undefined && status.stale === 0 && sourceIsStale(role, status)) {
+        await this.db.updateTable('model_fetch_status').set({ stale: 1 })
+          .where('provider', '=', def.id).where('role', '=', role).execute()
+      }
+      if (!(forceRelease && role === 'release') && status?.last_attempt_at !== null &&
+        status?.last_attempt_at !== undefined && Date.now() - Date.parse(status.last_attempt_at) < SOURCE_INTERVAL_MS[role]) continue
+      try {
+        const pages: Record<string, string> = {}
+        if (role === 'release') Object.assign(pages, await this.runPoll(def))
+        else for (const url of def.sources[role].urls) {
+          let content = await this.deps.fetchText(url, 30_000)
+          if (/<html[\s>]/i.test(content)) {
+            const $ = load(content)
+            $('script, style, noscript, nav, header, footer').remove()
+            const main = $('main')
+            content = (main.length > 0 ? main : $('body')).text().replace(/\s+/g, ' ').trim()
+          }
+          if (content.trim() === '') throw new Error('信源页为空')
+          pages[url] = content
+        }
+        const serialized = JSON.stringify(Object.entries(pages).sort(([a], [b]) => a.localeCompare(b)))
+        await this.markSource(def.id, true, role, {
+          pages: JSON.stringify(pages), fingerprint: createHash('sha256').update(serialized).digest('hex'),
+        }, attemptedAt)
+      } catch (e) {
+        await this.markSource(def.id, false, role, undefined, attemptedAt).catch(() => {})
+        if (role === 'release') releaseError = e
+        else console.error(`模型追踪(${def.label}/${role})取数失败:`, e)
+      }
+    }
+    if (releaseError !== undefined) throw releaseError
   }
 
   /**
@@ -356,13 +411,14 @@ export class ModelTrackingService {
    * 一项)自然退化为同语义(失败时多一次幂等 markSource,已记档的可接受漂移)。
    * 逐厂家的差异(信源/解析/匹配/线索)全部在 ProviderDef,此处不出现厂家分支。
    */
-  private async runPoll(def: ProviderDef<unknown>): Promise<void> {
+  private async runPoll(def: ProviderDef<unknown>): Promise<Record<string, string>> {
     const errs: unknown[] = []
+    const pages: Record<string, string> = {}
     const rows = await this.baselineRows(def.id)
-    for (const url of def.urls) {
+    for (const url of def.sources.release.urls) {
       try {
-        await this.pollOne(def.id, url, (md) => {
-          const { entries, skipped } = def.parse(md)
+        pages[url] = await this.pollOne(def.id, url, (md) => {
+          const { entries, skipped } = def.sources.release.parse(md)
           // 意外跳过先于判改版 warn:全灭场景的 skipped 片段就是「上游变成了什么」的排障线索。
           // 日志只打前 5 条片段:一个畸形月标题可让其后百余条类型行全部落 skipped,
           // 全量打会冲刷日志通道(评审修正);数组本身保持全量供测试断言。
@@ -395,6 +451,7 @@ export class ModelTrackingService {
       await this.markSource(def.id, false).catch(() => {})
       throw errs[0]
     }
+    return pages
   }
 
   /** 该家基线行集(每轮从 model_archive 读出;归属判定输入,ADR-0058 与代码常量解绑)。 */
@@ -466,7 +523,7 @@ export class ModelTrackingService {
     provider: ModelProviderId,
     url: string,
     parseAndMatch: (md: string) => ParsedFeed | null,
-  ): Promise<void> {
+  ): Promise<string> {
     try {
       const md = await this.deps.fetchText(url, 30_000)
       const feed = parseAndMatch(md)
@@ -474,6 +531,7 @@ export class ModelTrackingService {
       await this.ingest(provider, feed.hits)
       await this.ledger.ingest(provider, feed.clues)
       await this.markSource(provider, true)
+      return md
     } catch (e) {
       await this.markSource(provider, false).catch(() => {})
       throw e
@@ -552,24 +610,24 @@ export class ModelTrackingService {
     }
   }
 
-  private async markSource(provider: ModelProviderId, ok: boolean): Promise<void> {
+  private async markSource(provider: ModelProviderId, ok: boolean, role: SourceRole = 'release', snapshot?: { pages: string; fingerprint: string }, attemptedAt = nowIso()): Promise<void> {
     const now = nowIso()
     await this.db
       .insertInto('model_fetch_status')
       .values({
         provider,
-        // 信源角色(issues/02 健康表主键升级):当前轮询只抓发布页,即 release 职责;
-        // 六类信源分档健康在票 05/06 接线后由各自路径写入。
-        role: 'release',
+        role,
+        ...snapshot,
         stale: ok ? 0 : 1,
         last_success_at: ok ? now : null,
-        last_attempt_at: now,
+        last_attempt_at: attemptedAt,
       })
       .onConflict((oc) =>
         oc.columns(['provider', 'role']).doUpdateSet({
           stale: ok ? 0 : 1,
           ...(ok ? { last_success_at: now } : {}),
-          last_attempt_at: now,
+          last_attempt_at: attemptedAt,
+          ...snapshot,
         }),
       )
       .execute()

@@ -137,6 +137,8 @@ const MODEL_FETCH_STATUS: Col[] = [
   ['stale', 'INTEGER', 1, '0', 0],
   ['last_success_at', 'TEXT', 0, null, 0],
   ['last_attempt_at', 'TEXT', 0, null, 0],
+  ['pages', 'TEXT', 0, null, 0],
+  ['fingerprint', 'TEXT', 0, null, 0],
 ]
 const MODEL_FIELD_EVIDENCE: Col[] = [
   ['id', 'INTEGER', 0, null, 1],

@@ -96,6 +96,21 @@ function makeDeps(over: Partial<VerificationDeps> = {}) {
 }
 
 describe('核验图:出口语义(四类全测,同一 graph.invoke 接缝)', () => {
+  it('同一官方页登记 catalog 和 pricing，两类职责均保留而不被 URL 去重覆盖', async () => {
+    const { fn } = seqCall([readBoth, finalProposal([
+      STAGE_FIELD, AVAIL_REL, AVAIL_CAT, { ...PRICING_FIELD, sourceUrl: CAT },
+    ]), reviewAgree])
+    const d = makeDeps({ call: fn })
+    const result = await makeVerificationGraph(d.deps).invoke({ task: {
+      ...TASK, sources: [...TASK.sources, { role: 'pricing', url: CAT }],
+    } })
+    expect(result.exit).toMatchObject({ kind: 'accept' })
+    expect(d.commitPlans[0]!.fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: 'availability', decision: 'accept' }),
+      expect.objectContaining({ field: 'pricing', decision: 'accept' }),
+    ]))
+  })
+
   it('接纳(新模型插行):双段一致 + stage/availability 过硬 → 单事务计划落执行器;pricing 引发布页按矩阵暂缓', async () => {
     const { fn, calls } = seqCall([readBoth, finalProposal([STAGE_FIELD, AVAIL_REL, AVAIL_CAT, RELEASED_FIELD, PRICING_FIELD]), reviewAgree])
     const d = makeDeps({

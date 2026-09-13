@@ -341,6 +341,7 @@ export function migrate(sqlite: SqliteConnection) {
   })
   // 健康表主键升级 (provider) → (provider, role)(ADR-0062 决策二,issues/02)。
   upgradeFetchStatusRole(sqlite)
+  addMissingColumns(sqlite, 'model_fetch_status', { pages: 'TEXT', fingerprint: 'TEXT' })
   // 「重要日子」寄放布局设置(ADR-0026):存量行 NULL,读侧兜底 []。
   addMissingColumns(sqlite, 'layout_settings', { important_dates: 'TEXT' })
   // releaseTimes 落库(81888ea 曾以「迁移重」不动,2026-08-31 二次线上消失推翻):JSON
@@ -556,6 +557,9 @@ export interface ModelFetchStatusTable {
   stale: number
   last_success_at: string | null
   last_attempt_at: string | null
+  /** 最近完整成功页快照与 SHA-256;失败不覆盖,供影子核验按档位复用。 */
+  pages: Generated<string | null>
+  fingerprint: Generated<string | null>
 }
 
 export interface ModelFieldEvidenceTable {

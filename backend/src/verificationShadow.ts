@@ -9,6 +9,7 @@ import { makeClueLedger } from './clueLedger'
 import { PROVIDERS } from './modelTracking'
 import { callModel } from './llm'
 import type { SourceRole } from './adjudication'
+import { SOURCE_INTERVAL_MS, sourceIsStale } from './providers/def'
 import type { PendingClue, ProviderDef } from './providers/def'
 import {
   computeEvidenceFingerprint,
@@ -103,13 +104,20 @@ CREATE TABLE IF NOT EXISTS shadow_runs (
   updated_at     TEXT NOT NULL,
   PRIMARY KEY (provider, model_key)
 );
-CREATE TABLE IF NOT EXISTS shadow_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);`
+CREATE TABLE IF NOT EXISTS shadow_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS shadow_rechecks (
+  provider TEXT NOT NULL, model_key TEXT NOT NULL, occurred_on TEXT NOT NULL,
+  title TEXT NOT NULL, source_url TEXT NOT NULL, PRIMARY KEY (provider, model_key)
+);`
 
-/** 核验白名单(pre-六类注册表,issues/06 接管):厂家轮询信源 + 线索一手页(旧链
- *  verifyUrls 同源口径),全 release 角色,URL 去重。 */
+/** 六类注册信源 + 原有线索一手页;同 URL 可承担多个角色。 */
 function whitelistOf(def: ProviderDef<unknown>, clue: PendingClue): Array<{ role: SourceRole; url: string }> {
-  const urls = [...new Set([...def.urls, ...(def.verifyUrls?.(clue) ?? [clue.sourceUrl])])]
-  return urls.map((url) => ({ role: 'release' as const, url }))
+  const sources = (Object.keys(SOURCE_INTERVAL_MS) as SourceRole[])
+    .flatMap((role) => def.sources[role].urls.map((url) => ({ role, url })))
+  for (const url of def.verifyUrls?.(clue) ?? [clue.sourceUrl]) {
+    if (!sources.some((s) => s.url === url)) sources.push({ role: 'release', url })
+  }
+  return sources
 }
 
 /**
@@ -169,12 +177,14 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
 
   /** 当前工作项的预抓缓存(commit 落 jsonl 的上下文同款:轮次内串行,单槽即可)。 */
   let prefetch = new Map<string, string>()
+  let unavailable = new Set<string>()
   let commitCtx: { provider: string; modelKey: string; threadId: string; fingerprint: string } | null = null
 
   const graphDeps: VerificationDeps = {
     fetchText: async (url, timeoutMs) => {
       const hit = prefetch.get(url)
       if (hit !== undefined) return hit
+      if (unavailable.has(url)) throw new Error(`注册信源无新鲜快照:${url}`)
       return deps.fetchText(url, timeoutMs)
     },
     listModels: async (provider) => {
@@ -237,7 +247,7 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
   /** 线索身份键(去重/注册表查询共用单点,防三处拼接漂移)。 */
   const clueKey = (provider: string, modelKey: string): string => `${provider}|${modelKey}`
 
-  async function runItem(clue: PendingClue & { provider: ModelProviderId }, row: ShadowRunRow | undefined, roundCache: Map<string, string>): Promise<void> {
+  async function runItem(clue: PendingClue & { provider: ModelProviderId }, row: ShadowRunRow | undefined, roundCache: Map<string, string>, snapshots: Map<string, { content: string; observedAt: string }>, registered: Set<string>): Promise<void> {
     const def = PROVIDERS[clue.provider]
     const sources = whitelistOf(def, clue)
     const reads = new Map<string, ReadRecord>()
@@ -245,17 +255,18 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
     const observedAt = nowIso()
     for (const s of sources) {
       try {
-        // 轮级正缓存:共享信源页(厂家 def.urls)同轮跨线索只抓一次(终态重开检查逐项
-        // 比对指纹的取数大头);失败不缓存——图内按需重抓与下条线索都是真实的第二次机会
-        const hit = roundCache.get(s.url)
+        // 注册页复用轮询快照;线索自有页同轮跨线索只抓一次,失败仍可重试。
+        const snapshot = snapshots.get(s.url)
+        const hit = snapshot?.content ?? roundCache.get(s.url)
+        if (hit === undefined && registered.has(s.url)) throw new Error('信源快照不可用')
         const content = hit !== undefined ? hit : await deps.fetchText(s.url, 30_000)
         roundCache.set(s.url, content)
-        reads.set(s.url, { role: s.role, content, observedAt })
+        reads.set(s.url, { role: s.role, content, observedAt: snapshot?.observedAt ?? observedAt })
       } catch {
         failed.add(s.url)
       }
     }
-    const task: VerificationTask = { provider: clue.provider, clue, sources }
+    const task: VerificationTask = { provider: clue.provider, clue, sources: sources.map((s) => ({ ...s, observedAt: reads.get(s.url)?.observedAt })) }
     const fingerprint = computeEvidenceFingerprint(task, reads, failed)
     // 线索快照锚定注册表(重试期间任务恒定;账本 re-ingest 刷新 title/sourceUrl 不漂移进
     // 指纹三元组——snapshot 即该线索在影子域的任务身份)
@@ -265,6 +276,7 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
     q.register.run({ provider: clue.provider, modelKey: clue.modelKey, occurredOn: clue.occurredOn, title: clue.title, sourceUrl: clue.sourceUrl, threadId, fingerprint, updatedAt: nowIso() })
     commitCtx = { provider: clue.provider, modelKey: clue.modelKey, threadId, fingerprint }
     prefetch = new Map([...reads].map(([url, r]) => [url, r.content]))
+    unavailable = new Set([...failed].filter((url) => registered.has(url)))
     const cfg = { configurable: { thread_id: threadId } }
     let exit: VerificationExit | null
     let graphFingerprint: string | null = null
@@ -320,6 +332,36 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
         startedAt = nowIso()
         q.metaSet.run('started_at', startedAt)
       }
+      // 轮询是注册页唯一刷新者;快照过期/失败不在图内绕过档位重新抓取。
+      const snapshots = new Map<string, { content: string; observedAt: string }>()
+      const registered = new Set<string>()
+      const statuses = await db.selectFrom('model_fetch_status').selectAll().execute()
+      for (const status of statuses) {
+        const def = PROVIDERS[status.provider as ModelProviderId]
+        const role = status.role as SourceRole
+        const source = def?.sources[role]
+        if (source === undefined) continue
+        for (const url of source.urls) registered.add(url)
+        if (status.pages === null || status.last_success_at === null || sourceIsStale(role, status)) continue
+        const pages = JSON.parse(status.pages) as Record<string, string>
+        for (const url of source.urls) if (pages[url] !== undefined && (snapshots.get(url)?.observedAt ?? '') < status.last_success_at) {
+          snapshots.set(url, { content: pages[url], observedAt: status.last_success_at })
+        }
+        if (role === 'release' || status.fingerprint === null) continue
+        const key = `source:${def.id}:${role}`
+        const previous = q.metaGet.get(key)?.value
+        // 首次成功只建指纹底册,不把种子补证批次提前到影子期。
+        const models = previous !== undefined && previous !== status.fingerprint
+          ? await db.selectFrom('model_archive').select(['id', 'official_id', 'name']).where('provider', '=', def.id).execute()
+          : []
+        // ponytail: 共享页变化重核该厂家全部模型;有真实成本数据后再按页面 scope 收窄。
+        sqlite.transaction(() => {
+          for (const model of models) sqlite.prepare(
+            'INSERT INTO shadow_rechecks VALUES (?, ?, ?, ?, ?) ON CONFLICT (provider, model_key) DO NOTHING',
+          ).run(def.id, `recheck:${model.id}`, nowIso().slice(0, 10), `${model.official_id} (${model.name}) 官方资料变化重核`, def.sources.release.urls[0]!)
+          q.metaSet.run(key, status.fingerprint!)
+        })()
+      }
       // 工作项:重扫优先(运行中/退避中,无窗口限制——系统错误退避不受展示窗口限制)、
       // 摄取次之(first_seen 轴)、终态重开检查最后(ingest 窗内;逐项同指纹即守)
       const seen = new Set<string>()
@@ -327,6 +369,12 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
       for (const row of q.nonTerminal.all()) {
         items.push(rowToClue(row))
         seen.add(clueKey(row.provider, row.model_key))
+      }
+      for (const row of sqlite.prepare<[], ShadowRunRow>('SELECT * FROM shadow_rechecks').all()) {
+        if (!seen.has(clueKey(row.provider, row.model_key))) {
+          items.push(rowToClue(row))
+          seen.add(clueKey(row.provider, row.model_key))
+        }
       }
       for (const clue of await ledger.cluesFirstSeenSince(startedAt)) {
         if (!seen.has(clueKey(clue.provider, clue.modelKey))) items.push(clue)
@@ -337,7 +385,8 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
       const roundCache = new Map<string, string>()
       for (const clue of items) {
         try {
-          await runItem(clue, q.get.get(clue.provider, clue.modelKey) ?? undefined, roundCache)
+          await runItem(clue, q.get.get(clue.provider, clue.modelKey) ?? undefined, roundCache, snapshots, registered)
+          sqlite.prepare('DELETE FROM shadow_rechecks WHERE provider = ? AND model_key = ?').run(clue.provider, clue.modelKey)
         } catch (e) {
           // 意外异常(非图出口):行留 running,下轮同线程续跑自愈;单线索失败不牵连整轮
           console.error(`影子核验(${clue.provider})线索 ${clue.modelKey} 轮次异常(下轮续跑):`, e)

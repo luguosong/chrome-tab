@@ -98,7 +98,9 @@ function fullPages(): Record<string, string> {
  * 模块的只读输入;aaMapping 种子在 service 侧编排内完成;厂家轮询 404 与断言无关),
  * 再构造被测模块。 */
 async function makeModule(db: Db, pages: Record<string, string>, aaApiKey = STUB_UPSTREAM_KEY) {
-  await new ModelTrackingService(db, { fetchText: fetchOf({}) }, '').init()
+  const service = new ModelTrackingService(db, { fetchText: fetchOf({}) }, '')
+  await service.init()
+  await service.pollProvider() // 等初始化的厂家轮落定，再隔离断言 AA 的写入边界。
   return makeAaEvaluations(db, fetchOf(pages), aaApiKey)
 }
 

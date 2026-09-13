@@ -143,8 +143,17 @@ export function matchOpenAIEvents(
 export const OPENAI_DEF: ProviderDef<OpenAIChangelogEntry> = {
   id: 'openai',
   label: 'OpenAI',
-  urls: [OPENAI_CHANGELOG_URL],
-  parse: parseOpenAIChangelog,
+  sources: {
+    release: { urls: [OPENAI_CHANGELOG_URL], parse: parseOpenAIChangelog },
+    catalog: { urls: ['https://developers.openai.com/api/docs/models.md'], parse: 'fingerprint' },
+    pricing: { urls: ['https://developers.openai.com/api/docs/pricing.md'], parse: 'fingerprint' },
+    limits: { urls: ['https://developers.openai.com/api/docs/guides/rate-limits.md'], parse: 'fingerprint' },
+    weights: { urls: [
+      'https://huggingface.co/openai/gpt-oss-120b/raw/main/README.md',
+      'https://huggingface.co/openai/gpt-oss-20b/raw/main/README.md',
+    ], parse: 'fingerprint' },
+    retirement: { urls: ['https://developers.openai.com/api/docs/deprecations.md'], parse: 'fingerprint' },
+  },
   // auto 核验信源(ADR-0058):裸 ID 线索 → 模型文档页(.md 直抓,含规格/价格)+ changelog 页
   verifyUrls: (clue) => [
     `https://developers.openai.com/api/docs/models/${clue.modelKey}.md`,

@@ -83,8 +83,14 @@ export const ANTHROPIC_RELEASES_URL = 'https://platform.claude.com/docs/en/relea
 export const ANTHROPIC_DEF: ProviderDef<AnthropicNote> = {
   id: 'anthropic',
   label: 'Anthropic',
-  urls: [ANTHROPIC_RELEASES_URL],
-  parse: parseAnthropicReleases,
+  sources: {
+    release: { urls: [ANTHROPIC_RELEASES_URL], parse: parseAnthropicReleases },
+    catalog: { urls: ['https://platform.claude.com/docs/en/about-claude/models/overview.md'], parse: 'fingerprint' },
+    pricing: { urls: ['https://platform.claude.com/docs/en/about-claude/pricing.md'], parse: 'fingerprint' },
+    limits: { urls: ['https://platform.claude.com/docs/en/api/rate-limits.md'], parse: 'fingerprint' },
+    weights: { urls: ['https://www.anthropic.com/system-cards'], parse: 'fingerprint' },
+    retirement: { urls: ['https://platform.claude.com/docs/en/about-claude/model-deprecations.md'], parse: 'fingerprint' },
+  },
   // auto 核验信源(ADR-0058;信息智能化 spec 1.3 裁决 12):固定 models/overview 页
   // (新模型发布即上页,API ID/定价/limits/retirement 齐全)+ 线索源页——release notes
   // 条目只报发布不含规格,单靠它信源单薄(Fable 5.1 误拒归因之一)。直链

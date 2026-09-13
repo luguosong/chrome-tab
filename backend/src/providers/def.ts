@@ -1,4 +1,19 @@
 import type { ModelEvent, ModelProviderId } from 'chrome-tab-shared'
+import type { SourceRole } from '../adjudication'
+
+/** 档位同时是轮询间隔与健康新鲜度预算(ADR-0062)。 */
+export const SOURCE_INTERVAL_MS: Record<SourceRole, number> = {
+  release: 2 * 3600_000, catalog: 6 * 3600_000, retirement: 6 * 3600_000,
+  pricing: 24 * 3600_000, limits: 24 * 3600_000, weights: 24 * 3600_000,
+}
+
+export const sourceIsStale = (role: SourceRole, status: { stale: number; last_success_at: string | null }): boolean =>
+  status.stale === 1 || status.last_success_at === null ||
+  Date.now() - Date.parse(status.last_success_at) > SOURCE_INTERVAL_MS[role]
+
+export type ProviderSources<E> = {
+  release: { urls: string[]; parse: (md: string) => ParseResult<E> }
+} & Record<Exclude<SourceRole, 'release'>, { urls: string[]; parse: 'fingerprint' }>
 
 /**
  * 「跟踪厂家」的 provider 定义(CONTEXT.md「跟踪厂家」;ADR-0038):一个厂家与取数
@@ -50,11 +65,8 @@ export interface ProviderDef<E> {
   id: ModelProviderId
   /** 中文厂名家(cron 失败日志用,与既有日志格式对齐)。 */
   label: string
-  /** 信源 URL(月之暗面为资讯+Blog 两页,其余单页)。 */
-  urls: string[]
-  /** 信源原文 → 条目+意外跳过;零条目由 runPoll 统一判「上游改版」,skipped 非空
-   *  由 runPoll 统一 warn(CONTEXT「意外跳过」,ADR-0052)。 */
-  parse: (md: string) => ParseResult<E>
+  /** 六类角色 → 地址与解析职责;非发布页只算指纹,事实裁决仍归核验图。 */
+  sources: ProviderSources<E>
   /** 单条目分派(见 MatchEntryResult);rows = 该家基线行集(当轮从 DB 读)。 */
   matchEntry(e: E, rows: readonly BaselineRow[]): MatchEntryResult
   /** auto 核验信源(ADR-0058):线索 → 厂家一手页 URL(字段回链的「链」);缺省 =

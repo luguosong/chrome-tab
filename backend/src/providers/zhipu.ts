@@ -78,8 +78,26 @@ export const ZHIPU_RELEASES_URL = 'https://docs.bigmodel.cn/cn/update/new-releas
 export const ZHIPU_DEF: ProviderDef<ZhipuUpdate> = {
   id: 'zhipu',
   label: '智谱',
-  urls: [ZHIPU_RELEASES_URL],
-  parse: parseZhipuReleases,
+  sources: {
+    release: { urls: [ZHIPU_RELEASES_URL], parse: parseZhipuReleases },
+    catalog: { urls: ['https://docs.bigmodel.cn/cn/guide/start/model-overview.md'], parse: 'fingerprint' },
+    pricing: { urls: ['https://docs.bigmodel.cn/cn/guide/start/pricing.md'], parse: 'fingerprint' },
+    limits: { urls: ['https://docs.bigmodel.cn/cn/guide/start/model-overview.md'], parse: 'fingerprint' },
+    weights: { urls: [
+      'https://huggingface.co/zai-org/GLM-5.2/raw/main/README.md',
+      'https://huggingface.co/zai-org/GLM-5.1/raw/main/README.md',
+      'https://huggingface.co/zai-org/GLM-5/raw/main/README.md',
+      'https://huggingface.co/zai-org/GLM-4.7/raw/main/README.md',
+      'https://huggingface.co/zai-org/GLM-4.6/raw/main/README.md',
+      'https://huggingface.co/zai-org/GLM-4.5-Air/raw/main/README.md',
+      'https://huggingface.co/zai-org/GLM-4.7-Flash/raw/main/README.md',
+      'https://huggingface.co/zai-org/GLM-4.6V/raw/main/README.md',
+      'https://huggingface.co/zai-org/GLM-OCR/raw/main/README.md',
+      'https://huggingface.co/zai-org/GLM-4.6V-Flash/raw/main/README.md',
+      'https://huggingface.co/zai-org/GLM-TTS/raw/main/README.md',
+    ], parse: 'fingerprint' },
+    retirement: { urls: ['https://docs.bigmodel.cn/cn/guide/start/model-overview.md'], parse: 'fingerprint' },
+  },
   matchEntry(u, rows) {
     const hit = matchZhipuEvent(u, rows)
     if (hit !== null) return { hits: [hit], clues: [] }

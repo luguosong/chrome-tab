@@ -80,8 +80,26 @@ export function matchDeepSeekEvent(s: DeepSeekSection, rows: readonly BaselineRo
 export const DEEPSEEK_DEF: ProviderDef<DeepSeekSection> = {
   id: 'deepseek',
   label: 'DeepSeek',
-  urls: [DEEPSEEK_UPDATES_URL],
-  parse: parseDeepSeekUpdates,
+  sources: {
+    release: { urls: [DEEPSEEK_UPDATES_URL], parse: parseDeepSeekUpdates },
+    catalog: { urls: ['https://api-docs.deepseek.com/quick_start/pricing'], parse: 'fingerprint' },
+    pricing: { urls: ['https://api-docs.deepseek.com/quick_start/pricing'], parse: 'fingerprint' },
+    limits: { urls: ['https://api-docs.deepseek.com/quick_start/rate_limit'], parse: 'fingerprint' },
+    weights: { urls: [
+      'https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro-0813/raw/main/README.md',
+      'https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731/raw/main/README.md',
+      'https://huggingface.co/deepseek-ai/Janus-Pro-7B/raw/main/README.md',
+      'https://huggingface.co/deepseek-ai/Janus-Pro-1B/raw/main/README.md',
+      'https://huggingface.co/deepseek-ai/DeepSeek-V3.2/raw/main/README.md',
+      'https://huggingface.co/deepseek-ai/DeepSeek-V3.1/raw/main/README.md',
+      'https://huggingface.co/deepseek-ai/DeepSeek-R1/raw/main/README.md',
+      'https://huggingface.co/deepseek-ai/DeepSeek-V3/raw/main/README.md',
+      'https://huggingface.co/deepseek-ai/DeepSeek-V2.5-1210/raw/main/README.md',
+      'https://huggingface.co/deepseek-ai/DeepSeek-Coder-V2-Instruct/raw/main/README.md',
+      'https://huggingface.co/deepseek-ai/DeepSeek-V2/raw/main/README.md',
+    ], parse: 'fingerprint' },
+    retirement: { urls: ['https://api-docs.deepseek.com/updates/'], parse: 'fingerprint' },
+  },
   matchEntry(s, rows) {
     const matched = matchDeepSeekEvent(s, rows)
     if (matched.length > 0) return { hits: matched, clues: [] }

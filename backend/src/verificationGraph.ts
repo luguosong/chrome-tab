@@ -30,12 +30,12 @@ import type { PendingClue } from './providers/def'
  * 总时长三预算见 VERIFICATION_BUDGET。线索账本记账、指纹重开语义、cron 重扫在图外(票 05)。
  */
 
-/** 一次核验任务:线索 + 该厂家注册信源白名单(六类注册表由票 06 组装,现为接线方拼 def.urls)。 */
+/** 一次核验任务:线索 + 六类注册信源白名单;缓存页保留真实观察时刻。 */
 export interface VerificationTask {
   provider: ModelProviderId
   clue: PendingClue
   /** 受限读取器白名单:调查节点只允许读这些 URL(role = 裁决矩阵的权源判定输入)。 */
-  sources: ReadonlyArray<{ role: SourceRole; url: string }>
+  sources: ReadonlyArray<{ role: SourceRole; url: string; observedAt?: string }>
 }
 
 /** 该家档案行投影(调查上下文 = 判「新独立型号 vs 既有别名」的底册;commit 节点定位目标)。 */
@@ -348,7 +348,7 @@ function investigateNode(deps: VerificationDeps) {
           for (const url of allowed) {
             if (Date.now() > deadline) break
             try {
-              reads.set(url, { role: whitelist.get(url)!.role, content: await deps.fetchText(url, 30_000), observedAt: new Date().toISOString() })
+              reads.set(url, { role: whitelist.get(url)!.role, content: await deps.fetchText(url, 30_000), observedAt: whitelist.get(url)!.observedAt ?? new Date().toISOString() })
             } catch {
               failed.add(url)
               newlyFailed.push(url)
@@ -378,20 +378,21 @@ function investigateNode(deps: VerificationDeps) {
             return { investigation: null, fingerprint, exit: { kind: 'defer', cause: 'insufficient', reason: typeof parsed.reason === 'string' && parsed.reason !== '' ? parsed.reason : '提案身份校验未过(缺 officialId/name 或 kind 越值域),信源依据不足' } }
           }
           const rawFields = Array.isArray(parsed.fields) ? parsed.fields : []
-          const citations: FieldCitation[] = rawFields.map((f) => {
+          const citations: FieldCitation[] = rawFields.flatMap((f): FieldCitation[] => {
             const f2 = f as { field?: unknown; value?: unknown; sourceUrl?: unknown; excerpt?: unknown }
             const field = typeof f2.field === 'string' ? f2.field : ''
             const sourceUrl = typeof f2.sourceUrl === 'string' ? f2.sourceUrl : ''
             const excerpt = typeof f2.excerpt === 'string' ? f2.excerpt : ''
             const read = reads.get(sourceUrl)
             if (field === '' || read === undefined || !excerptInContent(read.content, excerpt) || !validFieldValue(field, f2.value)) {
-              return { field, value: f2.value, observation: null }
+              return [{ field, value: f2.value, observation: null }]
             }
-            return {
+            // 同 URL 的多个登记职责都交给全局矩阵裁决,不由 Map 最后一项吞掉角色。
+            return [...new Set(task.sources.filter((s) => s.url === sourceUrl).map((s) => s.role))].map((role) => ({
               field,
               value: f2.value,
-              observation: { role: read.role, sourceUrl, observedAt: read.observedAt, excerpt, value: f2.value },
-            }
+              observation: { role, sourceUrl, observedAt: read.observedAt, excerpt, value: f2.value },
+            }))
           })
           return { investigation: { kind: 'proposal', ...identity, citations }, investigateModel: chain[cursor], fingerprint, exit: null }
         }

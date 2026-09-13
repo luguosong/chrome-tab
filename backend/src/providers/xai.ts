@@ -97,8 +97,14 @@ export const XAI_RELEASES_URL = 'https://docs.x.ai/developers/release-notes.md'
 export const XAI_DEF: ProviderDef<XaiReleaseEntry> = {
   id: 'xai',
   label: 'xAI',
-  urls: [XAI_RELEASES_URL],
-  parse: parseXaiReleaseNotes,
+  sources: {
+    release: { urls: [XAI_RELEASES_URL], parse: parseXaiReleaseNotes },
+    catalog: { urls: ['https://docs.x.ai/developers/models.md'], parse: 'fingerprint' },
+    pricing: { urls: ['https://docs.x.ai/developers/pricing.md'], parse: 'fingerprint' },
+    limits: { urls: ['https://docs.x.ai/developers/rate-limits.md'], parse: 'fingerprint' },
+    weights: { urls: ['https://huggingface.co/xai-org/grok-1/raw/main/README.md'], parse: 'fingerprint' },
+    retirement: { urls: ['https://docs.x.ai/developers/release-notes.md'], parse: 'fingerprint' },
+  },
   matchEntry(e, rows) {
     const matched = matchXaiEvent(e, rows)
     if (matched.length > 0) return { hits: matched, clues: [] }
