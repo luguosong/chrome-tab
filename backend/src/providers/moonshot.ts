@@ -88,10 +88,10 @@ export const MOONSHOT_DEF: ProviderDef<KimiArticle> = {
   id: 'moonshot',
   label: '月之暗面',
   sources: {
-    release: { urls: [KIMI_NEWS_URL, KIMI_BLOG_URL], parse: parseKimiArticles },
-    catalog: { urls: ['https://platform.kimi.com/docs/pricing/chat'], parse: 'fingerprint' },
-    pricing: { urls: ['https://platform.moonshot.cn/docs/pricing/chat'], parse: 'fingerprint' },
-    limits: { urls: ['https://platform.moonshot.cn/docs/pricing/limits'], parse: 'fingerprint' },
+    release: { urls: [KIMI_NEWS_URL, KIMI_BLOG_URL], parse: parseKimiArticles, html: true },
+    catalog: { urls: ['https://platform.kimi.com/docs/pricing/chat'], parse: 'fingerprint', html: true },
+    pricing: { urls: ['https://platform.moonshot.cn/docs/pricing/chat'], parse: 'fingerprint', html: true },
+    limits: { urls: ['https://platform.moonshot.cn/docs/pricing/limits'], parse: 'fingerprint', html: true },
     weights: { urls: [
       'https://huggingface.co/MoonshotAI/Kimi-K3/raw/main/README.md',
       'https://huggingface.co/MoonshotAI/Kimi-K2.7-Code/raw/main/README.md',
@@ -101,7 +101,7 @@ export const MOONSHOT_DEF: ProviderDef<KimiArticle> = {
       'https://huggingface.co/MoonshotAI/Kimi-K2-Thinking/raw/main/README.md',
       'https://huggingface.co/MoonshotAI/Kimi-Audio-7B/raw/main/README.md',
     ], parse: 'fingerprint' },
-    retirement: { urls: ['https://platform.moonshot.cn/docs/changelog'], parse: 'fingerprint' },
+    retirement: { urls: ['https://platform.moonshot.cn/docs/changelog'], parse: 'fingerprint', html: true },
   },
   matchEntry(a, rows) {
     const hit = matchKimiEvent(a, rows)

@@ -88,7 +88,7 @@ export const ANTHROPIC_DEF: ProviderDef<AnthropicNote> = {
     catalog: { urls: ['https://platform.claude.com/docs/en/about-claude/models/overview.md'], parse: 'fingerprint' },
     pricing: { urls: ['https://platform.claude.com/docs/en/about-claude/pricing.md'], parse: 'fingerprint' },
     limits: { urls: ['https://platform.claude.com/docs/en/api/rate-limits.md'], parse: 'fingerprint' },
-    weights: { urls: ['https://www.anthropic.com/system-cards'], parse: 'fingerprint' },
+    weights: { urls: ['https://www.anthropic.com/system-cards'], parse: 'fingerprint', html: true },
     retirement: { urls: ['https://platform.claude.com/docs/en/about-claude/model-deprecations.md'], parse: 'fingerprint' },
   },
   // auto 核验信源(ADR-0058;信息智能化 spec 1.3 裁决 12):固定 models/overview 页

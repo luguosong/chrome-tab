@@ -112,10 +112,10 @@ export const ALIBABA_DEF: ProviderDef<BailianRow> = {
   id: 'alibaba',
   label: '通义',
   sources: {
-    release: { urls: [QWEN_RELEASES_URL], parse: parseBailianReleases },
-    catalog: { urls: ['https://help.aliyun.com/zh/model-studio/models'], parse: 'fingerprint' },
-    pricing: { urls: ['https://help.aliyun.com/zh/model-studio/model-pricing'], parse: 'fingerprint' },
-    limits: { urls: ['https://help.aliyun.com/zh/model-studio/rate-limit'], parse: 'fingerprint' },
+    release: { urls: [QWEN_RELEASES_URL], parse: parseBailianReleases, html: true },
+    catalog: { urls: ['https://help.aliyun.com/zh/model-studio/models'], parse: 'fingerprint', html: true },
+    pricing: { urls: ['https://help.aliyun.com/zh/model-studio/model-pricing'], parse: 'fingerprint', html: true },
+    limits: { urls: ['https://help.aliyun.com/zh/model-studio/rate-limit'], parse: 'fingerprint', html: true },
     weights: { urls: [
       'https://huggingface.co/Qwen/Qwen3.8-2.4T-A95B/raw/main/README.md',
       'https://huggingface.co/Qwen/Qwen3.8-27B/raw/main/README.md',
@@ -144,7 +144,7 @@ export const ALIBABA_DEF: ProviderDef<BailianRow> = {
       'https://huggingface.co/Qwen/Qwen3-VL-Reranker-2B/raw/main/README.md',
       'https://huggingface.co/Qwen/Qwen3-Reranker-0.6B/raw/main/README.md',
     ], parse: 'fingerprint' },
-    retirement: { urls: ['https://help.aliyun.com/zh/model-studio/model-deprecation'], parse: 'fingerprint' },
+    retirement: { urls: ['https://help.aliyun.com/zh/model-studio/model-deprecation'], parse: 'fingerprint', html: true },
   },
   // auto 核验信源 = 百炼表格页(价格/规格不在表内,LLM 只核「自家新模型上架」事实,资料字段留空)
   verifyUrls: (clue) => [clue.sourceUrl],

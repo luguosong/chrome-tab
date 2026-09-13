@@ -11,9 +11,15 @@ export const sourceIsStale = (role: SourceRole, status: { stale: number; last_su
   status.stale === 1 || status.last_success_at === null ||
   Date.now() - Date.parse(status.last_success_at) > SOURCE_INTERVAL_MS[role]
 
+/**
+ * 信源登记形态。`html: true` = 页面是 HTML(存储/指纹前须经 normalizeSourcePage 取正文);
+ * 缺省 = .md 原样。**静态声明而非内容启发式**:启发式对「.md 正文里出现字面 `<meta>`」
+ * 误报(存储形态被重写、指纹翻转)、对「无 `<html>` 字面标签的 HTML」漏报(script hash
+ * 进指纹)——注册表自己知道每个 URL 是什么,不用猜。
+ */
 export type ProviderSources<E> = {
-  release: { urls: string[]; parse: (md: string) => ParseResult<E> }
-} & Record<Exclude<SourceRole, 'release'>, { urls: string[]; parse: 'fingerprint' }>
+  release: { urls: string[]; parse: (md: string) => ParseResult<E>; html?: boolean }
+} & Record<Exclude<SourceRole, 'release'>, { urls: string[]; parse: 'fingerprint'; html?: boolean }>
 
 /**
  * 「跟踪厂家」的 provider 定义(CONTEXT.md「跟踪厂家」;ADR-0038):一个厂家与取数

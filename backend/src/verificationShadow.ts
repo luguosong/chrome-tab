@@ -6,7 +6,7 @@ import type { ModelProviderId } from 'chrome-tab-shared'
 import { makeEvidence } from './evidence'
 import type { Db } from './db'
 import { makeClueLedger } from './clueLedger'
-import { PROVIDERS } from './modelTracking'
+import { PROVIDERS, parseSourcePages } from './modelTracking'
 import { callModel } from './llm'
 import type { SourceRole } from './adjudication'
 import { SOURCE_INTERVAL_MS, sourceIsStale } from './providers/def'
@@ -79,11 +79,35 @@ interface ShadowRunRow {
 const THREAD_CLEANUP_DAYS = 7
 /**
  * 终态重开检查窗(实现侧判断):与账本 ingest 窗同轴同宽——线索滚出信源(30 天)后页面
- * 语境已逝,不再重开。已知天花板:指纹含厂家共享信源页,共享页任一变动会同轮重开该家
- * 窗内全部终态线索(重开风暴);影子期纯成本零风险,量级实测与收窄口径(如仅线索自有页)
- * 归票 10/11 裁决。
+ * 语境已逝,不再重开。调度指纹已收窄到线索专属页(见 runItem),共享注册页变化不再
+ * 触发全 provider 重开,改走 shadow_rechecks 逐模型强制重核;剩余天花板 = 线索自有页
+ * 本身变化(changelog 类 append-only 页对旧线索影响小),量级实测归票 10/11。
  */
 const REOPEN_WINDOW_DAYS = 30
+
+/** 重核线索的 modelKey 前缀(官方资料变化重核的注册表键;真线索键不与此形态碰撞)。 */
+const RECHECK_KEY_PREFIX = 'recheck:'
+
+/**
+ * 线索专属页集(调度指纹的唯一锚定面;重核线索无线索页)。**单点导出**:runItem 与
+ * 预播种测试助手共用——同一条目经 recheck 队列与 nonTerminal 重扫两通道进来若基准
+ * 分家,指纹必然不等,在途 checkpoint 被误删、崩溃续跑自愈失效。
+ */
+export function clueOwnedUrls(def: ProviderDef<unknown>, clue: PendingClue): Set<string> {
+  if (clue.modelKey.startsWith(RECHECK_KEY_PREFIX)) return new Set()
+  return new Set([clue.sourceUrl, ...(def.verifyUrls?.(clue) ?? [])])
+}
+
+/** error 出口(系统错误)重投退避窗 = 三个轮次:网关 5xx/超时类瞬时故障按此节奏重试;
+ *  无窗的每 2h 重投会让持续 error 的项无限烧 LLM(卡死模型 × 每轮 1-2 次真实调用)。 */
+const ERROR_RETRY_MS = 6 * 3600_000
+
+/**
+ * 指纹底册的存储形态版本:normalizeSourcePage/白名单语义升级时递增——新版本首轮只建
+ * 底册不判变化,规范化器升级不冒充「官方资料变化」触发全量重核风暴(跨厂家同步 LLM
+ * 尖峰)。旧版本 key 自然废弃不迁移。
+ */
+const FINGERPRINT_BASIS_VERSION = 2
 
 const nowIso = () => new Date().toISOString()
 const isoDaysAgo = (days: number) => new Date(Date.now() - days * 86400_000).toISOString()
@@ -110,13 +134,16 @@ CREATE TABLE IF NOT EXISTS shadow_rechecks (
   title TEXT NOT NULL, source_url TEXT NOT NULL, PRIMARY KEY (provider, model_key)
 );`
 
-/** 六类注册信源 + 原有线索一手页;同 URL 可承担多个角色。 */
+/** 六类注册信源 + 线索一手页;同 URL 可承担多个角色——verifyUrls 补充的条目**不去重**,
+ *  同 URL 双角色并存(图内 citations 按 task.sources 全角色展开):anthropic overview.md
+ *  注册为 catalog 却是规格主源,若被注册角色吞掉 release 角色,availability/released_at
+ *  观察在矩阵里就无权(只认 release/weights),系统性暂缓。 */
 function whitelistOf(def: ProviderDef<unknown>, clue: PendingClue): Array<{ role: SourceRole; url: string }> {
   const sources = (Object.keys(SOURCE_INTERVAL_MS) as SourceRole[])
     .flatMap((role) => def.sources[role].urls.map((url) => ({ role, url })))
-  for (const url of def.verifyUrls?.(clue) ?? [clue.sourceUrl]) {
-    if (!sources.some((s) => s.url === url)) sources.push({ role: 'release', url })
-  }
+  // 重核线索的 modelKey 是注册表键非模型 ID,内插 verifyUrls 是保证 404 的死链
+  if (clue.modelKey.startsWith(RECHECK_KEY_PREFIX)) return sources
+  for (const url of def.verifyUrls?.(clue) ?? [clue.sourceUrl]) sources.push({ role: 'release', url })
   return sources
 }
 
@@ -177,16 +204,10 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
 
   /** 当前工作项的预抓缓存(commit 落 jsonl 的上下文同款:轮次内串行,单槽即可)。 */
   let prefetch = new Map<string, string>()
-  let unavailable = new Set<string>()
   let commitCtx: { provider: string; modelKey: string; threadId: string; fingerprint: string } | null = null
 
   const graphDeps: VerificationDeps = {
-    fetchText: async (url, timeoutMs) => {
-      const hit = prefetch.get(url)
-      if (hit !== undefined) return hit
-      if (unavailable.has(url)) throw new Error(`注册信源无新鲜快照:${url}`)
-      return deps.fetchText(url, timeoutMs)
-    },
+    fetchText: async (url, timeoutMs) => prefetch.get(url) ?? deps.fetchText(url, timeoutMs),
     listModels: async (provider) => {
       const rows = await db
         .selectFrom('model_archive')
@@ -247,9 +268,15 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
   /** 线索身份键(去重/注册表查询共用单点,防三处拼接漂移)。 */
   const clueKey = (provider: string, modelKey: string): string => `${provider}|${modelKey}`
 
-  async function runItem(clue: PendingClue & { provider: ModelProviderId }, row: ShadowRunRow | undefined, roundCache: Map<string, string>, snapshots: Map<string, { content: string; observedAt: string }>, registered: Set<string>): Promise<void> {
+  async function runItem(clue: PendingClue & { provider: ModelProviderId }, row: ShadowRunRow | undefined, roundCache: Map<string, string>, snapshots: Map<string, { content: string; observedAt: string }>, registered: Set<string>, recheck = false): Promise<void> {
     const def = PROVIDERS[clue.provider]
-    const sources = whitelistOf(def, clue)
+    // 线索专属页恒在白名单(它是任务身份的一部分,注册与否都照常抓取/记失败——轮询
+    // 瞬时败时线索一手页整条隐身会让图在缺出处页的白名单上跑出错终态)。其余注册页
+    // 可读性 = 有新鲜快照(轮询是唯一刷新者,不在图内绕档位重抓):无快照的**剔除**
+    // 而非记抓取失败——升级迁移(pages NULL)或 boot 轮与首轮轮询竞态时不至于以死
+    // 白名单跑全图,failed 集与指纹也不被「暂不可用」污染。
+    const ownUrls = clueOwnedUrls(def, clue)
+    const sources = whitelistOf(def, clue).filter((s) => ownUrls.has(s.url) || !registered.has(s.url) || snapshots.has(s.url))
     const reads = new Map<string, ReadRecord>()
     const failed = new Set<string>()
     const observedAt = nowIso()
@@ -258,7 +285,6 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
         // 注册页复用轮询快照;线索自有页同轮跨线索只抓一次,失败仍可重试。
         const snapshot = snapshots.get(s.url)
         const hit = snapshot?.content ?? roundCache.get(s.url)
-        if (hit === undefined && registered.has(s.url)) throw new Error('信源快照不可用')
         const content = hit !== undefined ? hit : await deps.fetchText(s.url, 30_000)
         roundCache.set(s.url, content)
         reads.set(s.url, { role: s.role, content, observedAt: snapshot?.observedAt ?? observedAt })
@@ -267,16 +293,23 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
       }
     }
     const task: VerificationTask = { provider: clue.provider, clue, sources: sources.map((s) => ({ ...s, observedAt: reads.get(s.url)?.observedAt })) }
-    const fingerprint = computeEvidenceFingerprint(task, reads, failed)
+    // 调度指纹只锚线索专属页(clueOwnedUrls 单点;重核线索无线索页)——thread 身份
+    // 不随共享注册页内容抖动(31 页白名单任一变动全 provider 重开的风暴由此剪除);
+    // 共享页变化的重核走 source:role 指纹底册 + shadow_rechecks 通道(recheck=true
+    // 对同指纹终态也强制重跑)。票 10/11 拿到影子期实测后再议收窄口径。
+    const fingerprint = computeEvidenceFingerprint(
+      task,
+      new Map([...reads].filter(([url]) => ownUrls.has(url))),
+      new Set([...failed].filter((url) => ownUrls.has(url))),
+    )
     // 线索快照锚定注册表(重试期间任务恒定;账本 re-ingest 刷新 title/sourceUrl 不漂移进
     // 指纹三元组——snapshot 即该线索在影子域的任务身份)
-    if (row !== undefined && row.fingerprint === fingerprint && row.state === 'terminal') return // 同指纹守终态
+    if (row !== undefined && row.fingerprint === fingerprint && row.state === 'terminal' && !recheck) return // 同指纹守终态(重核例外:官方资料变了就要重跑)
     if (row !== undefined && row.fingerprint !== fingerprint) await saver.deleteThread(row.thread_id) // 证据已变:旧 checkpoint 语义失效
     const threadId = `${clue.provider}|${clue.modelKey}|${fingerprint}`
     q.register.run({ provider: clue.provider, modelKey: clue.modelKey, occurredOn: clue.occurredOn, title: clue.title, sourceUrl: clue.sourceUrl, threadId, fingerprint, updatedAt: nowIso() })
     commitCtx = { provider: clue.provider, modelKey: clue.modelKey, threadId, fingerprint }
     prefetch = new Map([...reads].map(([url, r]) => [url, r.content]))
-    unavailable = new Set([...failed].filter((url) => registered.has(url)))
     const cfg = { configurable: { thread_id: threadId } }
     let exit: VerificationExit | null
     let graphFingerprint: string | null = null
@@ -343,12 +376,13 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
         if (source === undefined) continue
         for (const url of source.urls) registered.add(url)
         if (status.pages === null || status.last_success_at === null || sourceIsStale(role, status)) continue
-        const pages = JSON.parse(status.pages) as Record<string, string>
+        const pages = parseSourcePages(status.pages)
         for (const url of source.urls) if (pages[url] !== undefined && (snapshots.get(url)?.observedAt ?? '') < status.last_success_at) {
           snapshots.set(url, { content: pages[url], observedAt: status.last_success_at })
         }
         if (role === 'release' || status.fingerprint === null) continue
-        const key = `source:${def.id}:${role}`
+        // 底册 key 带形态版本:规范化器升级后首轮只建底册,不把翻转冒充资料变化
+        const key = `source:${def.id}:${role}:v${FINGERPRINT_BASIS_VERSION}`
         const previous = q.metaGet.get(key)?.value
         // 首次成功只建指纹底册,不把种子补证批次提前到影子期。
         const models = previous !== undefined && previous !== status.fingerprint
@@ -358,34 +392,42 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
         sqlite.transaction(() => {
           for (const model of models) sqlite.prepare(
             'INSERT INTO shadow_rechecks VALUES (?, ?, ?, ?, ?) ON CONFLICT (provider, model_key) DO NOTHING',
-          ).run(def.id, `recheck:${model.id}`, nowIso().slice(0, 10), `${model.official_id} (${model.name}) 官方资料变化重核`, def.sources.release.urls[0]!)
+          ).run(def.id, `${RECHECK_KEY_PREFIX}${model.id}`, nowIso().slice(0, 10), `${model.official_id} (${model.name}) 官方资料变化重核`, def.sources.release.urls[0]!)
           q.metaSet.run(key, status.fingerprint!)
         })()
       }
-      // 工作项:重扫优先(运行中/退避中,无窗口限制——系统错误退避不受展示窗口限制)、
-      // 摄取次之(first_seen 轴)、终态重开检查最后(ingest 窗内;逐项同指纹即守)
+      // 工作项:重扫优先(运行中/退避中——系统错误按退避窗重试,不受展示窗口限制)、
+      // 重核队列次之(强制重跑)、摄取再次(first_seen 轴)、终态重开检查最后(ingest
+      // 窗内;逐项同指纹即守)
       const seen = new Set<string>()
-      const items: Array<PendingClue & { provider: ModelProviderId }> = []
+      const items: Array<{ clue: PendingClue & { provider: ModelProviderId }; recheck: boolean }> = []
       for (const row of q.nonTerminal.all()) {
-        items.push(rowToClue(row))
+        // seen 先占键再判退避:跳过的行也不许被摄取/重开通道把同一线索再拉进来跑。
+        // 退避判据用 state 列(finish 时 backoff ⇔ error 出口,schema 已编码;坏
+        // updated_at 视已过窗——重投后 finish 重写时间戳自愈,跳过则会永久卡死)。
         seen.add(clueKey(row.provider, row.model_key))
+        if (row.state === 'backoff') {
+          const age = Date.parse(row.updated_at)
+          if (!Number.isNaN(age) && Date.now() - age < ERROR_RETRY_MS) continue
+        }
+        items.push({ clue: rowToClue(row), recheck: false })
       }
       for (const row of sqlite.prepare<[], ShadowRunRow>('SELECT * FROM shadow_rechecks').all()) {
         if (!seen.has(clueKey(row.provider, row.model_key))) {
-          items.push(rowToClue(row))
+          items.push({ clue: rowToClue(row), recheck: true })
           seen.add(clueKey(row.provider, row.model_key))
         }
       }
       for (const clue of await ledger.cluesFirstSeenSince(startedAt)) {
-        if (!seen.has(clueKey(clue.provider, clue.modelKey))) items.push(clue)
+        if (!seen.has(clueKey(clue.provider, clue.modelKey))) items.push({ clue, recheck: false })
       }
       for (const row of q.terminalInWindow.all(dayCutoff(REOPEN_WINDOW_DAYS))) {
-        if (!seen.has(clueKey(row.provider, row.model_key))) items.push(rowToClue(row))
+        if (!seen.has(clueKey(row.provider, row.model_key))) items.push({ clue: rowToClue(row), recheck: false })
       }
       const roundCache = new Map<string, string>()
-      for (const clue of items) {
+      for (const { clue, recheck } of items) {
         try {
-          await runItem(clue, q.get.get(clue.provider, clue.modelKey) ?? undefined, roundCache, snapshots, registered)
+          await runItem(clue, q.get.get(clue.provider, clue.modelKey) ?? undefined, roundCache, snapshots, registered, recheck)
           sqlite.prepare('DELETE FROM shadow_rechecks WHERE provider = ? AND model_key = ?').run(clue.provider, clue.modelKey)
         } catch (e) {
           // 意外异常(非图出口):行留 running,下轮同线程续跑自愈;单线索失败不牵连整轮

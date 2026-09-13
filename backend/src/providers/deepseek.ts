@@ -81,10 +81,10 @@ export const DEEPSEEK_DEF: ProviderDef<DeepSeekSection> = {
   id: 'deepseek',
   label: 'DeepSeek',
   sources: {
-    release: { urls: [DEEPSEEK_UPDATES_URL], parse: parseDeepSeekUpdates },
-    catalog: { urls: ['https://api-docs.deepseek.com/quick_start/pricing'], parse: 'fingerprint' },
-    pricing: { urls: ['https://api-docs.deepseek.com/quick_start/pricing'], parse: 'fingerprint' },
-    limits: { urls: ['https://api-docs.deepseek.com/quick_start/rate_limit'], parse: 'fingerprint' },
+    release: { urls: [DEEPSEEK_UPDATES_URL], parse: parseDeepSeekUpdates, html: true },
+    catalog: { urls: ['https://api-docs.deepseek.com/quick_start/pricing'], parse: 'fingerprint', html: true },
+    pricing: { urls: ['https://api-docs.deepseek.com/quick_start/pricing'], parse: 'fingerprint', html: true },
+    limits: { urls: ['https://api-docs.deepseek.com/quick_start/rate_limit'], parse: 'fingerprint', html: true },
     weights: { urls: [
       'https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro-0813/raw/main/README.md',
       'https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731/raw/main/README.md',
@@ -98,7 +98,7 @@ export const DEEPSEEK_DEF: ProviderDef<DeepSeekSection> = {
       'https://huggingface.co/deepseek-ai/DeepSeek-Coder-V2-Instruct/raw/main/README.md',
       'https://huggingface.co/deepseek-ai/DeepSeek-V2/raw/main/README.md',
     ], parse: 'fingerprint' },
-    retirement: { urls: ['https://api-docs.deepseek.com/updates/'], parse: 'fingerprint' },
+    retirement: { urls: ['https://api-docs.deepseek.com/updates/'], parse: 'fingerprint', html: true },
   },
   matchEntry(s, rows) {
     const matched = matchDeepSeekEvent(s, rows)

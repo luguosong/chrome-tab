@@ -105,6 +105,36 @@ export const PROVIDERS: Record<ModelProviderId, ProviderDef<unknown>> = {
 const eventKey = (modelId: number, occurredOn: string, sourceUrl: string) =>
   `${modelId}|${occurredOn}|${sourceUrl}`
 
+/**
+ * HTML 信源页 → 存储与指纹形态:剥脚本/样式与页面框架层(body 直接子级的 header/
+ * footer/nav——main 内语义同名元素是正文,剥了会让此类 confined 变化静默漂移指纹),
+ * 取 main/body 文本。**同一 URL 无论哪个角色写入都经此单点**(调用方以 def 的 html
+ * 声明驱动,不做内容启发式):DeepSeek updates 页同时注册 release 与 retirement,
+ * 角色间形态不一会让按 URL 合并的影子快照随轮换角色翻转基准——零上游变化也翻指纹。
+ */
+export function normalizeSourcePage(content: string, html: boolean): string {
+  if (!html) return content
+  const $ = load(content)
+  $('script, style, noscript').remove()
+  $('body').children('header, footer, nav').remove()
+  // main 有但无文本(孤立的 </main> 片段/JS 挂载点)时退 body——不让正文蒸发成空快照
+  const main = $('main')
+  const scope = main.length > 0 && main.text().trim() !== '' ? main : $('body')
+  return scope.text().replace(/\s+/g, ' ').trim()
+}
+
+/** model_fetch_status.pages 列的守卫解析:坏行(截断写/手改)记 warn 视为空——单行坏
+ *  JSON 不该炸消费者(轮询的旧内容回退、影子的快照供给共此策略)。 */
+export function parseSourcePages(raw: string | null): Record<string, string> {
+  if (raw === null) return {}
+  try {
+    return JSON.parse(raw) as Record<string, string>
+  } catch (e) {
+    console.warn('模型追踪:信源快照坏行(pages)视为无快照:', e)
+    return {}
+  }
+}
+
 // ---- 服务(档案读写 + 轮询;IO 经 ModelTrackingDeps 注入,测试零真网)----
 
 /** 一轮解析产物:认领事件 + 待核验线索(类型 PendingClue 来自 providers/def.ts;月暗文章流等无线索信源 clues 恒空)。 */
@@ -358,8 +388,16 @@ export class ModelTrackingService {
 
   private pollSources(def: ProviderDef<unknown>, forceRelease = false): Promise<void> {
     const active = this.polling.get(def.id)
-    if (active !== undefined) return active
-    const job = this.pollSourceRoles(def, forceRelease).finally(() => this.polling.delete(def.id))
+    // 非强制直接并入在飞轮;强制(运维手动补轮)排在在飞轮之后真跑——cron 轮已按档位
+    // 跳过 release,复用它会让强制刷新静默落空。排队 promise 同样登记进 map,后来者
+    // 一并串行,不会双轮并发写同一 (provider, role) 行。finally 只删**自己**的登记:
+    // 在飞轮落定时会把已排队轮占住的槽一并删掉,后续调用者看不见在飞任务而并发起跑。
+    if (active !== undefined && !forceRelease) return active
+    const job = (active ?? Promise.resolve()).catch(() => {})
+      .then(() => this.pollSourceRoles(def, forceRelease))
+    job.finally(() => {
+      if (this.polling.get(def.id) === job) this.polling.delete(def.id)
+    }).catch(() => {})
     this.polling.set(def.id, job)
     return job
   }
@@ -367,6 +405,16 @@ export class ModelTrackingService {
   private async pollSourceRoles(def: ProviderDef<unknown>, forceRelease: boolean): Promise<void> {
     // cron 精度为分钟:取本轮起点,避免抓取耗时/毫秒抖动把 2h 档拖成 4h。
     const attemptedAt = new Date(Math.floor(Date.now() / 60_000) * 60_000).toISOString()
+    // 轮级 URL 去重缓存(存 raw):同 URL 多角色共注册(智谱 overview.md ×3、深求
+    // updates 页 release+retirement)在档位重合轮只抓一次——角色串行遍历,无并发。
+    const rawCache = new Map<string, string>()
+    const fetchRaw = async (url: string): Promise<string> => {
+      const hit = rawCache.get(url)
+      if (hit !== undefined) return hit
+      const raw = await this.deps.fetchText(url, 30_000)
+      rawCache.set(url, raw)
+      return raw
+    }
     let releaseError: unknown
     for (const role of Object.keys(SOURCE_INTERVAL_MS) as SourceRole[]) {
       const status = await this.db.selectFrom('model_fetch_status').selectAll()
@@ -379,17 +427,33 @@ export class ModelTrackingService {
         status?.last_attempt_at !== undefined && Date.now() - Date.parse(status.last_attempt_at) < SOURCE_INTERVAL_MS[role]) continue
       try {
         const pages: Record<string, string> = {}
-        if (role === 'release') Object.assign(pages, await this.runPoll(def))
-        else for (const url of def.sources[role].urls) {
-          let content = await this.deps.fetchText(url, 30_000)
-          if (/<html[\s>]/i.test(content)) {
-            const $ = load(content)
-            $('script, style, noscript, nav, header, footer').remove()
-            const main = $('main')
-            content = (main.length > 0 ? main : $('body')).text().replace(/\s+/g, ' ').trim()
+        if (role === 'release') {
+          for (const [url, raw] of Object.entries(await this.runPoll(def, fetchRaw))) {
+            const content = normalizeSourcePage(raw, def.sources.release.html ?? false)
+            if (content.trim() === '') throw new Error('信源页为空') // 正文全在框架层:空存储不可标健康
+            pages[url] = content
           }
-          if (content.trim() === '') throw new Error('信源页为空')
-          pages[url] = content
+        } else {
+          // 多页角色逐页容错:单页失败不弃整轮——有旧快照沿用旧内容(指纹与快照不因
+          // 间歇失败翻转),无旧内容的失败页缺席;全败才走角色失败(HF 仓库改名是常态,
+          // 一页 404 不该让其余好快照陪葬到整角色不可用)。失败一律入 pageErrs(回退与
+          // 收集是两件事:全败时 pageErrs[0] 才是真实错误而非 undefined)。
+          const prevPages = parseSourcePages(status?.pages ?? null)
+          const pageErrs: unknown[] = []
+          let fetched = 0
+          for (const url of def.sources[role].urls) {
+            try {
+              const content = normalizeSourcePage(await fetchRaw(url), def.sources[role].html ?? false)
+              if (content.trim() === '') throw new Error('信源页为空')
+              pages[url] = content
+              fetched++
+            } catch (e) {
+              pageErrs.push(e)
+              if (prevPages[url] !== undefined) pages[url] = prevPages[url]!
+            }
+          }
+          if (fetched === 0) throw pageErrs[0]
+          for (const e of pageErrs) console.error(`模型追踪(${def.label}/${role})单页失败:`, e)
         }
         const serialized = JSON.stringify(Object.entries(pages).sort(([a], [b]) => a.localeCompare(b)))
         await this.markSource(def.id, true, role, {
@@ -406,12 +470,13 @@ export class ModelTrackingService {
 
   /**
    * 一轮厂家取数的统一巡走(ADR-0038):逐信源页 fetch→解析→零条目判改版→逐条目
-   * 分派(命中/线索)→入库→标新鲜;**任一页失败先吞后聚,循环后统一补压终态(失败
-   * 优先)再上抛首个错误**——后一页的成功不会覆盖前一页的失败标记,单页家(urls 仅
-   * 一项)自然退化为同语义(失败时多一次幂等 markSource,已记档的可接受漂移)。
-   * 逐厂家的差异(信源/解析/匹配/线索)全部在 ProviderDef,此处不出现厂家分支。
+   * 分派(命中/线索)→入库;任一页失败先吞后聚、循环后上抛首个错误——**终态
+   * markSource 全归 pollSourceRoles 单写**(release 成功含 pages/指纹快照与
+   * verifyPendingClues 同拍落地,失败/成功不在 LLM 间隙里错位),后一页的成功不会
+   * 覆盖前一页的失败标记。逐厂家的差异(信源/解析/匹配/线索)全部在 ProviderDef,
+   * 此处不出现厂家分支。
    */
-  private async runPoll(def: ProviderDef<unknown>): Promise<Record<string, string>> {
+  private async runPoll(def: ProviderDef<unknown>, fetchRaw: (url: string) => Promise<string>): Promise<Record<string, string>> {
     const errs: unknown[] = []
     const pages: Record<string, string> = {}
     const rows = await this.baselineRows(def.id)
@@ -437,7 +502,7 @@ export class ModelTrackingService {
             clues.push(...r.clues)
           }
           return { hits, clues }
-        })
+        }, fetchRaw)
       } catch (e) {
         errs.push(e)
       }
@@ -447,10 +512,7 @@ export class ModelTrackingService {
     await this.verifyPendingClues(def).catch((e) =>
       console.error(`模型追踪(${def.label})auto 核验失败:`, e),
     )
-    if (errs.length > 0) {
-      await this.markSource(def.id, false).catch(() => {})
-      throw errs[0]
-    }
+    if (errs.length > 0) throw errs[0]
     return pages
   }
 
@@ -514,28 +576,23 @@ export class ModelTrackingService {
   }
 
   /**
-   * 一轮取数的公共失败口径(fetch 抛错与「200 但零结构化条目」= 上游改版,均抛错标
-   * 陈旧、保留库内最后成功结果,不静默清零;markSource 自身失败不吞原始错误——极端:
-   * DB 写挂,原始信源错误更值得上抛/记日志)。结构差异(解析器/匹配器/线索提取)由
-   * ProviderDef 闭合(runPoll 组装),返回 null 即「解析不出任何结构化条目」。
+   * 一轮取数的公共失败口径(fetch 抛错与「200 但零结构化条目」= 上游改版,均抛错由
+   * pollSourceRoles 统一标陈旧、保留库内最后成功结果,不静默清零)。结构差异(解析
+   * 器/匹配器/线索提取)由 ProviderDef 闭合(runPoll 组装),返回 null 即「解析不出
+   * 任何结构化条目」。
    */
   private async pollOne(
     provider: ModelProviderId,
     url: string,
     parseAndMatch: (md: string) => ParsedFeed | null,
+    fetchRaw: (url: string) => Promise<string>,
   ): Promise<string> {
-    try {
-      const md = await this.deps.fetchText(url, 30_000)
-      const feed = parseAndMatch(md)
-      if (feed === null) throw new Error('发布源无结构化条目(疑似上游改版)')
-      await this.ingest(provider, feed.hits)
-      await this.ledger.ingest(provider, feed.clues)
-      await this.markSource(provider, true)
-      return md
-    } catch (e) {
-      await this.markSource(provider, false).catch(() => {})
-      throw e
-    }
+    const md = await fetchRaw(url)
+    const feed = parseAndMatch(md)
+    if (feed === null) throw new Error('发布源无结构化条目(疑似上游改版)')
+    await this.ingest(provider, feed.hits)
+    await this.ledger.ingest(provider, feed.clues)
+    return md
   }
 
   /**

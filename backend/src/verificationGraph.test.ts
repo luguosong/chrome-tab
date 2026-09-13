@@ -296,6 +296,21 @@ describe('核验图:出口语义(四类全测,同一 graph.invoke 接缝)', () =
     expect(d.deps.fetchText).toHaveBeenCalledTimes(2)
   })
 
+  it('系统错误:信源全败短路在大白名单下可达(尝试满读取预算即判,不烧满 4 轮后错终态)', async () => {
+    // 白名单 9 个 URL > sourceReads 预算 8:旧条件 attempted >= whitelist.size 永不可达
+    const bigWhitelist = Array.from({ length: 9 }, (_, i) => ({ role: 'catalog' as const, url: `https://docs.example/big-${i}` }))
+    const { fn, calls } = seqCall([
+      JSON.stringify({ action: 'read', urls: bigWhitelist.map((s) => s.url) }),
+      finalNoise, reviewAgree,
+    ])
+    const d = makeDeps({ call: fn, fetchText: vi.fn(async () => { throw new Error('HTTP 503') }) })
+    const result = await makeVerificationGraph(d.deps).invoke({ task: { ...TASK, sources: bigWhitelist } })
+    expect(result.exit).toMatchObject({ kind: 'error' })
+    expect((result.exit as { reason: string }).reason).toContain('信源全败')
+    expect(calls).toHaveLength(1) // 预算耗尽即短路,无第二轮
+    expect(d.deps.fetchText).toHaveBeenCalledTimes(8) // 预算封顶,不多抓
+  })
+
   it('系统错误:执行器事务抛错 → error(重放由执行器幂等守卫)', async () => {
     const { fn } = seqCall([readBoth, finalProposal([STAGE_FIELD, AVAIL_REL, AVAIL_CAT]), reviewAgree])
     const d = makeDeps({

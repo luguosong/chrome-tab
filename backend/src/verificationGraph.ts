@@ -354,10 +354,12 @@ function investigateNode(deps: VerificationDeps) {
               newlyFailed.push(url)
             }
           }
-          // 信源全败短路(ADR:不再以占位串进 prompt):白名单内已全部尝试且零成功 → 系统错误,不进下一轮
+          // 信源全败短路(ADR:不再以占位串进 prompt):白名单内已尝试满额(或达读取预算,
+          // 白名单大于预算时按预算封顶——否则六类注册大白名单下此出口永不可达,全败也
+          // 烧完 4 轮 LLM 后以暂缓错终态)且零成功 → 系统错误,不进下一轮
           const attemptedInWhitelist = reads.size + [...failed].filter((u) => whitelist.has(u)).length
-          if (reads.size === 0 && whitelist.size > 0 && attemptedInWhitelist >= whitelist.size) {
-            return { investigation: null, fingerprint: fingerprintOf(reads, failed), exit: { kind: 'error', reason: `信源全败:白名单 ${whitelist.size} 个信源全部抓取失败` } }
+          if (reads.size === 0 && whitelist.size > 0 && attemptedInWhitelist >= Math.min(whitelist.size, VERIFICATION_BUDGET.sourceReads)) {
+            return { investigation: null, fingerprint: fingerprintOf(reads, failed), exit: { kind: 'error', reason: `信源全败:白名单 ${whitelist.size} 个信源(尝试 ${attemptedInWhitelist})全部抓取失败` } }
           }
           const parts: string[] = []
           if (offList.length > 0) parts.push(`以下 URL 不在可读清单,已拒绝:${offList.join('、')}`)

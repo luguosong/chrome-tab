@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDb, type Db } from './db'
 import { makeClueLedger } from './clueLedger'
-import { makeShadowVerification, type ShadowVerification } from './verificationShadow'
+import { clueOwnedUrls, makeShadowVerification, type ShadowVerification } from './verificationShadow'
 import { ZHIPU_DEF } from './providers/zhipu'
 import { ModelTrackingService } from './modelTracking'
 import type { PendingClue } from './providers/def'
@@ -92,15 +92,17 @@ const agree = JSON.stringify({ agree: true, reason: '证据支撑' })
 /** 白名单:六类注册页 + 线索 sourceUrl(zhipu 无 verifyUrls → 缺省)。 */
 const whitelistUrls = (): string[] => [...new Set([...Object.values(ZHIPU_DEF.sources).flatMap((s) => s.urls), CLUE.sourceUrl])]
 
-/** 与 round() 同式的调度侧指纹(预播种 thread_id 用):全部白名单信源预抓。 */
+/** 与 round() 同式的调度侧指纹(预播种 thread_id 用):锚定面经 clueOwnedUrls 单点
+ *  (与 runItem 同源,口径收窄时测试不与实现错开)。 */
 function schedulerFingerprint(fx: Fixture): string {
+  const ownUrls = clueOwnedUrls(ZHIPU_DEF, CLUE)
   const reads = new Map<string, ReadRecord>()
   const failed = new Set<string>()
-  for (const url of whitelistUrls()) {
+  for (const url of ownUrls) {
     if (fx.pages[url] === undefined) failed.add(url)
     else reads.set(url, { role: 'release', content: fx.pages[url]!, observedAt: '2026-09-13T00:00:00Z' })
   }
-  const task: VerificationTask = { provider: 'zhipu', clue: CLUE, sources: whitelistUrls().map((url) => ({ role: 'release' as const, url })) }
+  const task: VerificationTask = { provider: 'zhipu', clue: CLUE, sources: [...ownUrls].map((url) => ({ role: 'release' as const, url })) }
   return computeEvidenceFingerprint(task, reads, failed)
 }
 
@@ -255,6 +257,159 @@ describe('影子核验:cron 重扫与断点续跑', () => {
   })
 })
 
+describe('影子核验:调度修复(票 06 review)', () => {
+  it('信源快照坏 JSON 行不炸轮:该行视为无快照(注册页剔除),线索照跑', async () => {
+    const fx = fixture()
+    // zhipu catalog 行:registered 但 pages 是截断写坏行——upgrade/手改后的真实形态
+    await fx.db.insertInto('model_fetch_status').values({
+      provider: 'zhipu', role: 'catalog', stale: 0, pages: '{"https://docs.zhipu.com', fingerprint: null,
+      last_success_at: new Date().toISOString(), last_attempt_at: new Date().toISOString(),
+    }).execute()
+    await markerThenIngest(fx)
+    fx.replies.push(finalNoise, agree)
+    await fx.shadow.round()
+    const lines = jsonl(fx)
+    expect(lines).toHaveLength(1) // 轮次未被坏行抛断
+    expect(lines[0]).toMatchObject({ exit: { kind: 'noise' } })
+    // 坏行无快照 → catalog URL 剔除出白名单(既不在可读清单也不在抓取失败)
+    const catalogUrl = ZHIPU_DEF.sources.catalog.urls[0]!
+    expect(fx.calls[0]!.user).not.toContain(catalogUrl)
+  })
+
+  it('无新鲜快照的注册页剔除出白名单:不在可读清单、不进抓取失败,线索自有页照读', async () => {
+    const fx = fixture()
+    // 升级迁移形态:release 行 registered 但 pages=NULL、无成功时间
+    await fx.db.insertInto('model_fetch_status').values({
+      provider: 'zhipu', role: 'release', stale: 0, pages: null, fingerprint: null,
+      last_success_at: null, last_attempt_at: new Date().toISOString(),
+    }).execute()
+    await markerThenIngest(fx)
+    fx.replies.push(finalNoise, agree)
+    await fx.shadow.round()
+    const user = fx.calls[0]!.user
+    expect(user).not.toContain(REL) // 暂不可用 ≠ 抓取失败:整条剔除,不引导 LLM 也不污染 failed/指纹
+    expect(user).toContain(DOC) // 线索自有页(未注册)恒可读
+    expect(jsonl(fx)[0]).toMatchObject({ exit: { kind: 'noise' } })
+  })
+
+  it('重核线索不内插 verifyUrls:modelKey 是注册表键非模型 ID,不产保证 404 的死链', async () => {
+    const fx = fixture()
+    await fx.shadow.round() // started_at 划界
+    const changelog = 'https://developers.openai.com/api/docs/changelog.md'
+    fx.pages[changelog] = '# Changelog\n\n## September, 2026\n'
+    fx.shadow.sqlite
+      .prepare('INSERT INTO shadow_rechecks VALUES (?, ?, ?, ?, ?)')
+      .run('openai', 'recheck:42', '2026-09-13', 'gpt-x (GPT-X) 官方资料变化重核', changelog)
+    fx.replies.push(finalNoise, agree)
+    await fx.shadow.round()
+    const user = fx.calls[0]!.user
+    expect(user).not.toContain('models/recheck:42') // 无 models/recheck:42.md 死链进可读清单(线索唯一键本身合法在场)
+    expect(jsonl(fx)[0]).toMatchObject({ modelKey: 'recheck:42', exit: { kind: 'noise' } })
+  })
+
+  it('error 出口按退避窗重投:6h 窗内跳过(不再每轮烧 LLM),过窗照常重试', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-12T02:41:00Z'))
+    const fx = fixture()
+    try {
+      await markerThenIngest(fx)
+      fx.replies.push(Object.assign(new Error('gateway down'), { status: 502 }))
+      await fx.shadow.round()
+      expect(jsonl(fx)).toHaveLength(1)
+      expect(registryRow(fx)).toMatchObject({ state: 'backoff' })
+      vi.setSystemTime(new Date('2026-09-12T04:41:00Z')) // +2h:退避窗内
+      await fx.shadow.round()
+      expect(jsonl(fx)).toHaveLength(1) // 未重投
+      expect(fx.calls).toHaveLength(1)
+      vi.setSystemTime(new Date('2026-09-12T08:41:01Z')) // +6h 过窗
+      fx.replies.push(finalNoise, agree)
+      await fx.shadow.round()
+      expect(jsonl(fx)).toHaveLength(2) // 重投成功
+      expect(jsonl(fx)[1]).toMatchObject({ exit: { kind: 'noise' } })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('同 URL 双角色并存:anthropic overview.md 注册为 catalog 又被 verifyUrls 以 release 补充', async () => {
+    const fx = fixture()
+    await fx.shadow.round()
+    const overview = 'https://platform.claude.com/docs/en/about-claude/models/overview.md'
+    const releases = 'https://platform.claude.com/release-notes.md'
+    fx.pages[overview] = '# Models\n\nFable 5.1 api available\n'
+    fx.pages[releases] = '# Release notes\n'
+    await fx.ledger.ingest('anthropic', [{
+      occurredOn: '2026-09-12', title: 'Fable 5.1 released',
+      sourceUrl: releases, modelKey: 'fable-5.1',
+    }])
+    fx.replies.push(finalNoise, agree)
+    await fx.shadow.round()
+    const user = fx.calls[0]!.user
+    // 去重会吞掉 release 角色 → availability 观察在矩阵无权(只认 release/weights)→ 系统性暂缓
+    expect(user).toContain(`- [catalog] ${overview}`)
+    expect(user).toContain(`- [release] ${overview}`)
+  })
+
+  it('重核线索两通道同指纹:error 退避经 nonTerminal 重扫时 thread 不换(在途 checkpoint 不被误删)', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-13T00:00:00Z'))
+    const fx = fixture()
+    try {
+      await fx.db.insertInto('model_archive').values({
+        provider: 'zhipu', official_id: 'glm-5.4', name: 'GLM-5.4', kind: 'text', stage: 'ga',
+        availability: '["api"]', summary: null, sources: '[]', pricing: null, limits: null,
+        training_params: null, match_aliases: '[]', match_slugs: '[]', verified: 'manual',
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      }).execute()
+      await fx.shadow.round() // started_at 划界
+      fx.shadow.sqlite
+        .prepare('INSERT INTO shadow_rechecks VALUES (?, ?, ?, ?, ?)')
+        .run('zhipu', 'recheck:1', '2026-09-13', 'glm-5.4 (GLM-5.4) 官方资料变化重核', REL)
+      fx.replies.push(Object.assign(new Error('gateway down'), { status: 502 }))
+      await fx.shadow.round() // recheck 通道首跑 error → backoff(recheck 行已消费)
+      const recheckRow = () => fx.shadow.sqlite
+        .prepare<[string, string], { state: string; thread_id: string }>('SELECT state, thread_id FROM shadow_runs WHERE provider = ? AND model_key = ?')
+        .get('zhipu', 'recheck:1')!
+      expect(recheckRow().state).toBe('backoff')
+      vi.setSystemTime(new Date('2026-09-13T07:00:00Z')) // 过 6h 退避窗:nonTerminal 通道重扫
+      fx.replies.push(finalNoise, agree)
+      await fx.shadow.round()
+      const lines = jsonl(fx)
+      expect(lines).toHaveLength(2)
+      // 指纹锚定面经 clueOwnedUrls 单点推导:两通道(recheck 队列 / nonTerminal 重扫)同基准,
+      // 同 thread_id 重 invoke——不分家则 deleteThread 击穿崩溃续跑自愈
+      expect(lines[1]!.threadId).toBe(lines[0]!.threadId)
+      expect(recheckRow().state).toBe('terminal')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('重核队列对同指纹终态强制重跑(官方资料变化即重核,不被同指纹守卫拦)', async () => {
+    const fx = fixture()
+    await fx.db.insertInto('model_archive').values({
+      provider: 'zhipu', official_id: 'glm-5.4', name: 'GLM-5.4', kind: 'text', stage: 'ga',
+      availability: '["api"]', summary: null, sources: '[]', pricing: null, limits: null,
+      training_params: null, match_aliases: '[]', match_slugs: '[]', verified: 'manual',
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }).execute()
+    await fx.shadow.round()
+    const enqueue = () => fx.shadow.sqlite
+      .prepare('INSERT INTO shadow_rechecks VALUES (?, ?, ?, ?, ?) ON CONFLICT (provider, model_key) DO NOTHING')
+      .run('zhipu', 'recheck:1', '2026-09-13', 'glm-5.4 (GLM-5.4) 官方资料变化重核', REL)
+    enqueue()
+    fx.replies.push(finalNoise, agree)
+    await fx.shadow.round()
+    expect(fx.calls).toHaveLength(2)
+    // 同键再次入队(资料又变/上轮队列残留):线索指纹未变也须重跑——同指纹守卫只护真线索
+    enqueue()
+    fx.replies.push(finalNoise, agree)
+    await fx.shadow.round()
+    expect(fx.calls).toHaveLength(4)
+    expect(jsonl(fx)).toHaveLength(2)
+  })
+})
+
 describe('影子核验:指纹重开与线程清理', () => {
   it('24h 页变化为无发布线索的既有模型入重核队列，同页不烧 LLM，影子链复用快照', async () => {
     vi.useFakeTimers()
@@ -290,7 +445,7 @@ describe('影子核验:指纹重开与线程清理', () => {
     expect(await fx.db.selectFrom('model_field_evidence').selectAll().execute()).toEqual([])
   })
 
-  it('同指纹守终态(不再 invoke);信源页内容变化 → 重开新线程,旧 checkpoint 删除', async () => {
+  it('同指纹守终态(不再 invoke);线索自有页变化 → 重开新线程,旧 checkpoint 删除;共享注册页变化不再翻指纹', async () => {
     const fx = fixture()
     await markerThenIngest(fx)
     fx.replies.push(finalNoise, agree)
@@ -300,8 +455,12 @@ describe('影子核验:指纹重开与线程清理', () => {
     await fx.shadow.round()
     expect(jsonl(fx)).toHaveLength(1)
     expect(fx.calls).toHaveLength(2)
-    // 指纹变化(信源页内容变化):重开
+    // 共享注册页(REL)内容变化:不翻调度指纹(重核走 shadow_rechecks 通道)——仍守终态
     fx.pages[REL] = `${RELEASE_MD}\n新增一行:GLM-5.4 价格调整。`
+    await fx.shadow.round()
+    expect(jsonl(fx)).toHaveLength(1)
+    // 线索自有页(DOC)内容变化:thread 身份变 → 重开
+    fx.pages[DOC] = `${DOC_MD}\nGLM-5.4 已开放权重。`
     fx.replies.push(finalNoise, agree)
     await fx.shadow.round()
     const lines = jsonl(fx)
