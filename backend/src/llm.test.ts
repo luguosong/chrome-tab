@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CandidateExhausted, callModel, modelCandidates, runCandidateChain } from './llm'
 
+/** 网关机制测试(ADR-0061 归属):请求形状 / 畸形载荷降级 / 候选链三态与相位 / 闸门串行;
+ * 译制协议、分段与存储在 translate.test.ts,核验状态映射在 modelVerify.test.ts。 */
 describe('LLM Gateway', () => {
   const realFetch = globalThis.fetch
 
@@ -14,7 +16,7 @@ describe('LLM Gateway', () => {
     vi.restoreAllMocks()
   })
 
-  it('callModel extracts content and sends the shared completion request', async () => {
+  it('callModel 发共享补全请求(POST + system/user 消息对)并取回 content', async () => {
     globalThis.fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
       expect(init?.method).toBe('POST')
       expect(JSON.parse(String(init?.body))).toMatchObject({
@@ -35,15 +37,24 @@ describe('LLM Gateway', () => {
     })
   })
 
-  it('callModel turns malformed completion payloads into null content', async () => {
-    globalThis.fetch = vi.fn(async () =>
-      new Response(JSON.stringify({ choices: [{ message: { content: 42 } }] }), { status: 200 }),
-    ) as typeof fetch
-
-    await expect(callModel('m1', 'key', 'sys', 'user')).resolves.toMatchObject({ content: null })
+  it('callModel 畸形补全载荷统一降级 null content(不抛)', async () => {
+    // 全形态对齐搬迁前 translate.test.ts 的 extractContent 直测(choices 缺失/非数组/
+    // 空数组、content 非串、message null、整体 null);extractContent 现私有,经 callModel
+    // 公共面覆盖
+    for (const body of [
+      JSON.stringify({ choices: [{ message: { content: 42 } }] }), // content 非字符串
+      'null', // JSON.parse 得 null(原直测的 null 入参形态)
+      '{}', // choices 缺失
+      JSON.stringify({ choices: 'nope' }), // choices 非数组
+      JSON.stringify({ choices: [] }), // 空数组
+      JSON.stringify({ choices: [{ message: null }] }), // message null
+    ]) {
+      globalThis.fetch = vi.fn(async () => new Response(body, { status: 200 })) as typeof fetch
+      await expect(callModel('m1', 'key', 'sys', 'user')).resolves.toMatchObject({ content: null })
+    }
   })
 
-  it('runCandidateChain advances after a soft exhaustion sentinel', async () => {
+  it('候选链遇软失效哨兵换下一候选', async () => {
     const seen: string[] = []
     await expect(
       runCandidateChain(['m1', 'm2'], async (model) => {
@@ -55,7 +66,7 @@ describe('LLM Gateway', () => {
     expect(seen).toEqual(['m1', 'm2'])
   })
 
-  it('modelCandidates prefers free models and accepts a trimmed env override', () => {
+  it('modelCandidates free 优先默认链 + env 覆盖 trim / 纯分隔符回退', () => {
     expect(modelCandidates()).toEqual([
       'coding-glm-5.3-flash-free',
       'coding-glm-5.3-free',
@@ -69,7 +80,7 @@ describe('LLM Gateway', () => {
     expect(modelCandidates({ CHANGELOG_LLM_MODEL: ',,,' } as NodeJS.ProcessEnv)).toEqual(modelCandidates())
   })
 
-  it('runCandidateChain reports exhausted and fatal terminal states', async () => {
+  it('候选链终局:exhausted 聚合末次错误 / fatal 停链带候选上下文', async () => {
     const exhausted = await runCandidateChain(['m1', 'm2'], async (model) => {
       if (model === 'm1') throw new CandidateExhausted('soft')
       const error = Object.assign(new Error('rate limited'), { status: 429 })
@@ -86,7 +97,7 @@ describe('LLM Gateway', () => {
     ).resolves.toEqual({ status: 'fatal', err: fatalError, model: 'm2', index: 2 })
   })
 
-  it('runCandidateChain preserves empty-chain and attempt-phase semantics', async () => {
+  it('候选链空链 lastErr 为 null + onAttempt 相位上报(1 基序数)', async () => {
     await expect(runCandidateChain([], async () => 'unused')).resolves.toEqual({
       status: 'exhausted',
       lastErr: null,
@@ -112,7 +123,7 @@ describe('LLM Gateway', () => {
     expect(attempts).toEqual(phases)
   })
 
-  it('callModel gate spaces consecutive requests', async () => {
+  it('闸门串行化:连续请求间隔 ≥ 阈值', async () => {
     process.env.LLM_MIN_REQUEST_INTERVAL_MS = '80'
     const times: number[] = []
     globalThis.fetch = vi.fn(async () => {
