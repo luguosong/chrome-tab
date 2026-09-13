@@ -1,5 +1,5 @@
 // 强制 GC 后稳态 RSS 测量 —— research/01 方法的仓内复现(spec 票 02 验收项)。
-// 起 dist/index.js(--expose-gc)→ 探针流量 → 双 GC → 稳定 5s → 读 /proc/<pid>/status VmRSS。
+// 起 dist/index.js(--expose-gc)→ 探针流量 → 双 GC → VmRSS 轮询至收敛 → 读 /proc/<pid>/status VmRSS。
 // 用法:pnpm --filter chrome-tab-backend measure          # 打包形态(部署路径)
 //      pnpm --filter chrome-tab-backend measure -- --source  # tsx 源码直跑形态
 import { spawn } from 'node:child_process'
@@ -38,7 +38,7 @@ try {
   await fetch(`http://127.0.0.1:${port}/debug/gc`, { method: 'POST' })
   await fetch(`http://127.0.0.1:${port}/debug/gc`, { method: 'POST' })
   // 稳定窗口:轮询 VmRSS 至收敛(连续 5 次波动 ≤0.5 MiB,上限 60s)。固定 5s 短窗
-  // (research/01 时代)在七服务启动预热时序不定时是瞬态读数,方差可达 ±70 MiB。
+  // (research/01 时代)在七服务启动预热时序不定时是瞬态读数,方差可达 ±60 MiB 量级。
   let rssKb = 0
   let stable = 0
   for (let i = 0; i < 30 && stable < 5; i++) {

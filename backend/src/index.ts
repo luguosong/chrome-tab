@@ -1,8 +1,8 @@
-// 依赖守门(无人值守数据核验 issues/01):side-effect 加载 LangGraph 三件套进启动路径,
-// 实测常驻内存与 bundle 产物代价(门槛 ~28 MiB);checkpoint-sqlite 顶层
-// import better-sqlite3 在 bundle 中 external 为原生 ESM import(Node interop
-// 解析到顶层 13.0.3,跨大版本兼容已实测)。票 04 核验图落地后由其模块 import
-// 自然接管,此段删除。
+// 依赖守门(无人值守数据核验 issues/01):side-effect 加载 LangGraph 三件套进启动路径
+// (core 经 langgraph 传递加载,无显式 import),实测常驻内存与 bundle 产物代价(门槛
+// ~28 MiB);三件套代码内联进 bundle,checkpoint-sqlite 顶层 import better-sqlite3
+// 是唯一 external(原生 ESM import,Node interop 解析到顶层 13.0.3,跨大版本兼容
+// 已实测)。票 04 核验图落地后由其模块 import 自然接管,此段删除。
 import '@langchain/langgraph'
 import '@langchain/langgraph-checkpoint-sqlite'
 import { serve } from '@hono/node-server'
