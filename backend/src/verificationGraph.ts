@@ -175,7 +175,7 @@ const errText = (e: unknown): string => String((e as Error)?.message ?? e)
 
 // ---- 调查节点 ----
 
-const INVESTIGATE_SYSTEM = `你是 AI 模型档案核验的调查员。给你一条来自某厂家官方发布源的「待核验线索」、该厂家既有档案模型清单、可读信源清单。判断该线索是否为该厂家自家新发布的独立模型型号(独立产品差异的变体算独立型号;移动别名、latest 引用、日期快照、平台/SDK 功能条目、第三方托管模型、纯别名/更名、fine-tune 变体、纯价格调整、region 公告都不算),并取证提出逐字段提案。
+const INVESTIGATE_SYSTEM = `你是 AI 模型档案核验的调查员。给你一条来自该厂家官方信源的「待核验线索」(发布流条目、官方目录差集、或官方弃用/退役公告)、该厂家既有档案模型清单、可读信源清单。判断线索属于哪类:①该厂家自家新发布的独立模型型号(独立产品差异的变体算独立型号)→ 提案新行字段;②对既有档案模型的官方弃用/退役公告 → officialId 取该既有模型,提案 stage(deprecated/retired)/retired_at 等字段;③其余 → 噪音(移动别名、latest 引用、日期快照、平台/SDK 功能条目、第三方托管模型、纯别名/更名、fine-tune 变体、纯价格调整、region 公告;档案中已有同等事实的旧公告重复触达)。
 
 协议:每轮只输出一个 JSON 对象,无 markdown 围栏,无解释:
 索取原文:{"action":"read","urls":["可读清单内的 URL"]}
@@ -247,7 +247,7 @@ function investigationUser(
     `线索信源页:${task.clue.sourceUrl}`,
     `线索唯一键:${task.clue.modelKey}`,
     '',
-    '既有档案模型(该家已入档;线索若只是其中别名/变体/托管第三方即噪音):',
+    '既有档案模型(该家已入档;线索若只是其中别名/变体/托管第三方即噪音——但对其中模型的官方弃用/退役公告是类②字段更新,不是噪音):',
     archive.length === 0 ? '(无)' : archive.map((m) => `- ${m.officialId}(${m.name},stage=${m.stage},别名:${m.matchAliases.join('/') || '无'})`).join('\n'),
     '',
     '历史证据(各字段最新值出处;与既有出处矛盾时如实引用,冲突由裁决矩阵处理):',

@@ -1,5 +1,5 @@
 import type { ModelEvent } from 'chrome-tab-shared'
-import { type BaselineRow, aliasIn, clipFragment, isRealIsoDate, type ParseResult, type ProviderDef } from './def'
+import { type BaselineRow, aliasIn, clipFragment, isRealIsoDate, type ParseResult, type ProviderDef, type RetirementEntry } from './def'
 
 // ---- 月之暗面资讯/Blog(研究 §3:商业模型用资讯、研究/开放权重用 Blog,两页
 //  均无文档化 RSS——按文章 URL 去重,研究 §6.6;页面为同构 Next.js 卡片列表)----
@@ -79,17 +79,55 @@ export const KIMI_NEWS_URL = 'https://www.kimi.com/news'
 /** 月之暗面 Blog(研究/开放权重发布,研究 §3;同上按文章 URL 去重)。 */
 export const KIMI_BLOG_URL = 'https://www.kimi.com/en/blog/'
 
+/** 月之暗面模型列表页(.md 直出;目录与退役双职责,票 07——同页两角色:在册表做差集,
+ *  「已下线模型」段落做退役监视;域用 moonshot.cn 与价格/限额页一致,生产侧直连)。 */
+export const KIMI_MODELS_URL = 'https://platform.moonshot.cn/docs/models.md'
+
+/**
+ * 模型列表页 → 在册 API ID 集(票 07 目录差集):全页反引号小写 ID(在售表与已下线
+ * 表同形态;已下线 ID 经家族归并解析回档案行,不产差集线索)。
+ */
+export function parseMoonshotCatalog(md: string): ParseResult<string> {
+  const ids = new Set<string>()
+  for (const m of md.matchAll(/`([a-z][a-z0-9.-]*)`/g)) ids.add(m[1]!)
+  return { entries: [...ids], skipped: [] }
+}
+
+/**
+ * 模型列表页 → 退役条目(票 07):含「下线」且带中文日期的行(页首 Warning 与
+ * 「已下线模型」段落同构,双处出现按 modelKey 幂等)——ID = 行内反引号。无日期的
+ * 下线机制说明行结构排除。
+ */
+export function parseMoonshotRetirements(md: string): ParseResult<RetirementEntry> {
+  const out: RetirementEntry[] = []
+  const skipped: string[] = []
+  for (const line of md.split('\n')) {
+    if (!line.includes('下线')) continue
+    const m = /(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/.exec(line)
+    if (m === null) continue // 结构排除:机制说明/表格行(日期在段落行)
+    const date = `${m[1]}-${m[2]!.padStart(2, '0')}-${m[3]!.padStart(2, '0')}`
+    if (!isRealIsoDate(date)) {
+      skipped.push(clipFragment(line)) // 意外跳过:日期回滚校验失败
+      continue
+    }
+    const modelIds = [...line.matchAll(/`([a-z][a-z0-9.-]*)`/g)].map((x) => x[1]!)
+    if (modelIds.length === 0) continue // 结构排除:公告行不带模型 ID
+    out.push({ occurredOn: date, title: line.replace(/[`>]/g, '').replace(/\*\*/g, '').trim(), modelIds })
+  }
+  return { entries: out, skipped }
+}
+
 /**
  * 月之暗面 provider:资讯+Blog **两页独立取数**(runPoll 的 urls 多项语义即为此家
- * 而设)。线索恒空:两页为文章流,非模型条目为主(线索即洪水);信源不滚动,
- * 漏检可事后核页。
+ * 而设)。文章流仍不产线索(非模型条目为主,线索即洪水)——票 07 起该家线索覆盖改由
+ * 目录差集供(「文章流永不产线索」的**家级零线索豁免**取消,models.md 差集供真信号)。
  */
 export const MOONSHOT_DEF: ProviderDef<KimiArticle> = {
   id: 'moonshot',
   label: '月之暗面',
   sources: {
     release: { urls: [KIMI_NEWS_URL, KIMI_BLOG_URL], parse: parseKimiArticles, html: true },
-    catalog: { urls: ['https://platform.kimi.com/docs/pricing/chat'], parse: 'fingerprint', html: true },
+    catalog: { urls: [KIMI_MODELS_URL], parse: parseMoonshotCatalog },
     pricing: { urls: ['https://platform.moonshot.cn/docs/pricing/chat'], parse: 'fingerprint', html: true },
     limits: { urls: ['https://platform.moonshot.cn/docs/pricing/limits'], parse: 'fingerprint', html: true },
     weights: { urls: [
@@ -101,7 +139,7 @@ export const MOONSHOT_DEF: ProviderDef<KimiArticle> = {
       'https://huggingface.co/MoonshotAI/Kimi-K2-Thinking/raw/main/README.md',
       'https://huggingface.co/MoonshotAI/Kimi-Audio-7B/raw/main/README.md',
     ], parse: 'fingerprint' },
-    retirement: { urls: ['https://platform.moonshot.cn/docs/changelog'], parse: 'fingerprint', html: true },
+    retirement: { urls: [KIMI_MODELS_URL], parse: parseMoonshotRetirements },
   },
   matchEntry(a, rows) {
     const hit = matchKimiEvent(a, rows)

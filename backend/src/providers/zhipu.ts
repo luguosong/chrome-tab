@@ -1,5 +1,5 @@
 import type { ModelEvent } from 'chrome-tab-shared'
-import { type BaselineRow, aliasIn, clipFragment, normalizeIsoDate, type ParseResult, type ProviderDef, slugIn } from './def'
+import { type BaselineRow, aliasIn, clipFragment, normalizeIsoDate, type ParseResult, type ProviderDef, retirementFromTitles, slugIn } from './def'
 
 // ---- 智谱新品发布页(研究 §3:主发布源;发布页 Markdown 的 `<Update>` 块)----
 
@@ -71,8 +71,22 @@ export function matchZhipuEvent(u: ZhipuUpdate, rows: readonly BaselineRow[]): {
   return null
 }
 
-/** 智谱新品发布页(主发布源,研究 §3)。 */
+/** 智谱新品发布页(主发布源,研究 §3;2026-09 实抓口径:页面含「公告通知」Update 块流)。 */
 export const ZHIPU_RELEASES_URL = 'https://docs.bigmodel.cn/cn/update/new-releases.md'
+
+/** 智谱模型概览页(目录/限额双职责,票 06 注册;票 07 起目录做条目级差集)。 */
+export const ZHIPU_OVERVIEW_URL = 'https://docs.bigmodel.cn/cn/guide/start/model-overview.md'
+
+/**
+ * 模型概览页 → 在册模型名集(票 07 目录差集):模型表格首列 `[名称](/cn/guide/models/…)`
+ * 链接文本(最新模型当日同步进推荐表,卡片区的嵌套 JSX 含 `>` 无法稳定正则,不依赖)。
+ * 无链接的裸名(CodeGeeX-4 等)不收:结构上无法与正文叙述区分。
+ */
+export function parseZhipuCatalog(md: string): ParseResult<string> {
+  const ids = new Set<string>()
+  for (const m of md.matchAll(/\[([^\]]+)\]\(\/cn\/guide\/models\/[^)]+\)/g)) ids.add(m[1]!.trim())
+  return { entries: [...ids], skipped: [] }
+}
 
 /** 智谱 provider:双条件归属(alias 词边界 + 文档链接 slug);未认领块以文档链接/日期+描述为线索键。 */
 export const ZHIPU_DEF: ProviderDef<ZhipuUpdate> = {
@@ -80,9 +94,9 @@ export const ZHIPU_DEF: ProviderDef<ZhipuUpdate> = {
   label: '智谱',
   sources: {
     release: { urls: [ZHIPU_RELEASES_URL], parse: parseZhipuReleases },
-    catalog: { urls: ['https://docs.bigmodel.cn/cn/guide/start/model-overview.md'], parse: 'fingerprint' },
+    catalog: { urls: [ZHIPU_OVERVIEW_URL], parse: parseZhipuCatalog },
     pricing: { urls: ['https://docs.bigmodel.cn/cn/guide/start/pricing.md'], parse: 'fingerprint' },
-    limits: { urls: ['https://docs.bigmodel.cn/cn/guide/start/model-overview.md'], parse: 'fingerprint' },
+    limits: { urls: [ZHIPU_OVERVIEW_URL], parse: 'fingerprint' },
     weights: { urls: [
       'https://huggingface.co/zai-org/GLM-5.2/raw/main/README.md',
       'https://huggingface.co/zai-org/GLM-5.1/raw/main/README.md',
@@ -96,7 +110,12 @@ export const ZHIPU_DEF: ProviderDef<ZhipuUpdate> = {
       'https://huggingface.co/zai-org/GLM-4.6V-Flash/raw/main/README.md',
       'https://huggingface.co/zai-org/GLM-TTS/raw/main/README.md',
     ], parse: 'fingerprint' },
-    retirement: { urls: ['https://docs.bigmodel.cn/cn/guide/start/model-overview.md'], parse: 'fingerprint' },
+    // 退役监视(票 07):智谱无独立弃用页,弃用公告走发布流 Update 块——同页按标题
+    // 词面筛退役条目(retirementFromTitles),日期/型号沿用发布块解析
+    retirement: { urls: [ZHIPU_RELEASES_URL], parse: (md) => {
+      const { entries, skipped } = parseZhipuReleases(md)
+      return { entries: retirementFromTitles(entries.map((u) => ({ occurredOn: u.date, title: u.description }))), skipped }
+    } },
   },
   matchEntry(u, rows) {
     const hit = matchZhipuEvent(u, rows)

@@ -27,8 +27,8 @@ import { XAI_DEF } from './providers/xai'
 import { MOONSHOT_DEF } from './providers/moonshot'
 import { OPENAI_DEF } from './providers/openai'
 import { ALIBABA_DEF } from './providers/alibaba'
-import type { BaselineRow, MatchedHit, PendingClue, ProviderDef } from './providers/def'
-import { SOURCE_INTERVAL_MS, sourceIsStale } from './providers/def'
+import type { BaselineRow, CatalogParse, MatchedHit, PendingClue, ProviderDef, RetirementEntry, RetirementParse } from './providers/def'
+import { catalogDiffClues, retirementClues, SOURCE_INTERVAL_MS, sourceIsStale } from './providers/def'
 import type { SourceRole } from './adjudication'
 import { makeAaEvaluations, type AaEvaluations } from './aaEvaluations'
 import { verifyClue } from './modelVerify'
@@ -448,12 +448,15 @@ export class ModelTrackingService {
           const prevPages = parseSourcePages(status?.pages ?? null)
           const pageErrs: unknown[] = []
           let fetched = 0
+          const freshRaws: Array<{ url: string; raw: string }> = []
           for (const url of def.sources[role].urls) {
             try {
-              const content = normalizeSourcePage(await fetchRaw(url), def.sources[role].html ?? false)
+              const raw = await fetchRaw(url)
+              const content = normalizeSourcePage(raw, def.sources[role].html ?? false)
               if (content.trim() === '') throw new Error('信源页为空')
               pages[url] = content
               fetched++
+              freshRaws.push({ url, raw })
             } catch (e) {
               pageErrs.push(e)
               if (prevPages[url] !== undefined) pages[url] = prevPages[url]!
@@ -461,6 +464,12 @@ export class ModelTrackingService {
           }
           if (fetched === 0) throw pageErrs[0]
           for (const e of pageErrs) console.error(`模型追踪(${def.label}/${role})单页失败:`, e)
+          // 条目级角色(票 07):目录差集与退役公告在本轮新鲜抓取上产线索(改版零条目
+          // 抛错在前,标陈旧不产线索——与发布源同契约)
+          const parse = def.sources[role].parse
+          if (parse !== 'fingerprint' && (role === 'catalog' || role === 'retirement')) {
+            await this.ingestRoleEntries(def, role, parse, freshRaws)
+          }
         }
         const serialized = JSON.stringify(Object.entries(pages).sort(([a], [b]) => a.localeCompare(b)))
         await this.markSource(def.id, true, role, {
@@ -473,6 +482,38 @@ export class ModelTrackingService {
       }
     }
     if (releaseError !== undefined) throw releaseError
+  }
+
+  /**
+   * 目录/退役角色的条目级线索生成(票 07):解析**本轮新鲜抓取**的原始页——回退旧快照
+   * 不重解析(旧内容的线索已在其新鲜轮入账,账本冻结语义天然幂等)。目录差集线索键 =
+   * 裸 ID(occurredOn = 观察日,目录页不携带模型日期);退役线索键 = 条目 ID/命中别名,
+   * occurredOn = 公告日期(30 天入库窗天然只放行新鲜公告,历史弃用不重复触达)。目录
+   * 零条目 = 上游改版口径(抛错由调用方标陈旧,同发布源契约);退役零条目合法(当期
+   * 无弃用公告)。线索经线索账本入库,旧链 auto 核验与影子链同一协议消费。
+   */
+  private async ingestRoleEntries(
+    def: ProviderDef<unknown>,
+    role: 'catalog' | 'retirement',
+    parse: CatalogParse | RetirementParse,
+    freshRaws: ReadonlyArray<{ url: string; raw: string }>,
+  ): Promise<void> {
+    const rows = await this.baselineRows(def.id)
+    const clues: PendingClue[] = []
+    let entries = 0
+    for (const { url, raw } of freshRaws) {
+      // role 与 parse 形态由 ProviderSources 静态绑定(catalog→CatalogParse),此处断言收窄
+      const r = role === 'catalog' ? (parse as CatalogParse)(raw) : (parse as RetirementParse)(raw)
+      if (r.skipped.length > 0) {
+        console.warn(`模型追踪(${def.label}/${role})意外跳过 ${r.skipped.length} 条:`, r.skipped.slice(0, 5))
+      }
+      entries += r.entries.length
+      clues.push(...(role === 'catalog'
+        ? catalogDiffClues(r.entries as string[], rows, { occurredOn: nowIso().slice(0, 10), sourceUrl: url })
+        : retirementClues(r.entries as RetirementEntry[], rows, url)))
+    }
+    if (role === 'catalog' && entries === 0) throw new Error('目录源无结构化条目(疑似上游改版)')
+    await this.ledger.ingest(def.id, clues)
   }
 
   /**

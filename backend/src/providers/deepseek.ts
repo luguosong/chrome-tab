@@ -1,7 +1,29 @@
-import { type BaselineRow, aliasIn, clipFragment, isRealIsoDate, type MatchedHit, type ParseResult, type ProviderDef } from './def'
+import { type BaselineRow, aliasIn, clipFragment, isRealIsoDate, type MatchedHit, type ParseResult, type ProviderDef, retirementFromTitles } from './def'
 
 /** DeepSeek API Change Log(主发布源,研究 §3;ADR-0058 起常量自基线文件迁入本体)。 */
 export const DEEPSEEK_UPDATES_URL = 'https://api-docs.deepseek.com/updates/'
+
+/** DeepSeek 定价页(目录与价格双职责,票 06 注册;票 07 起目录做条目级差集)。 */
+export const DEEPSEEK_PRICING_URL = 'https://api-docs.deepseek.com/quick_start/pricing'
+
+/**
+ * 定价页 → 在册模型 ID 集(票 07 目录差集):规格表逐行是「特性 × 模型列」的转置表,
+ * `MODEL` 行是当前 API 名(`deepseek-flash`,无版本移动别名)、`MODEL VERSION` 行是
+ * 版本快照(`DeepSeek-V4.1-Flash`)——两行的非首格都是 ID(脚注角标 `(1)` 剥除)。
+ */
+export function parseDeepSeekCatalog(html: string): ParseResult<string> {
+  const ids = new Set<string>()
+  for (const row of html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)) {
+    const cells = [...row[1]!.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)]
+      .map((c) => c[1]!.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim())
+    if (cells.length < 2 || !/^(MODEL|MODEL VERSION)$/.test(cells[0]!)) continue
+    for (const cell of cells.slice(1)) {
+      const id = cell.replace(/\s*\(\d+\)$/, '').trim()
+      if (id !== '') ids.add(id)
+    }
+  }
+  return { entries: [...ids], skipped: [] }
+}
 
 // ---- DeepSeek API Change Log(研究 §3:主发布源 HTML 无 RSS。解析器与匹配器随
 //  厂家 provider 文件走——issues/07 期间「随基线文件走」是并行接入防撞车的临时
@@ -82,8 +104,8 @@ export const DEEPSEEK_DEF: ProviderDef<DeepSeekSection> = {
   label: 'DeepSeek',
   sources: {
     release: { urls: [DEEPSEEK_UPDATES_URL], parse: parseDeepSeekUpdates, html: true },
-    catalog: { urls: ['https://api-docs.deepseek.com/quick_start/pricing'], parse: 'fingerprint', html: true },
-    pricing: { urls: ['https://api-docs.deepseek.com/quick_start/pricing'], parse: 'fingerprint', html: true },
+    catalog: { urls: [DEEPSEEK_PRICING_URL], parse: parseDeepSeekCatalog, html: true },
+    pricing: { urls: [DEEPSEEK_PRICING_URL], parse: 'fingerprint', html: true },
     limits: { urls: ['https://api-docs.deepseek.com/quick_start/rate_limit'], parse: 'fingerprint', html: true },
     weights: { urls: [
       'https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro-0813/raw/main/README.md',
@@ -98,7 +120,11 @@ export const DEEPSEEK_DEF: ProviderDef<DeepSeekSection> = {
       'https://huggingface.co/deepseek-ai/DeepSeek-Coder-V2-Instruct/raw/main/README.md',
       'https://huggingface.co/deepseek-ai/DeepSeek-V2/raw/main/README.md',
     ], parse: 'fingerprint' },
-    retirement: { urls: ['https://api-docs.deepseek.com/updates/'], parse: 'fingerprint', html: true },
+    // 退役监视(票 07):深求无独立弃用页,弃用公告走 Change Log 小节——同页按标题词面筛
+    retirement: { urls: [DEEPSEEK_UPDATES_URL], parse: (html) => {
+      const { entries, skipped } = parseDeepSeekUpdates(html)
+      return { entries: retirementFromTitles(entries.map((s) => ({ occurredOn: s.date, title: s.title }))), skipped }
+    }, html: true },
   },
   matchEntry(s, rows) {
     const matched = matchDeepSeekEvent(s, rows)

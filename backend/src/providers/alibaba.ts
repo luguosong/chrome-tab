@@ -3,6 +3,37 @@ import { clipFragment, makeIdResolver, type MatchedHit, normalizeIsoDate, type P
 /** 阿里百炼「模型上下架与更新」页(主发布源,研究 §3;ADR-0058 起常量自基线文件迁入本体)。 */
 export const QWEN_RELEASES_URL = 'https://help.aliyun.com/zh/model-studio/newly-released-models'
 
+/** 百炼「选择模型」页(目录职责,票 06 注册;票 07 起做条目级差集)。 */
+export const QWEN_MODELS_URL = 'https://help.aliyun.com/zh/model-studio/models'
+
+/** 百炼「模型下线机制说明」页(退役职责;实抓 2026-09:批次日期 + 官网公告链接,**无逐模型
+ *  ID**——型号清单在 aliyun.com/notice 子页且客户端渲染,fetchText 拿不到;该角色维持
+ *  指纹形态,批次页变化经 shadow_rechecks 通道触发该家全量重核。注意 slug 是阿里官方
+ *  拼写 model-depreciation,直觉拼写 model-deprecation 是 404)。 */
+export const QWEN_DEPRECIATION_URL = 'https://help.aliyun.com/zh/model-studio/model-depreciation'
+
+/**
+ * 「选择模型」页 → 在册模型 ID 集(票 07 目录差集):SSR 正文文本的 ID 形态 token
+ * (百炼 ID 必含 `-`/`/` 段界——qwen3.8-max、kimi/kimi-k3;纯单词 token 是栏目名
+ * ASR/TTS 类,结构性排除)。托管第三方(kimi/glm/deepseek 等)照常进差集,由
+ * noiseClue 在核验前硬拦(不进 LLM)。
+ */
+export function parseBailianCatalog(html: string): ParseResult<string> {
+  const text = html
+    .replace(/<script[\s\S]*?<\/script>/g, ' ')
+    .replace(/<style[\s\S]*?<\/style>/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&nbsp;/g, ' ')
+  const ids = new Set<string>()
+  for (const token of text.split(/\s+/)) {
+    // 必含数字:百炼模型 ID 全带版本数字(qwen3.8-max/wan2.7-…),面包屑路径段
+    // (zh/model-studio、quick_start/pricing)无数字,结构性排除
+    if (/^[a-zA-Z][a-zA-Z0-9.]*[-/][a-zA-Z0-9./_-]+$/.test(token) && /\d/.test(token)) ids.add(token)
+  }
+  return { entries: [...ids], skipped: [] }
+}
+
 // ---- 阿里通义:百炼「模型上下架与更新」(研究 §3:主发布源 SSR 纯表格。解析器
 //  原随 qwenBaseline 走(并行接入防撞车约定),ADR-0038 起归一为厂家 provider 文件)----
 
@@ -113,7 +144,7 @@ export const ALIBABA_DEF: ProviderDef<BailianRow> = {
   label: '通义',
   sources: {
     release: { urls: [QWEN_RELEASES_URL], parse: parseBailianReleases, html: true },
-    catalog: { urls: ['https://help.aliyun.com/zh/model-studio/models'], parse: 'fingerprint', html: true },
+    catalog: { urls: [QWEN_MODELS_URL], parse: parseBailianCatalog, html: true },
     pricing: { urls: ['https://help.aliyun.com/zh/model-studio/model-pricing'], parse: 'fingerprint', html: true },
     limits: { urls: ['https://help.aliyun.com/zh/model-studio/rate-limit'], parse: 'fingerprint', html: true },
     weights: { urls: [
@@ -144,7 +175,7 @@ export const ALIBABA_DEF: ProviderDef<BailianRow> = {
       'https://huggingface.co/Qwen/Qwen3-VL-Reranker-2B/raw/main/README.md',
       'https://huggingface.co/Qwen/Qwen3-Reranker-0.6B/raw/main/README.md',
     ], parse: 'fingerprint' },
-    retirement: { urls: ['https://help.aliyun.com/zh/model-studio/model-deprecation'], parse: 'fingerprint', html: true },
+    retirement: { urls: [QWEN_DEPRECIATION_URL], parse: 'fingerprint', html: true },
   },
   // auto 核验信源 = 百炼表格页(价格/规格不在表内,LLM 只核「自家新模型上架」事实,资料字段留空)
   verifyUrls: (clue) => [clue.sourceUrl],

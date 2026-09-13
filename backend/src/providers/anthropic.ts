@@ -1,5 +1,5 @@
 import type { ModelEvent } from 'chrome-tab-shared'
-import { type BaselineRow, aliasIn, clipFragment, MONTHS, type ParseResult, type ProviderDef, slugIn } from './def'
+import { type BaselineRow, aliasIn, clipFragment, datedSectionsToRetirements, MONTHS, type ParseResult, type ProviderDef, slugIn } from './def'
 
 // ---- Anthropic release notes(研究 §3:主发布源;页面混有 SDK/平台功能条目,
 //  须按明确模型名/ID 过滤——与智谱同用双条件归属)----
@@ -79,17 +79,37 @@ export function matchAnthropicEvent(n: AnthropicNote, rows: readonly BaselineRow
 /** Anthropic Claude Platform release notes(主发布源,研究 §3)。 */
 export const ANTHROPIC_RELEASES_URL = 'https://platform.claude.com/docs/en/release-notes/overview.md'
 
+/** Anthropic 模型总览页(目录职责;票 07 起做条目级差集)。 */
+export const ANTHROPIC_MODELS_URL = 'https://platform.claude.com/docs/en/about-claude/models/overview.md'
+
+/** Anthropic 模型弃用页(退役职责;票 07 起解析弃用公告段)。 */
+export const ANTHROPIC_DEPRECATIONS_URL = 'https://platform.claude.com/docs/en/about-claude/model-deprecations.md'
+
+/**
+ * 模型总览页 → API ID 集(票 07 目录差集):逐表取 `Claude API ID` 行的反引号值
+ * (对比表逐行一特性,只有该行是 ID 行;总览只列在售代际,退役型号不在此——差集
+ * 只做加法,不在场不是观察)。
+ */
+export function parseAnthropicCatalog(md: string): ParseResult<string> {
+  const ids = new Set<string>()
+  for (const line of md.split('\n')) {
+    if (!/^\|\s*Claude API ID\b/.test(line)) continue
+    for (const m of line.matchAll(/`([^`]+)`/g)) ids.add(m[1]!.trim())
+  }
+  return { entries: [...ids], skipped: [] }
+}
+
 /** Anthropic provider:双条件归属(与智谱同构);未认领条目以首链接/日期+原文前缀为线索键。 */
 export const ANTHROPIC_DEF: ProviderDef<AnthropicNote> = {
   id: 'anthropic',
   label: 'Anthropic',
   sources: {
     release: { urls: [ANTHROPIC_RELEASES_URL], parse: parseAnthropicReleases },
-    catalog: { urls: ['https://platform.claude.com/docs/en/about-claude/models/overview.md'], parse: 'fingerprint' },
+    catalog: { urls: [ANTHROPIC_MODELS_URL], parse: parseAnthropicCatalog },
     pricing: { urls: ['https://platform.claude.com/docs/en/about-claude/pricing.md'], parse: 'fingerprint' },
     limits: { urls: ['https://platform.claude.com/docs/en/api/rate-limits.md'], parse: 'fingerprint' },
     weights: { urls: ['https://www.anthropic.com/system-cards'], parse: 'fingerprint', html: true },
-    retirement: { urls: ['https://platform.claude.com/docs/en/about-claude/model-deprecations.md'], parse: 'fingerprint' },
+    retirement: { urls: [ANTHROPIC_DEPRECATIONS_URL], parse: datedSectionsToRetirements },
   },
   // auto 核验信源(ADR-0058;信息智能化 spec 1.3 裁决 12):固定 models/overview 页
   // (新模型发布即上页,API ID/定价/limits/retirement 齐全)+ 线索源页——release notes

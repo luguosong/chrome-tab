@@ -1,4 +1,4 @@
-import { clipFragment, isRealIsoDate, makeIdResolver, MONTHS, type MatchedHit, type ParseResult, type ProviderDef, residualIdClues } from './def'
+import { clipFragment, datedSectionsToRetirements, isRealIsoDate, makeIdResolver, MONTHS, type MatchedHit, type ParseResult, type ProviderDef, residualIdClues } from './def'
 
 // ---- OpenAI API changelog(研究 §3:主发布源。与别家不同,条目类型行自带
 //  `Model: id` 结构化字段,归属无需双条件猜测——精确 ID 匹配 + 最长前缀快照归族)----
@@ -8,6 +8,22 @@ export const OPENAI_CHANGELOG_PAGE_URL = 'https://developers.openai.com/api/docs
 
 /** OpenAI API changelog(主发布源;.md 形式直抓,锚点用人类可读页 URL)。 */
 export const OPENAI_CHANGELOG_URL = `${OPENAI_CHANGELOG_PAGE_URL}.md`
+
+/** OpenAI 模型目录页(目录职责;票 07 起做条目级差集)。 */
+export const OPENAI_MODELS_URL = 'https://developers.openai.com/api/docs/models.md'
+
+/** OpenAI 弃用页(退役职责;票 07 起解析弃用公告段)。 */
+export const OPENAI_DEPRECATIONS_URL = 'https://developers.openai.com/api/docs/deprecations.md'
+
+/**
+ * 模型目录页 → API ID 集(票 07 目录差集):条目 `- [名称](/api/docs/models/<id>.md)`
+ * 的 slug(精选区与全目录同构链接,Set 去重;退役型号也在册——差集只做加法)。
+ */
+export function parseOpenAICatalog(md: string): ParseResult<string> {
+  const ids = new Set<string>()
+  for (const m of md.matchAll(/\]\(\/api\/docs\/models\/([a-z0-9.-]+)\.md\)/g)) ids.add(m[1]!)
+  return { entries: [...ids], skipped: [] }
+}
 
 /** changelog 锚点月份词表(全名前三字母,`#sep-3` 形态)。 */
 const OPENAI_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'] as const
@@ -134,43 +150,53 @@ export function matchOpenAIEvents(
 }
 
 /**
- * OpenAI provider:`Model:` 字段精确/前缀匹配。无 `Model:` 字段的平台/SDK 条目非
- * 模型线索,不落;其余条目(全未认领与部分认领同构)每个未被认领的 ID 一条线索
- * (键 = 裸 ID,`-latest` 移动别名不算——CONTEXT:latest 只是引用方式,不另算模型)。
- * 全未认领不再用「日期+ID 串」整条键:整条键与裸键并存会让同一模型在基线收录
- * 部分成员后的过渡期(旧整条行 7 天滚出前)双行同现。
+ * OpenAI provider:`Model:` 字段精确/前缀匹配。其余条目(全未认领与部分认领同构)
+ * 每个未被认领的 ID 一条线索(键 = 裸 ID,`-latest` 移动别名不算——CONTEXT:latest
+ * 只是引用方式,不另算模型)。**无 `Model:` 字段的平台/SDK 条目也落线索**(票 07
+ * 豁免取消:七家线索覆盖无死角,条目级噪音交核验链判):键退化为日期+标题派生
+ * (无结构化 ID),同键幂等。全未认领不再用「日期+ID 串」整条键:整条键与裸键并存
+ * 会让同一模型在基线收录部分成员后的过渡期(旧整条行 7 天滚出前)双行同现。
  */
 export const OPENAI_DEF: ProviderDef<OpenAIChangelogEntry> = {
   id: 'openai',
   label: 'OpenAI',
   sources: {
     release: { urls: [OPENAI_CHANGELOG_URL], parse: parseOpenAIChangelog },
-    catalog: { urls: ['https://developers.openai.com/api/docs/models.md'], parse: 'fingerprint' },
+    catalog: { urls: [OPENAI_MODELS_URL], parse: parseOpenAICatalog },
     pricing: { urls: ['https://developers.openai.com/api/docs/pricing.md'], parse: 'fingerprint' },
     limits: { urls: ['https://developers.openai.com/api/docs/guides/rate-limits.md'], parse: 'fingerprint' },
     weights: { urls: [
       'https://huggingface.co/openai/gpt-oss-120b/raw/main/README.md',
       'https://huggingface.co/openai/gpt-oss-20b/raw/main/README.md',
     ], parse: 'fingerprint' },
-    retirement: { urls: ['https://developers.openai.com/api/docs/deprecations.md'], parse: 'fingerprint' },
+    retirement: { urls: [OPENAI_DEPRECATIONS_URL], parse: datedSectionsToRetirements },
   },
-  // auto 核验信源(ADR-0058):裸 ID 线索 → 模型文档页(.md 直抓,含规格/价格)+ changelog 页
+  // auto 核验信源(ADR-0058):裸 ID 线索 → 模型文档页(.md 直抓,含规格/价格)+ changelog 页;
+  // 无 `Model:` 条目的日期+标题派生键(含 `|`)内插模型页是保证 404 的死链,只核 changelog
   verifyUrls: (clue) => [
-    `https://developers.openai.com/api/docs/models/${clue.modelKey}.md`,
+    ...(clue.modelKey.includes('|') ? [] : [`https://developers.openai.com/api/docs/models/${clue.modelKey}.md`]),
     OPENAI_CHANGELOG_URL,
   ],
   matchEntry(e, rows) {
-    // 无 `Model:` 字段的平台/SDK 条目非模型线索,不落
-    if (e.models.length === 0) return { hits: [], clues: [] }
     const resolve = makeIdResolver(rows)
     const title = openaiEntryTitle(e.firstLine !== '' ? e.firstLine : e.typeLine)
+    const clues = residualIdClues(e.models, resolve, {
+      occurredOn: e.date,
+      titleOf: () => title,
+      sourceUrl: openaiChangelogAnchor(e.date),
+    })
+    // 无 `Model:` 条目(票 07 豁免取消):整条一条日期+标题派生键线索
+    if (e.models.length === 0) {
+      clues.push({
+        occurredOn: e.date,
+        title,
+        sourceUrl: openaiChangelogAnchor(e.date),
+        modelKey: `${e.date}|${title}`,
+      })
+    }
     return {
       hits: matchOpenAIEvents([e], resolve),
-      clues: residualIdClues(e.models, resolve, {
-        occurredOn: e.date,
-        titleOf: () => title,
-        sourceUrl: openaiChangelogAnchor(e.date),
-      }),
+      clues,
     }
   },
 }

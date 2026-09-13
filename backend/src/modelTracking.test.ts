@@ -1415,7 +1415,7 @@ describe('模型追踪:OpenAI changelog 解析(纯函数,issues/03)', () => {
     })
   })
 
-  it('部分认领条目:残余 ID 逐个落待核验线索(键=裸 ID,重复去重);全认领/平台条目无线索;全未认领保持整条线索', () => {
+  it('部分认领条目:残余 ID 逐个落待核验线索(键=裸 ID,重复去重);全未认领保持整条线索;无 Model: 条目落日期+标题派生键线索(票 07 豁免取消)', () => {
     const entry: OpenAIChangelogEntry = {
       date: '2026-08-30',
       typeLine: 'Update: Model: gpt-5.6-sol and Model: gpt-6.2',
@@ -1436,7 +1436,17 @@ describe('模型追踪:OpenAI changelog 解析(纯函数,issues/03)', () => {
     expect(whole.hits).toEqual([])
     expect(whole.clues).toHaveLength(1)
     expect(whole.clues[0]!.modelKey).toBe('gpt-6.2') // 全未认领同裸键:同一模型永不双行
-    expect(OPENAI_DEF.matchEntry({ ...entry, models: [] }, asRows(OPENAI_BASELINE)).clues).toEqual([])
+    // 无 `Model:` 平台/SDK 条目豁免已取消(票 07:七家线索覆盖无死角):整条一条
+    // 日期+标题派生键线索(无结构化 ID 可用),核验链判条目级噪音
+    const platform = OPENAI_DEF.matchEntry({ ...entry, models: [], firstLine: 'New SDK released.' }, asRows(OPENAI_BASELINE))
+    expect(platform.clues).toEqual([{
+      occurredOn: '2026-08-30',
+      title: 'New SDK released.',
+      sourceUrl: 'https://developers.openai.com/api/docs/changelog#aug-30',
+      modelKey: '2026-08-30|New SDK released.',
+    }])
+    // 派生键(含 |)不内插模型文档死链,只核 changelog 页
+    expect(OPENAI_DEF.verifyUrls!(platform.clues[0]!)).toEqual([OPENAI_CHANGELOG_URL])
   })
 })
 

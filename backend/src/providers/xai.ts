@@ -1,4 +1,4 @@
-import { type BaselineRow, aliasIn, clipFragment, MONTHS, type MatchedHit, type ParseResult, type ProviderDef } from './def'
+import { type BaselineRow, aliasIn, clipFragment, MONTHS, type MatchedHit, type ParseResult, type ProviderDef, retirementFromTitles } from './def'
 
 // ---- xAI 发布流(研究 §3:主发布源;`## 月份` 标题仅月份粒度,条目 `### ` 自带标题)----
 
@@ -93,17 +93,47 @@ export function matchXaiEvent(e: XaiReleaseEntry, rows: readonly BaselineRow[]):
 /** xAI 发布流(主发布源,研究 §3;公共缓存约 1 小时,轮询节奏 6h 不短于缓存)。 */
 export const XAI_RELEASES_URL = 'https://docs.x.ai/developers/release-notes.md'
 
+/** xAI 模型页(目录职责;票 07 起做条目级差集)。 */
+export const XAI_MODELS_URL = 'https://docs.x.ai/developers/models.md'
+
+/**
+ * 模型页 → 在册模型 ID 集(票 07 目录差集):逐表首列——长上下文定价行的括号是
+ * 计价档位(`grok-4.6 (< 200k prompt tokens)`)剥掉取裸名;语音表的括号是**模式行**
+ * 的真 ID(`Speech to Speech (grok-voice-think-fast-2.0)`,裸名是模式标签不是模型),
+ * 取括号弃裸名。表头行(Model/Mode)排除。
+ */
+export function parseXaiCatalog(md: string): ParseResult<string> {
+  const ids = new Set<string>()
+  for (const m of md.matchAll(/^\| ([^|\n]+) \|/gm)) {
+    const cell = m[1]!.trim()
+    if (cell === 'Model' || cell === 'Mode' || /^-+$/.test(cell)) continue // 结构排除:表头与分隔行
+    const parenIds = [...cell.matchAll(/\((grok-[a-z0-9.-]+)\)/g)].map((p) => p[1]!)
+    if (parenIds.length > 0) {
+      for (const id of parenIds) ids.add(id)
+      continue
+    }
+    const bare = cell.replace(/\s*\([^)]*\)\s*$/, '').trim()
+    if (bare !== '') ids.add(bare)
+  }
+  return { entries: [...ids], skipped: [] }
+}
+
 /** xAI provider:标题词边界归属(月份粒度事件锚定当月 1 日);未认领条目以首链接/标题为线索键。 */
 export const XAI_DEF: ProviderDef<XaiReleaseEntry> = {
   id: 'xai',
   label: 'xAI',
   sources: {
     release: { urls: [XAI_RELEASES_URL], parse: parseXaiReleaseNotes },
-    catalog: { urls: ['https://docs.x.ai/developers/models.md'], parse: 'fingerprint' },
+    catalog: { urls: [XAI_MODELS_URL], parse: parseXaiCatalog },
     pricing: { urls: ['https://docs.x.ai/developers/pricing.md'], parse: 'fingerprint' },
     limits: { urls: ['https://docs.x.ai/developers/rate-limits.md'], parse: 'fingerprint' },
     weights: { urls: ['https://huggingface.co/xai-org/grok-1/raw/main/README.md'], parse: 'fingerprint' },
-    retirement: { urls: ['https://docs.x.ai/developers/release-notes.md'], parse: 'fingerprint' },
+    // 退役监视(票 07):xAI 无独立弃用页,退役公告走发布流——同页按标题词面筛
+    // (实抓 2026-09:grok-imagine-image-quality retirement 段即在发布流内)
+    retirement: { urls: [XAI_RELEASES_URL], parse: (md) => {
+      const { entries, skipped } = parseXaiReleaseNotes(md)
+      return { entries: retirementFromTitles(entries.map((e) => ({ occurredOn: `${e.yearMonth}-01`, title: e.title }))), skipped }
+    } },
   },
   matchEntry(e, rows) {
     const matched = matchXaiEvent(e, rows)
