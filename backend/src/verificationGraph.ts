@@ -5,13 +5,14 @@ import type {
   ModelEvent,
   ModelEventKind,
   ModelKind,
+  ModelLimit,
+  ModelPricing,
   ModelProviderId,
   ReleaseStage,
 } from 'chrome-tab-shared'
 import { adjudicateField, type FieldCurrent, type FieldObservation, type SourceRole } from './adjudication'
 import type { FieldEvidence } from './evidence'
 import { callModel } from './llm'
-import { AVAILABILITY, MODEL_KINDS, RELEASE_STAGES, SOURCE_EXCERPT, parseLlmJson, safeHost, validLimits, validPricing } from './modelVerify'
 import { isRealIsoDate } from './providers/def'
 import type { PendingClue } from './providers/def'
 
@@ -90,10 +91,12 @@ export interface AcceptInsertRow {
   sources: Array<{ title: string; url: string }>
 }
 
-/** 单字段裁决落点(票 03 三态):defer 带 reason(暂缓归因);其余带待追加证据行。 */
+/** 单字段裁决落点(票 03 三态):defer 带 reason(暂缓归因);accept/supersede 带提案值
+ *  (执行器写档案列用,issues/11 切换写库补全契约)与待追加证据行。 */
 export interface FieldLanding {
   field: string
   decision: 'accept' | 'supersede' | 'defer'
+  value?: unknown
   evidence?: FieldEvidence
   deferReason?: string
 }
@@ -105,6 +108,7 @@ export interface FieldLanding {
  * 生产执行器归接线票(05 影子期 = jsonl 落点,切换后 = SQLite 事务);本模块只产出计划。
  */
 export interface AcceptPlan {
+  provider: ModelProviderId
   clue: PendingClue
   target: { kind: 'update'; modelId: number } | { kind: 'insert'; row: AcceptInsertRow }
   fields: FieldLanding[]
@@ -130,6 +134,58 @@ export interface VerificationDeps {
   /** 图内最终事务执行器:接纳计划单事务落库。 */
   commit: (plan: AcceptPlan) => Promise<void>
   env: NodeJS.ProcessEnv
+}
+
+// ---- 值域与解析工具(旧链 modelVerify 退役时迁入,issues/11;核验域单点) ----
+
+export const MODEL_KINDS = new Set(['text', 'multimodal_understanding', 'image_generation', 'video_generation', 'audio_speech', 'embedding', 'rerank', 'moderation_classification'])
+export const RELEASE_STAGES = new Set(['experimental', 'preview', 'beta', 'ga', 'deprecated', 'retired'])
+export const AVAILABILITY = new Set(['api', 'first_party_app', 'open_weights'])
+
+/** 单信源原文进 prompt 的截断上限(多页合计 ~24k 字符;模型文档页头部即规格区)。 */
+export const SOURCE_EXCERPT = 12_000
+
+/** LLM 输出 → JSON 对象;剥 markdown 围栏与前后杂文(取首个 { 到末个 })。 */
+export function parseLlmJson(content: string): Record<string, unknown> | null {
+  const start = content.indexOf('{')
+  const end = content.lastIndexOf('}')
+  if (start === -1 || end <= start) return null
+  try {
+    const v = JSON.parse(content.slice(start, end + 1))
+    return typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
+}
+
+/** URL host;非法 URL → null。 */
+export function safeHost(url: string): string | null {
+  try {
+    return new URL(url).host
+  } catch {
+    return null
+  }
+}
+
+/** pricing 形状:{entries: [{text}...]}(scope 可选);非对象/缺数组/空文本项 → null。 */
+export function validPricing(raw: unknown): ModelPricing | null {
+  if (raw === null || raw === undefined || typeof raw !== 'object') return null
+  const entries = (raw as { entries?: unknown }).entries
+  if (!Array.isArray(entries) || entries.length === 0) return null
+  const ok = entries.every(
+    (e) => typeof e === 'object' && e !== null && typeof (e as { text?: unknown }).text === 'string' && (e as { text: string }).text !== '',
+  )
+  if (!ok) return null
+  return raw as ModelPricing
+}
+
+/** limits 形状:[{label, text}...];非数组/缺项 → null。 */
+export function validLimits(raw: unknown): ModelLimit[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null
+  const ok = raw.every(
+    (e) => typeof e === 'object' && e !== null && typeof (e as { label?: unknown }).label === 'string' && typeof (e as { text?: unknown }).text === 'string',
+  )
+  return ok ? (raw as ModelLimit[]) : null
 }
 
 /**
@@ -526,7 +582,7 @@ function commitNode(deps: VerificationDeps) {
         if (verdict.decision === 'defer') {
           landings.push({ field, decision: 'defer', deferReason: verdict.reason })
         } else {
-          landings.push({ field, decision: verdict.decision, evidence: verdict.evidence })
+          landings.push({ field, decision: verdict.decision, value: c.value, evidence: verdict.evidence })
           accepted.set(field, c.value)
           primarySource.set(field, verdict.evidence.sourceUrl)
         }
@@ -542,6 +598,7 @@ function commitNode(deps: VerificationDeps) {
           ? ((await deps.fieldCurrent(existing.modelId, 'availability'))?.value as AvailabilityMode[] | undefined) ?? []
           : []
         plan = {
+          provider: task.provider,
           clue: task.clue,
           target: { kind: 'update', modelId: existing.modelId },
           fields: landings,
@@ -560,6 +617,7 @@ function commitNode(deps: VerificationDeps) {
         const citedSources = [...new Set(inv.citations.filter((c) => c.observation !== null).map((c) => c.observation!.sourceUrl))]
           .map((url) => ({ title: hostOf(url), url }))
         plan = {
+          provider: task.provider,
           clue: task.clue,
           target: {
             kind: 'insert',

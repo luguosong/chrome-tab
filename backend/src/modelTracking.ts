@@ -31,8 +31,8 @@ import type { BaselineRow, CatalogParse, MatchedHit, PendingClue, ProviderDef, R
 import { catalogDiffClues, retirementClues, SOURCE_INTERVAL_MS, sourceIsStale } from './providers/def'
 import type { SourceRole } from './adjudication'
 import { makeAaEvaluations, type AaEvaluations } from './aaEvaluations'
-import { verifyClue } from './modelVerify'
 import { makeClueLedger, type ClueLedger } from './clueLedger'
+import type { AcceptInsertRow } from './verificationGraph'
 
 /**
  * 模型追踪(CONTEXT.md「模型追踪/跟踪模型/模型档案」;ADR-0025):全局单例图标的
@@ -147,16 +147,12 @@ export interface ParsedFeed {
 export interface ModelTrackingDeps {
   /** init 可选透传(AA 评测 x-api-key header;生产 fetchText 原生支持,测试桩忽略)。 */
   fetchText: (url: string, timeoutMs: number, init?: RequestInit) => Promise<string>
-  /** auto 核验(LLM 网关 Key/候选链)的环境(ADR-0058);缺省 process.env,测试注入。 */
-  env?: NodeJS.ProcessEnv
-  /** LLM 单次调用注入(auto 核验测试零真网);缺省真 callModel(ADR-0037 闸门在其内部)。 */
-  callModel?: (model: string, apiKey: string, system: string, user: string) => Promise<{ content: string | null; resp: string }>
 }
 
 const nowIso = () => new Date().toISOString()
 
 export class ModelTrackingService {
-  /** 线索账本(票 .scratch/线索账本/01):model_pending_clues 域行为的单点(入库/核验结果/活动窗)。 */
+  /** 线索账本(票 .scratch/线索账本/01):model_pending_clues 域行为的单点(入库/核验结果/未决集)。 */
   private readonly ledger: ClueLedger
   /** 评测接入(票 .scratch/评测生命周期/01):六路取数、映射、快照、状态与读侧投影的单点。 */
   private readonly aa: AaEvaluations
@@ -167,16 +163,11 @@ export class ModelTrackingService {
     private readonly deps: ModelTrackingDeps,
     /** Artificial Analysis API Key(issues/08);语义单点在 aaEvaluations 工厂(未配置 = 轮询 no-op、读侧 configured=false)。 */
     aaApiKey = '',
-    /** 核验链状态供数(数据健康 UI,ADR-0062 决策五;影子期 = verificationShadow.chainStats,切换后换生产库实现);缺省 = 尚未成功/零堆积。 */
+    /** 核验链状态供数(数据健康 UI,ADR-0062 决策五;= verificationShadow.chainStats 注册表读侧,切换后语义不变);缺省 = 尚未成功/零堆积。 */
     private readonly verificationStats?: () => ModelVerificationChainStatus,
   ) {
     this.ledger = makeClueLedger(db)
     this.aa = makeAaEvaluations(db, deps.fetchText, aaApiKey)
-  }
-
-  /** deps 注入 env 或进程 env(auto 核验用)。 */
-  private get env(): NodeJS.ProcessEnv {
-    return this.deps.env ?? process.env
   }
 
   /**
@@ -193,7 +184,7 @@ export class ModelTrackingService {
   /** 空库灌种子(行+事件);存量库(迁移前列全默认)按种子回填 aliases/slugs。幂等。 */
   private async bootstrapFromSeed(): Promise<void> {
     // 旧 aaUnmappedClues 的存量线索(键 aa: 前缀)语义已死(2026-09-05 翻转为自动映射
-    // 不再产出),不清会被 verifyPendingClues 误核验——AA 模型页被当厂家一手信源。
+    // 不再产出),不清会被核验链误核验——AA 模型页被当厂家一手信源。
     // 一次性迁移清残留原地、不走「线索账本」(票 01 裁决 7:不为一次性调用 widening interface)
     await this.db.deleteFrom('model_pending_clues').where('model_key', 'like', 'aa:%').execute()
     const existing = await this.db
@@ -271,35 +262,6 @@ export class ModelTrackingService {
     }
   }
 
-  /** 种子/auto 行入库共用:insert 行(verified 区分);冲突(已存在)静默跳过——修订不覆盖。 */
-  private async upsertBaselineRow(
-    b: Pick<BaselineModel, 'provider' | 'officialId' | 'name' | 'kind' | 'stage' | 'availability' | 'summary' | 'sources' | 'pricing' | 'limits' | 'trainingParams'> & { matchAliases: string[]; matchSlugs?: string[]; verified?: 'manual' | 'auto' },
-    db: Pick<Db, 'insertInto'> = this.db,
-  ): Promise<void> {
-    await db
-      .insertInto('model_archive')
-      .values({
-        provider: b.provider,
-        official_id: b.officialId,
-        name: b.name,
-        kind: b.kind,
-        stage: b.stage,
-        availability: JSON.stringify(b.availability),
-        summary: b.summary,
-        sources: JSON.stringify(b.sources),
-        pricing: b.pricing === null ? null : JSON.stringify(b.pricing),
-        limits: b.limits === null ? null : JSON.stringify(b.limits),
-        training_params: b.trainingParams === null ? null : JSON.stringify(b.trainingParams),
-        match_aliases: JSON.stringify(b.matchAliases),
-        match_slugs: JSON.stringify(b.matchSlugs ?? []),
-        verified: b.verified ?? 'manual',
-        created_at: nowIso(),
-        updated_at: nowIso(),
-      })
-      .onConflict((oc) => oc.columns(['provider', 'official_id']).doNothing())
-      .execute()
-  }
-
   /** 档案读侧(路由直调):模型(可用在前、retired 沉底)+ 各事件倒序 + 信源状态。 */
   async archive(): Promise<ModelArchiveResponse> {
     const models = await this.db
@@ -333,16 +295,7 @@ export class ModelTrackingService {
     // 评测读侧经模块(aaEvaluations.ts):行投影与信封是评测方知识,wire 形态直出
     const evalsByModel = await this.aa.byModel()
     const evalStatus = await this.aa.status()
-    // 线索读侧经「线索账本」(徽标窗 × 触人集,ADR-0058 注记 2026-09-10 轴对齐——
-    // 窗口与集合策略单点于 clueLedger.ts);此处只做 wire 投影(date/url)
-    const clues = await this.ledger.visibleClues()
     return {
-      pendingClues: clues.map((c) => ({
-        provider: c.provider,
-        date: c.occurredOn,
-        title: c.title,
-        url: c.sourceUrl,
-      })),
       models: models.map((r) => ({
         id: r.id,
         provider: r.provider as ModelProviderId,
@@ -519,10 +472,10 @@ export class ModelTrackingService {
   /**
    * 一轮厂家取数的统一巡走(ADR-0038):逐信源页 fetch→解析→零条目判改版→逐条目
    * 分派(命中/线索)→入库;任一页失败先吞后聚、循环后上抛首个错误——**终态
-   * markSource 全归 pollSourceRoles 单写**(release 成功含 pages/指纹快照与
-   * verifyPendingClues 同拍落地,失败/成功不在 LLM 间隙里错位),后一页的成功不会
-   * 覆盖前一页的失败标记。逐厂家的差异(信源/解析/匹配/线索)全部在 ProviderDef,
-   * 此处不出现厂家分支。
+   * markSource 全归 pollSourceRoles 单写**(release 成功含 pages/指纹快照同拍落地,
+   * 失败/成功不因页面间处理错位),后一页的成功不会覆盖前一页的失败标记。逐厂家的
+   * 差异(信源/解析/匹配/线索)全部在 ProviderDef,此处不出现厂家分支。线索的核验
+   * 在轮询之外(核验链 2h 同节奏重扫,verificationShadow.ts;issues/11 切换接管)。
    */
   private async runPoll(def: ProviderDef<unknown>, fetchRaw: (url: string) => Promise<string>): Promise<Record<string, string>> {
     const errs: unknown[] = []
@@ -555,11 +508,6 @@ export class ModelTrackingService {
         errs.push(e)
       }
     }
-    // auto 核验(ADR-0058):窗口内未核验线索逐条 LLM 核验。取数失败也跑(旧线索
-    // 不该陪葬);自身失败只记日志,不并入取数错误口径。
-    await this.verifyPendingClues(def).catch((e) =>
-      console.error(`模型追踪(${def.label})auto 核验失败:`, e),
-    )
     if (errs.length > 0) throw errs[0]
     return pages
   }
@@ -643,78 +591,6 @@ export class ModelTrackingService {
     return md
   }
 
-  /**
-   * auto 核验一轮(ADR-0058):核验窗重试集逐条(「线索账本」dueClues——含 error
-   * 下轮重试,spec 1.2)——①噪音谓词(def.noiseClue)硬拦 →
-   * noise(确定性已知噪音,不触人:百炼托管常态,徽标也不占);②verifyClue(LLM)四态:
-   * accept 入档(verified='auto',aliases=草稿)+ 当轮产 kind 'updated' 事件
-   * (occurredOn/标题/信源用线索——语义保守,api_available 留给人工修订);
-   * reject(噪音/低置信)→ rejected 留表触人;insufficient(判自家但草稿校验不过,
-   * spec 1.5)→ 活动窗内触人但不重试(一次定终身,超窗淡出);error → 落表
-   * 不触人,按 2h 轮询在活动窗内重试。reject/insufficient/error 均落
-   * verify_reason(误拒可归因,spec 1.4)。触达 = 图标徽标「N 待核验」(ADR-0058
-   * 注记:ntfy 推送通道 2026-09-06 撤除)。行插入 onConflict doNothing:已存在
-   * (人工先收录)时静默,线索停更滚出自愈。
-   */
-  private async verifyPendingClues(def: ProviderDef<unknown>): Promise<void> {
-    for (const clue of await this.ledger.dueClues(def.id)) {
-      if (def.noiseClue?.(clue) === true) {
-        await this.ledger.recordVerification(def.id, clue.modelKey, 'noise')
-        continue
-      }
-      const r = await verifyClue(def, clue, this.deps.fetchText, this.env, this.deps.callModel)
-      if (r.outcome === 'error') {
-        console.warn(`模型追踪(${def.label})线索核验失败(下轮重试) ${clue.modelKey}:`, r.reason)
-        await this.ledger.recordVerification(def.id, clue.modelKey, 'error', r.reason)
-        continue
-      }
-      if (r.outcome === 'reject') {
-        await this.ledger.recordVerification(def.id, clue.modelKey, 'rejected', r.reason)
-        continue
-      }
-      if (r.outcome === 'insufficient') {
-        await this.ledger.recordVerification(def.id, clue.modelKey, 'insufficient', r.reason)
-        continue
-      }
-      await this.db.transaction().execute(async (trx) => {
-        if (!(await makeClueLedger(trx).recordVerification(def.id, clue.modelKey, 'accepted'))) return
-        await this.upsertBaselineRow({
-          provider: def.id,
-          officialId: r.draft.officialId,
-          name: r.draft.name,
-          kind: r.draft.kind as ModelKind,
-          stage: r.draft.stage as ReleaseStage,
-          availability: r.draft.availability as AvailabilityMode[],
-          summary: r.draft.summary,
-          sources: r.draft.sources,
-          pricing: r.draft.pricing as ModelPricing | null,
-          limits: r.draft.limits as ModelLimit[] | null,
-          trainingParams: null,
-          matchAliases: r.draft.matchAliases,
-          verified: 'auto',
-        }, trx)
-        const modelId = (await trx
-          .selectFrom('model_archive')
-          .select('id')
-          .where('provider', '=', def.id)
-          .where('official_id', '=', r.draft.officialId)
-          .executeTakeFirstOrThrow())!.id
-        await trx
-          .insertInto('model_events')
-          .values({
-            model_id: modelId,
-            kind: 'updated',
-            occurred_on: clue.occurredOn,
-            title: clue.title,
-            source_url: clue.sourceUrl,
-            created_at: nowIso(),
-          })
-          .onConflict((oc) => oc.columns(['model_id', 'kind', 'occurred_on', 'source_url']).doNothing())
-          .execute()
-      })
-    }
-  }
-
   private async markSource(provider: ModelProviderId, ok: boolean, role: SourceRole = 'release', snapshot?: { pages: string; fingerprint: string }, attemptedAt = nowIso()): Promise<void> {
     const now = nowIso()
     await this.db
@@ -751,6 +627,43 @@ export function modelTrackingRoutes(service: ModelTrackingService): Hono<AuthEnv
 
 export function prodModelDeps(): ModelTrackingDeps {
   return { fetchText }
+}
+
+/**
+ * 核验链接纳计划的档案插行(issues/11 切换写库):verified='auto' 的 insert,冲突
+ * (人工已收录/已插过)静默跳过——修订不覆盖,取 id 归调用方(verificationShadow 的
+ * 图内最终事务,同事务内与证据行/事件原子提交)。
+ */
+export async function insertAutoArchiveRow(db: Pick<Db, 'insertInto' | 'selectFrom'>, row: AcceptInsertRow): Promise<number> {
+  await db
+    .insertInto('model_archive')
+    .values({
+      provider: row.provider,
+      official_id: row.officialId,
+      name: row.name,
+      kind: row.kind,
+      stage: row.stage,
+      availability: JSON.stringify(row.availability),
+      summary: row.summary,
+      sources: JSON.stringify(row.sources),
+      pricing: null,
+      limits: null,
+      training_params: null,
+      match_aliases: JSON.stringify(row.matchAliases),
+      match_slugs: '[]',
+      verified: 'auto',
+      created_at: nowIso(),
+      updated_at: nowIso(),
+    })
+    .onConflict((oc) => oc.columns(['provider', 'official_id']).doNothing())
+    .execute()
+  const existing = await db
+    .selectFrom('model_archive')
+    .select('id')
+    .where('provider', '=', row.provider)
+    .where('official_id', '=', row.officialId)
+    .executeTakeFirstOrThrow()
+  return existing.id
 }
 
 // ---- 定时轮询(ADR-0058「当天时效」:6h→2h;非整点错开,同 videoUpdates 口径)----

@@ -630,31 +630,26 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
     expect(a.models).toHaveLength(TOTAL_BASELINE)
   })
 
-  it('待核验线索:基线外块落线索库、30 天窗口挡历史块、幂等不翻倍、occurred_on 出窗滚出读侧', async () => {
+  it('待核验线索:基线外块落线索库(未核验态)、30 天窗口挡历史块、幂等不翻倍', async () => {
     // 回归(2026-08-27 千问/智谱漏检):ADR-0025「跳过待核验」不再静默——基线外
-    // 块须落 model_pending_clues 可见。时间钉 2026-02-05:GLM-9.9 块(02-03)落
-    // 30 天 ingest 窗且在读侧 7 天窗内,Vidu 块(2025-06-18)被窗口挡掉(滚动信源
-    // 的历史块非漏检信号)。
+    // 块须落 model_pending_clues。时间钉 2026-02-05:GLM-9.9 块(02-03)落
+    // 30 天 ingest 窗内,Vidu 块(2025-06-18)被窗口挡掉(滚动信源的历史块非漏检
+    // 信号)。核验归核验链(issues/11 后轮询只落库;直查表断言)。
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
     try {
       const { db } = openDb(':memory:')
-      // 核验注入恒 reject(spec 1.2 后无 Key 环境线索首轮即 error 落表、不触人滚出
-      // 读侧;本用例测落库/窗口/读侧轴,给稳定的 rejected 触人可见形态)
-      const deps = makeDeps(ZHIPU_MD)
-      deps.env = { AIHUBMIX_API_KEY: 'k' }
-      deps.callModel = async () => ({ content: JSON.stringify({ isNoise: true, reason: 'fixture', draft: null }), resp: '' })
-      const svc = await makeService(db, deps)
+      const svc = await makeService(db, makeDeps(ZHIPU_MD))
       await svc.pollProvider('zhipu')
-      const clueTitles = async () => (await svc.archive()).pendingClues.map((c) => c.title)
-      expect((await clueTitles()).some((t) => t.includes('GLM-9.9'))).toBe(true)
-      expect((await clueTitles()).some((t) => t.includes('Vidu'))).toBe(false)
+      // 直查表断言(读侧触人面已随 issues/11 退役,账本 interface 未决集属核验链工作集语义,
+      // 此处测轮询落库本身——存储真值断言先例)
+      const clueRows = async () => (await db.selectFrom('model_pending_clues').selectAll().execute())
+      expect((await clueRows()).some((r) => r.title.includes('GLM-9.9'))).toBe(true)
+      expect((await clueRows()).some((r) => r.title.includes('Vidu'))).toBe(false)
       await svc.pollProvider('zhipu') // 二轮幂等:同行不翻倍
-      expect((await clueTitles()).filter((t) => t.includes('GLM-9.9'))).toHaveLength(1)
-      // 时间流逝 8 天,occurred_on(02-03)滑出读侧 7 天窗 → 滚出徽标(读侧与核验窗
-      // 同 occurred_on 轴;条目从页面消失/完结冻结后 occurred_on 停更,同路径滚出)
-      vi.setSystemTime(new Date('2026-02-13T02:41:00Z'))
-      expect((await clueTitles()).some((t) => t.includes('GLM-9.9'))).toBe(false)
+      expect((await clueRows()).filter((r) => r.title.includes('GLM-9.9'))).toHaveLength(1)
+      // 轮询不动核验状态:线索留 pending(未核验态),由核验链消费
+      expect((await clueRows()).every((r) => r.verify_state === null)).toBe(true)
     } finally {
       vi.useRealTimers()
     }
@@ -668,22 +663,18 @@ describe('模型追踪:档案服务(持久化/历史去重/陈旧)', () => {
 Update: Model: gpt-5.6-sol and Model: gpt-6.2
 Dual launch announcement.
 `
-    // 时间钉夹具日期后 2 天:读侧 occurred_on 轴 7 天窗(issues/04)下夹具日期须在
-    // 窗内,钉死对墙钟的依赖(旧 last_seen_at 轴下 last_seen=now 恒在窗,无此约束)
+    // 时间钉夹具日期后 2 天:occurred_on 在 30 天 ingest 窗内,钉死对墙钟的依赖;
+    // 核验归核验链,直查表断言残余落库
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-01T00:00:00Z'))
     try {
       const { db } = openDb(':memory:')
-      // 同上:核验注入恒 reject,防无 Key 的 error 落表让线索滚出读侧(本用例测残余落库)
-      const deps = makeDeps(ZHIPU_MD, { [OPENAI_CHANGELOG_URL]: partialMd })
-      deps.env = { AIHUBMIX_API_KEY: 'k' }
-      deps.callModel = async () => ({ content: JSON.stringify({ isNoise: true, reason: 'fixture', draft: null }), resp: '' })
-      const svc = await makeService(db, deps)
+      const svc = await makeService(db, makeDeps(ZHIPU_MD, { [OPENAI_CHANGELOG_URL]: partialMd }))
       await svc.pollProvider('openai')
-      const clues = (await svc.archive()).pendingClues.filter((c) => c.provider === 'openai')
+      const clues = await db.selectFrom('model_pending_clues').selectAll().where('provider', '=', 'openai').execute()
       expect(clues).toHaveLength(1)
       expect(clues[0]!.title).toMatch(/^gpt-6\.2:/)
-      expect(clues[0]!.date).toBe('2026-08-30')
+      expect(clues[0]!.occurred_on).toBe('2026-08-30')
     } finally {
       vi.useRealTimers()
     }

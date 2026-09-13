@@ -15,8 +15,8 @@ export const QWEN_DEPRECIATION_URL = 'https://help.aliyun.com/zh/model-studio/mo
 /**
  * 「选择模型」页 → 在册模型 ID 集(票 07 目录差集):SSR 正文文本的 ID 形态 token
  * (百炼 ID 必含 `-`/`/` 段界——qwen3.8-max、kimi/kimi-k3;纯单词 token 是栏目名
- * ASR/TTS 类,结构性排除)。托管第三方(kimi/glm/deepseek 等)照常进差集,由
- * noiseClue 在核验前硬拦(不进 LLM)。
+ * ASR/TTS 类,结构性排除)。托管第三方(kimi/glm/deepseek 等)照常进差集产线索,
+ * 噪音判定归核验图调查节点(旧链 noiseClue 硬拦已随核验链退役,issues/11)。
  */
 export function parseBailianCatalog(html: string): ParseResult<string> {
   const text = html
@@ -103,9 +103,6 @@ export function parseBailianReleases(html: string): ParseResult<BailianRow> {
  * 不在任何 alias 集,天然 null——「跟踪厂家」定义性约束(不认领非自家模型)。
  */
 
-/** 百炼自家模型 ID 前缀(auto 核验噪音白名单):不匹配 = 托管第三方,规则硬拦不进 LLM。
- *  前缀后可为连字符或数字(qwen-plus / qwen3.9-preview / wan2.2 / wanx2.1 / qwq-plus)。 */
-const ALIBABA_OWN_PREFIX = /^(qwen|qwq|wanx?)[-.\d]/
 
 /**
  * 表格行 → 每个被认领模型一条事件(kind 恒 'updated',自动解析不猜语义;同格多 ID 命中
@@ -179,8 +176,6 @@ export const ALIBABA_DEF: ProviderDef<BailianRow> = {
   },
   // auto 核验信源 = 百炼表格页(价格/规格不在表内,LLM 只核「自家新模型上架」事实,资料字段留空)
   verifyUrls: (clue) => [clue.sourceUrl],
-  // 托管第三方(kimi-k3/GLM-5.3/vidu 等百炼上架的非通义模型)规则硬拦,不进 LLM(ADR-0058 护栏②)
-  noiseClue: (clue) => !ALIBABA_OWN_PREFIX.test(clue.modelKey),
   matchEntry(r, baseline) {
     const resolve = makeIdResolver(baseline)
     return {

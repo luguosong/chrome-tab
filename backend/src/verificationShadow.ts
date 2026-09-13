@@ -1,12 +1,12 @@
 import Database from 'better-sqlite3'
 import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite'
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { ModelProviderId, ModelVerificationChainStatus } from 'chrome-tab-shared'
 import { makeEvidence } from './evidence'
 import type { Db } from './db'
 import { makeClueLedger } from './clueLedger'
-import { PROVIDERS, parseSourcePages } from './modelTracking'
+import { PROVIDERS, parseSourcePages, insertAutoArchiveRow } from './modelTracking'
 import { callModel } from './llm'
 import type { SourceRole } from './adjudication'
 import { SOURCE_INTERVAL_MS, sourceIsStale } from './providers/def'
@@ -24,19 +24,20 @@ import {
 } from './verificationGraph'
 
 /**
- * 影子核验调度(CONTEXT.md「无人值守数据核验」;ADR-0062 调度与执行,issues/05):把核验图
- * (verificationGraph.ts)挂上生产轨道但**零生产写**——新链跑真流量、核验结果只读落 jsonl,
- * 旧核验链(modelTracking.verifyPendingClues)照常生产,影子期自交付起自然积累。切换
- * (issues/11)后本模块的注册表语义由线索账本的指纹重开(clueLedger.reopenIfFingerprintChanged)
- * 接管,jsonl 落点换真 SQLite 事务。
+ * 核验链调度(CONTEXT.md「无人值守数据核验」;ADR-0062 调度与执行):把核验图
+ * (verificationGraph.ts)挂上生产轨道——issues/05 影子期零生产写(结果只落 jsonl)已由
+ * issues/11 切换终结:图内最终事务节点经注入执行器单事务写生产库(档案/动态/证据行/
+ * 线索状态),noise/defer 出口由本调度记账线索账本(带证据指纹,同指纹守终态、指纹变化
+ * 重开——取代旧链「终态不可覆盖 + 一次定终身」)。旧核验链(modelVerify.verifyClue 与
+ * rejected/insufficient 触人出口)已整体退役,代码不留双路径。
  *
  * 线程生命周期(spec 实现决策):thread_id = 线索 + 证据指纹;SqliteSaver(sync)单机嵌入,
- * **checkpoint 仅执行进度**——本模块的私有 sqlite 文件(data/verification.db)同时持有
- * saver 表与影子注册表(shadow_runs),与生产库(newtab.db)物理隔离,影子零生产写由此保证。
- * 终态线程 7 天清理(checkpoint 膨胀控制;注册表行保留——指纹知识是重开判定的底册),
+ * **checkpoint 仅执行进度**——本模块的私有 sqlite 文件(data/verification.db)持有 saver
+ * 表与运行注册表(shadow_runs):注册表只管执行(thread/退避/清理),线索终态判据在
+ * 线索账本(model_pending_clues,生产真相)。终态线程 7 天清理(checkpoint 膨胀控制),
  * 运行中/退避中永不清理(重扫要续跑)。
  *
- * 证据指纹(调度侧)= SHA-256(线索三元组 + **全部**白名单信源页内容):thread_id 须先于
+ * 证据指纹(调度侧)= SHA-256(线索三元组 + 线索专属信源页内容):thread_id 须先于
  * invoke 可算且跨轮稳定,图内 reads 子集依赖 LLM 选择不满足;预抓页以缓存注入图内
  * fetchText(免双重抓取)。预抓全部失败不短路——图内按需重抓是真实的第二次机会。
  *
@@ -45,7 +46,7 @@ import {
  * next 空且 exit 非空 = 已完成未记账(invoke 返回与记账之间崩溃)→ 采纳不再 invoke。
  */
 
-/** 影子调度注入面(测试零真网;fetch/env/call 同 ModelTrackingDeps 口径)。 */
+/** 核验链调度注入面(测试零真网;fetch/env/call 注入)。 */
 export interface ShadowDeps {
   fetchText: (url: string, timeoutMs: number) => Promise<string>
   env?: NodeJS.ProcessEnv
@@ -54,13 +55,11 @@ export interface ShadowDeps {
 }
 
 export interface ShadowConfig {
-  /** 私有 sqlite 文件路径(saver 表 + 影子注册表;与生产库隔离)。 */
+  /** 私有 sqlite 文件路径(saver 表 + 运行注册表;与生产库隔离)。 */
   checkpointDbPath: string
-  /** 核验结果 jsonl 落点(影子期唯一产物)。 */
-  jsonlPath: string
 }
 
-/** 影子注册表行(shadow_runs;state 三值:running/backoff/terminal)。 */
+/** 运行注册表行(shadow_runs;state 三值:running/backoff/terminal——只管执行,终态判据在线索账本)。 */
 interface ShadowRunRow {
   provider: string
   model_key: string
@@ -79,9 +78,8 @@ interface ShadowRunRow {
 const THREAD_CLEANUP_DAYS = 7
 /**
  * 终态重开检查窗(实现侧判断):与账本 ingest 窗同轴同宽——线索滚出信源(30 天)后页面
- * 语境已逝,不再重开。调度指纹已收窄到线索专属页(见 runItem),共享注册页变化不再
- * 触发全 provider 重开,改走 shadow_rechecks 逐模型强制重核;剩余天花板 = 线索自有页
- * 本身变化(changelog 类 append-only 页对旧线索影响小),量级实测归票 10/11。
+ * 语境已逝,不再重开。重开判据 = 线索专属页指纹 vs 账本裁决时落的 evidence_fingerprint
+ * (同指纹守终态);共享注册页变化走 shadow_rechecks 逐模型强制重核。
  */
 const REOPEN_WINDOW_DAYS = 30
 
@@ -111,7 +109,6 @@ const FINGERPRINT_BASIS_VERSION = 2
 
 const nowIso = () => new Date().toISOString()
 const isoDaysAgo = (days: number) => new Date(Date.now() - days * 86400_000).toISOString()
-const dayCutoff = (days: number) => isoDaysAgo(days).slice(0, 10)
 
 const RUNS_DDL = `
 CREATE TABLE IF NOT EXISTS shadow_runs (
@@ -148,12 +145,11 @@ function whitelistOf(def: ProviderDef<unknown>, clue: PendingClue): Array<{ role
 }
 
 /**
- * 影子核验调度器。返回 round()(一轮重扫,2h cron 在轮询后驱动;内部并发自守卫,
+ * 核验链调度器。返回 round()(一轮重扫,2h cron 在轮询后驱动;内部并发自守卫,
  * 重入即跳过)与 graph/sqlite(测试接缝:断点续跑预播种与注册表断言;生产不消费)。
  */
 export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowConfig) {
   mkdirSync(dirname(config.checkpointDbPath), { recursive: true })
-  mkdirSync(dirname(config.jsonlPath), { recursive: true })
   const sqlite = new Database(config.checkpointDbPath)
   sqlite.exec(RUNS_DDL)
   const saver = new SqliteSaver(sqlite)
@@ -180,9 +176,6 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
     // (chainStats 的「最近成功裁决」取它),清理打标冒充不得(Mark Cleaned ≠ 新裁决)。
     markCleaned: sqlite.prepare('UPDATE shadow_runs SET thread_cleaned = 1 WHERE provider = ? AND model_key = ?'),
     nonTerminal: sqlite.prepare<[], ShadowRunRow>(`SELECT * FROM shadow_runs WHERE state != 'terminal' ORDER BY updated_at ASC`),
-    terminalInWindow: sqlite.prepare<[string], ShadowRunRow>(
-      `SELECT * FROM shadow_runs WHERE state = 'terminal' AND occurred_on >= ? ORDER BY updated_at ASC`,
-    ),
     cleanupCandidates: sqlite.prepare<[string], ShadowRunRow>(
       `SELECT * FROM shadow_runs WHERE state = 'terminal' AND thread_cleaned = 0 AND updated_at < ?`,
     ),
@@ -198,15 +191,62 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
     modelKey: row.model_key,
   })
 
-  const appendLine = (rec: Record<string, unknown>): void => {
-    appendFileSync(config.jsonlPath, `${JSON.stringify(rec)}\n`)
+  // ---- 图装配(生产读侧 + 注入 fetch/call;commit = 图内最终事务,单事务写生产库)----
+
+  /** 当前工作项的预抓缓存(轮次内串行,单槽即可)。 */
+  let prefetch = new Map<string, string>()
+  /** 当前工作项的调度指纹(commit 记账线索状态用——与 thread_id 同源)。 */
+  let currentFingerprint = ''
+
+  /** 档案列映射(fieldCurrent 同一张表;released_at/retired_at 无列——事件即存档形态)。 */
+  const ARCHIVE_COLUMN: Partial<Record<string, string>> = {
+    pricing: 'pricing', limits: 'limits', training_params: 'training_params', stage: 'stage', availability: 'availability',
   }
 
-  // ---- 图装配(生产读侧 + 注入 fetch/call;commit = jsonl 落点,零生产写)----
-
-  /** 当前工作项的预抓缓存(commit 落 jsonl 的上下文同款:轮次内串行,单槽即可)。 */
-  let prefetch = new Map<string, string>()
-  let commitCtx: { provider: string; modelKey: string; threadId: string; fingerprint: string } | null = null
+  /**
+   * 接纳计划执行器(ADR-0062「图内最终事务节点」的生产实现,issues/11):线索状态 +
+   * 证据行 append + 档案插行/列更新 + 语义化事件,单 SQLite 事务原子提交。幂等可重放
+   * = 状态守卫(recordVerification false 即线索已完整记账,整单跳过)+ 冲突跳过
+   * (插行/事件 onConflict doNothing);insert 路径证据行 modelId 为占位常量,插行取
+   * id 后重写(证据内容指纹不含 modelId,重写安全)。
+   */
+  async function commitAcceptPlan(plan: AcceptPlan): Promise<void> {
+    await db.transaction().execute(async (trx) => {
+      const ledgerTx = makeClueLedger(trx)
+      const evidenceTx = makeEvidence(trx)
+      if (!(await ledgerTx.recordVerification(plan.provider, plan.clue.modelKey, 'accepted', undefined, currentFingerprint))) {
+        // 落空两因:重核线索(recheck: 键)不在账本 → 照常落档案面;线索已被完整记账
+        // (重放/人工抢先)→ 幂等守卫,整单跳过
+        if (await ledgerTx.clueRow(plan.provider, plan.clue.modelKey) !== null) return
+      }
+      let modelId = plan.target.kind === 'insert' ? await insertAutoArchiveRow(trx, plan.target.row) : plan.target.modelId
+      for (const l of plan.fields) {
+        if (l.evidence !== undefined && l.decision !== 'defer') {
+          // 同证据(内容指纹)已在库即不追加:重核路径无账本状态守卫,崩溃重放由此去重
+          if (await evidenceTx.has(modelId, l.field, l.evidence.contentFingerprint)) continue
+          await evidenceTx.append({ ...l.evidence, modelId })
+        }
+      }
+      if (plan.target.kind === 'update') {
+        const updates: Record<string, unknown> = {}
+        for (const l of plan.fields) {
+          if (l.decision === 'defer' || l.value === undefined) continue
+          const column = ARCHIVE_COLUMN[l.field]
+          if (column !== undefined) updates[column] = column === 'stage' ? l.value : JSON.stringify(l.value)
+        }
+        if (Object.keys(updates).length > 0) {
+          await trx.updateTable('model_archive').set({ ...updates, updated_at: nowIso() }).where('id', '=', modelId).execute()
+        }
+      }
+      for (const ev of plan.events) {
+        await trx
+          .insertInto('model_events')
+          .values({ model_id: modelId, kind: ev.kind, occurred_on: ev.occurredOn, title: ev.title, source_url: ev.sourceUrl, created_at: nowIso() })
+          .onConflict((oc) => oc.columns(['model_id', 'kind', 'occurred_on', 'source_url']).doNothing())
+          .execute()
+      }
+    })
+  }
 
   const graphDeps: VerificationDeps = {
     fetchText: async (url, timeoutMs) => prefetch.get(url) ?? deps.fetchText(url, timeoutMs),
@@ -255,12 +295,7 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
       return { value, evidence: await evidenceStore.latest(modelId, field) }
     },
     call: deps.call ?? callModel,
-    commit: async (plan: AcceptPlan) => {
-      // 影子落点:接纳计划即时落 jsonl(崩溃窗口内也在场);真事务归切换票
-      if (commitCtx !== null) {
-        appendLine({ at: nowIso(), kind: 'plan', ...commitCtx, plan })
-      }
-    },
+    commit: (plan: AcceptPlan) => commitAcceptPlan(plan),
     env: deps.env ?? process.env,
   }
   const graph: VerificationGraph = makeVerificationGraph(graphDeps, saver)
@@ -298,50 +333,55 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
     // 调度指纹只锚线索专属页(clueOwnedUrls 单点;重核线索无线索页)——thread 身份
     // 不随共享注册页内容抖动(31 页白名单任一变动全 provider 重开的风暴由此剪除);
     // 共享页变化的重核走 source:role 指纹底册 + shadow_rechecks 通道(recheck=true
-    // 对同指纹终态也强制重跑)。票 10/11 拿到影子期实测后再议收窄口径。
+    // 对同指纹终态也强制重跑)。
     const fingerprint = computeEvidenceFingerprint(
       task,
       new Map([...reads].filter(([url]) => ownUrls.has(url))),
       new Set([...failed].filter((url) => ownUrls.has(url))),
     )
-    // 线索快照锚定注册表(重试期间任务恒定;账本 re-ingest 刷新 title/sourceUrl 不漂移进
-    // 指纹三元组——snapshot 即该线索在影子域的任务身份)
-    if (row !== undefined && row.fingerprint === fingerprint && row.state === 'terminal' && !recheck) return // 同指纹守终态(重核例外:官方资料变了就要重跑)
+    // 终态判据 = 线索账本(生产真相,issues/11):同指纹守终态(重核例外:官方资料变了
+    // 就要重跑);指纹已变即重开(pending 可再裁决)。影子期注册表行不再是判据——影子期
+    // 裁决不落账本,切换首轮按新协议重跑属预期(35 条存量同路径自然消化,无迁移特判)。
+    const clueRowLedger = await ledger.clueRow(clue.provider, clue.modelKey)
+    if (clueRowLedger !== null && !recheck) {
+      if (clueRowLedger.state !== 'pending' && clueRowLedger.state !== 'error' && clueRowLedger.fingerprint === fingerprint) return
+      await ledger.reopenIfFingerprintChanged(clue.provider, clue.modelKey, fingerprint)
+    }
     if (row !== undefined && row.fingerprint !== fingerprint) await saver.deleteThread(row.thread_id) // 证据已变:旧 checkpoint 语义失效
     const threadId = `${clue.provider}|${clue.modelKey}|${fingerprint}`
     q.register.run({ provider: clue.provider, modelKey: clue.modelKey, occurredOn: clue.occurredOn, title: clue.title, sourceUrl: clue.sourceUrl, threadId, fingerprint, updatedAt: nowIso() })
-    commitCtx = { provider: clue.provider, modelKey: clue.modelKey, threadId, fingerprint }
+    currentFingerprint = fingerprint
     prefetch = new Map([...reads].map(([url, r]) => [url, r.content]))
     const cfg = { configurable: { thread_id: threadId } }
     let exit: VerificationExit | null
-    let graphFingerprint: string | null = null
     if (row !== undefined && row.state === 'running' && row.fingerprint === fingerprint) {
       // 重扫运行中线程:getState 三态(中断续跑 / 完成未记账采纳 / 空线程全新)
       const snap = await graph.getState(cfg)
-      const values = snap.values as { exit?: VerificationExit | null; fingerprint?: string | null } | undefined
+      const values = snap.values as { exit?: VerificationExit | null } | undefined
       const staleExit = values?.exit ?? null
       if (snap.next.length > 0) {
-        const r = await graph.invoke(null, cfg)
-        exit = r.exit
-        graphFingerprint = r.fingerprint
+        exit = (await graph.invoke(null, cfg)).exit
       } else if (staleExit !== null) {
         exit = staleExit
       } else {
-        const r = await graph.invoke({ task }, cfg)
-        exit = r.exit
-        graphFingerprint = r.fingerprint
+        exit = (await graph.invoke({ task }, cfg)).exit
       }
     } else {
       // 全新线程 / 退避重试(已完成线程带 input 重 invoke = 从头重跑)/ 指纹重开
-      const r = await graph.invoke({ task }, cfg)
-      exit = r.exit
-      graphFingerprint = r.fingerprint
+      exit = (await graph.invoke({ task }, cfg)).exit
     }
-    commitCtx = null
+    currentFingerprint = ''
     const state = exit !== null && exit.kind !== 'error' ? 'terminal' : 'backoff'
     q.finish.run({ provider: clue.provider, modelKey: clue.modelKey, state, exitJson: JSON.stringify(exit), updatedAt: nowIso() })
-    // graphFingerprint = 图内实际读取子集的指纹(与调度侧全量指纹同名不同值,票 10 取证对照用)
-    appendLine({ at: nowIso(), kind: 'exit', provider: clue.provider, modelKey: clue.modelKey, threadId, fingerprint, graphFingerprint, exit })
+    // 出口记账(线索账本,带证据指纹):noise / defer(insufficient)为终态待指纹变化重开;
+    // accept 已在图内最终事务记账(commitAcceptPlan);error 不写——留 pending 由退避重扫
+    // 重试,不受展示窗口限制。写不进(旧链终态行等)由 recordVerification 返回 false
+    // 表达,不抛错;真 DB 异常照轮次口径上抛记日志(下轮自愈)。
+    if (exit !== null && exit.kind === 'noise') {
+      await ledger.recordVerification(clue.provider, clue.modelKey, 'noise', exit.reason, fingerprint)
+    } else if (exit !== null && exit.kind === 'defer') {
+      await ledger.recordVerification(clue.provider, clue.modelKey, 'insufficient', exit.reason, fingerprint)
+    }
   }
 
   // ---- 一轮(2h cron 在轮询后驱动):清理 → 重扫/摄取/重开检查,串行逐项 ----
@@ -349,23 +389,16 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
   let scanning = false
   async function round(): Promise<void> {
     if (scanning) {
-      console.warn('影子核验:上一轮仍在进行,跳过本轮')
+      console.warn('核验链:上一轮仍在进行,跳过本轮')
       return
     }
     scanning = true
     try {
-      // 终态线程 7 天清理:删 checkpoint 线程(注册表行保留 = 指纹底册);运行中/退避中
+      // 终态线程 7 天清理:删 checkpoint 线程(注册表行保留);运行中/退避中
       // 不进此查询,永不清理(重扫要续跑)。已清理行打标防重复删。
       for (const row of q.cleanupCandidates.all(isoDaysAgo(THREAD_CLEANUP_DAYS))) {
         await saver.deleteThread(row.thread_id)
         q.markCleaned.run(row.provider, row.model_key)
-      }
-      // 摄取划界:首轮写 started_at 且只此一次——存量线索(first_seen 早于影子链启动)
-      // 不进影子集(spec 附注:存量 35 条切换首轮进待裁决集,历史补证归 issues/12)
-      let startedAt = q.metaGet.get('started_at')?.value
-      if (startedAt === undefined) {
-        startedAt = nowIso()
-        q.metaSet.run('started_at', startedAt)
       }
       // 轮询是注册页唯一刷新者;快照过期/失败不在图内绕过档位重新抓取。
       const snapshots = new Map<string, { content: string; observedAt: string }>()
@@ -386,7 +419,7 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
         // 底册 key 带形态版本:规范化器升级后首轮只建底册,不把翻转冒充资料变化
         const key = `source:${def.id}:${role}:v${FINGERPRINT_BASIS_VERSION}`
         const previous = q.metaGet.get(key)?.value
-        // 首次成功只建指纹底册,不把种子补证批次提前到影子期。
+        // 首次成功只建指纹底册,不把种子补证批次提前触发。
         const models = previous !== undefined && previous !== status.fingerprint
           ? await db.selectFrom('model_archive').select(['id', 'official_id', 'name']).where('provider', '=', def.id).execute()
           : []
@@ -399,8 +432,9 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
         })()
       }
       // 工作项:重扫优先(运行中/退避中——系统错误按退避窗重试,不受展示窗口限制)、
-      // 重核队列次之(强制重跑)、摄取再次(first_seen 轴)、终态重开检查最后(ingest
-      // 窗内;逐项同指纹即守)
+      // 重核队列次之(强制重跑)、未决集再次(账本 {pending, error} 全集——存量线索
+      // 切换首轮自然进入,issues/11)、终态重开检查最后(账本指纹非空的终态行,窗内
+      // 逐项重算指纹,同指纹即守)
       const seen = new Set<string>()
       const items: Array<{ clue: PendingClue & { provider: ModelProviderId }; recheck: boolean }> = []
       for (const row of q.nonTerminal.all()) {
@@ -416,15 +450,18 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
       }
       for (const row of sqlite.prepare<[], ShadowRunRow>('SELECT * FROM shadow_rechecks').all()) {
         if (!seen.has(clueKey(row.provider, row.model_key))) {
+          // 强制重跑 = 账本行无条件重置 pending(重核的线索指纹可能未变,等不来自然重开);
+          // 重核键(recheck:)不在账本,forceReopen 落空即 no-op
+          await ledger.forceReopen(row.provider as ModelProviderId, row.model_key)
           items.push({ clue: rowToClue(row), recheck: true })
           seen.add(clueKey(row.provider, row.model_key))
         }
       }
-      for (const clue of await ledger.cluesFirstSeenSince(startedAt)) {
+      for (const clue of await ledger.unresolvedClues()) {
         if (!seen.has(clueKey(clue.provider, clue.modelKey))) items.push({ clue, recheck: false })
       }
-      for (const row of q.terminalInWindow.all(dayCutoff(REOPEN_WINDOW_DAYS))) {
-        if (!seen.has(clueKey(row.provider, row.model_key))) items.push({ clue: rowToClue(row), recheck: false })
+      for (const clue of await ledger.reopenCandidates(REOPEN_WINDOW_DAYS)) {
+        if (!seen.has(clueKey(clue.provider, clue.modelKey))) items.push({ clue, recheck: false })
       }
       const roundCache = new Map<string, string>()
       for (const { clue, recheck } of items) {
@@ -433,13 +470,13 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
           sqlite.prepare('DELETE FROM shadow_rechecks WHERE provider = ? AND model_key = ?').run(clue.provider, clue.modelKey)
         } catch (e) {
           // 意外异常(非图出口):行留 running,下轮同线程续跑自愈;单线索失败不牵连整轮
-          console.error(`影子核验(${clue.provider})线索 ${clue.modelKey} 轮次异常(下轮续跑):`, e)
+          console.error(`核验链(${clue.provider})线索 ${clue.modelKey} 轮次异常(下轮续跑):`, e)
         }
       }
     } catch (e) {
       // cron 驱动的 fire-and-forget 常例:轮自身永不向调用方抛错(清理/划界段异常记日志,
       // 下轮自愈),防止未处理 rejection
-      console.error('影子核验轮次失败(下轮重试):', e)
+      console.error('核验链轮次失败(下轮重试):', e)
     } finally {
       scanning = false
     }
@@ -452,10 +489,9 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
     /** 测试接缝:私有库连接(注册表/清理断言);先例 openDb 暴露 sqlite。 */
     sqlite,
     /**
-     * 核验链状态(ADR-0062 决策五,archive 信封供数;只读查询不算「生产写」):影子期
-     * 数据源 = 影子注册表(暂缓是新链出口,旧链/主库无此语义);切换(issues/11)后换
-     * 生产库实现,wire 形态不变。terminal 行的 exit_json 坏行跳过不计数(读侧不因
-     * 单行脏数据 500)。
+     * 核验链状态(ADR-0062 决策五,archive 信封供数):数据源 = 运行注册表的 terminal
+     * 行(本链执行记录;暂缓是新链出口,旧链终态行不在面内)。terminal 行的 exit_json
+     * 坏行跳过不计数(读侧不因单行脏数据 500)。
      */
     chainStats: (): ModelVerificationChainStatus => {
       const rows = sqlite.prepare<[], { exit_json: string | null; updated_at: string }>(

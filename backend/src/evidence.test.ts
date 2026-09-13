@@ -56,4 +56,13 @@ describe('evidence:最小读写路径(append-only)', () => {
     await expect(evidence.latest(1, 'limits')).resolves.toBeNull()
     await expect(evidence.latest(2, 'pricing')).resolves.toBeNull()
   })
+
+  it('has 按内容指纹判重:同证据 true(重放去重守卫),异指纹/异字段/异模型 false', async () => {
+    const { evidence } = setup()
+    await evidence.append(row())
+    await expect(evidence.has(1, 'pricing', 'a'.repeat(64))).resolves.toBe(true)
+    await expect(evidence.has(1, 'pricing', 'b'.repeat(64))).resolves.toBe(false)
+    await expect(evidence.has(1, 'limits', 'a'.repeat(64))).resolves.toBe(false)
+    await expect(evidence.has(2, 'pricing', 'a'.repeat(64))).resolves.toBe(false)
+  })
 })

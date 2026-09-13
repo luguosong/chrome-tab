@@ -101,8 +101,6 @@ export interface ProviderDef<E> {
   /** auto 核验信源(ADR-0058):线索 → 厂家一手页 URL(字段回链的「链」);缺省 =
    *  线索 sourceUrl 本身;undefined = 该家无线索自动核验(月暗文章流)。 */
   verifyUrls?: (clue: PendingClue) => string[]
-  /** 确定性噪音谓词:命中不进 LLM(线索照常留表,红点可见;如百炼托管第三方前缀)。 */
-  noiseClue?: (clue: PendingClue) => boolean
 }
 
 /**

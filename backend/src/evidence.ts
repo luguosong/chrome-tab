@@ -69,6 +69,22 @@ export function makeEvidence(db: Pick<Db, 'insertInto' | 'selectFrom'>) {
     },
 
     /**
+     * 同证据已在库(按内容指纹;同证据重放 observedAt 不变 → 指纹不变,票 04 幂等契约)。
+     * commit 执行器重核路径重放时的去重守卫——append-only 无 UPDATE/DELETE,「重复」
+     * 只能不追加以避免(issues/11:重核线索不在账本,事务级状态守卫护不到证据行)。
+     */
+    async has(modelId: number, field: string, contentFingerprint: string): Promise<boolean> {
+      const row = await db
+        .selectFrom('model_field_evidence')
+        .select('id')
+        .where('model_id', '=', modelId)
+        .where('field', '=', field)
+        .where('content_fingerprint', '=', contentFingerprint)
+        .executeTakeFirst()
+      return row !== undefined
+    },
+
+    /**
      * 字段当前值投影 = (模型, 字段) 最新一行(append-only 下 id 单调 = 落行序);
      * 无证据返回 null。
      */

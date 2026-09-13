@@ -46,12 +46,11 @@ const changelog = Object.fromEntries(
 ) as ChangelogServices
 // 和风天气(ADR-0009):Key/个人专用主机走环境变量、不入库;缺省未配置 → 端点 500
 const videoUpdatesService = new VideoUpdatesService(db, prodVideoDeps())
-// 无人值守核验影子链(issues/05):私有 checkpoint 库与 jsonl 落点与生产库同目录(随
-// data 卷持久);构造先于模型追踪 service——核验链状态(chainStats,数据健康 UI 票 08)
-// 注入档案信封,影子期数据源即影子注册表(暂缓是新链出口,主库无此语义)
+// 无人值守核验链(issues/05 接线、issues/11 切换写库):私有 checkpoint/运行注册表库与
+// 生产库同目录(随 data 卷持久);构造先于模型追踪 service——核验链状态(chainStats,
+// 数据健康 UI)注入档案信封。图内最终事务单事务写生产库(档案/动态/证据行/线索状态)
 const shadowVerification = makeShadowVerification(db, prodModelDeps(), {
   checkpointDbPath: resolve(dirname(dbPath), 'verification.db'),
-  jsonlPath: resolve(dirname(dbPath), 'verification-shadow.jsonl'),
 })
 // 模型追踪(CONTEXT.md「模型追踪」,issues/01):init 同步完成基线入档(本地写,毫秒级),
 // 首轮取数异步进行——失败照陈旧口径降级,基线数据已保证 tile 即有内容
@@ -114,8 +113,8 @@ serve({ fetch: app.fetch, port }, (info) => console.log(`backend listening on :$
 startChangelogScheduler(Object.values(changelog))
 // 视频更新 1h 轮询(spec:非整点错开整点请求高峰;库即真相,无启动预热步骤)
 startVideoUpdatesScheduler(videoUpdatesService)
-// 无人值守核验影子链(issues/05)首轮启动即跑(写摄取划界 started_at,存量不入;round
-// 自吞异常),此后由 2h cron 在每轮取数落定后驱动重扫——新链真流量持续运转,影子期自此积累
+// 无人值守核验链首轮启动即跑(账本未决集与重开检查面自然进入,round 自吞异常),此后
+// 由 2h cron 在每轮取数落定后驱动重扫——线索先经轮询入库,再进核验
 void shadowVerification.round()
 // 模型追踪 2h 轮询(ADR-0058;失败保留库内档案并标记陈旧,下轮即重试),同 cron 驱动影子重扫
 startModelTrackingScheduler(modelTrackingService, () => void shadowVerification.round())

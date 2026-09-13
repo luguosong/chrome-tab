@@ -214,17 +214,6 @@ export type ModelArchiveResponse = {
   evaluations: ModelEvaluationsStatus
   /** 核验链状态(数据健康,ADR-0062 决策五;只读透明,非人工待办)。 */
   verificationChain: ModelVerificationChainStatus
-  /** 待核验线索(解析出但基线未认领的条目,ADR-0025 可见形态;近 7 天仍出现的,倒序)。 */
-  pendingClues: ModelPendingClue[]
-}
-
-/** 待核验线索一行:新条目出现在厂家发布源但不在人工核验基线——核验后纳入即自愈消失。 */
-export type ModelPendingClue = {
-  provider: ModelProviderId
-  /** YYYY-MM-DD。 */
-  date: string
-  title: string
-  url: string
 }
 
 export * from './iconTypes'

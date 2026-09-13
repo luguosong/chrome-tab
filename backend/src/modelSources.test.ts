@@ -11,7 +11,7 @@ it('定时轮按 last_attempt 分三档跳过，重启仍守档位，慢档健�
   vi.setSystemTime(new Date('2026-09-13T00:00:00Z'))
   const { db } = openDb(':memory:')
   const fetchText = vi.fn(async () => '官方资料')
-  const deps = { fetchText, env: {} }
+  const deps = { fetchText }
   const svc = new ModelTrackingService(db, deps)
   await svc.pollProvider()
   const status = () => db.selectFrom('model_fetch_status').selectAll().where('provider', '=', 'zhipu').execute()
@@ -42,7 +42,7 @@ it('失败只标当前角色陈旧，保留快照与成功时间，下一档到�
   vi.setSystemTime(new Date('2026-09-13T00:00:00Z'))
   const { db } = openDb(':memory:')
   let fail = false
-  const svc = new ModelTrackingService(db, { env: {}, fetchText: async (url) => {
+  const svc = new ModelTrackingService(db, { fetchText: async (url) => {
     if (fail && url === ZHIPU_DEF.sources.pricing.urls[0]) throw new Error('HTTP 503')
     return '官方资料'
   } })
@@ -72,7 +72,7 @@ it('HTML 页指纹只认正文变化，页面脚本变化不触发重核', async
   // release 页单独给可解析 HTML,避免单家轮被「发布源无结构化条目」直抛中断。
   const releases = '<html><body><main><h2 id="d">Date: 2026-09-13</h2><h3 id="a">DeepSeek-V4.2 发布</h3></main></body></html>'
   const pricingUrl = 'https://api-docs.deepseek.com/quick_start/pricing'
-  const svc = new ModelTrackingService(db, { env: {}, fetchText: async (url) =>
+  const svc = new ModelTrackingService(db, { fetchText: async (url) =>
     url === pricingUrl
       ? `<html><head><script>${script}</script></head><body><main>价格 ${price} 元</main></body></html>`
       : url === 'https://api-docs.deepseek.com/quick_start/rate_limit'
@@ -102,7 +102,7 @@ it('健康预算按角色区分：同为 7 小时前成功，目录陈旧而价�
     provider: 'zhipu', role, stale: 0, last_success_at: '2026-09-13T00:00:00.000Z',
     last_attempt_at: '2026-09-13T06:00:00.000Z',
   }).execute()
-  await new ModelTrackingService(db, { env: {}, fetchText: async () => '官方资料' }).pollProvider()
+  await new ModelTrackingService(db, { fetchText: async () => '官方资料' }).pollProvider()
   const rows = await db.selectFrom('model_fetch_status').select(['role', 'stale']).where('provider', '=', 'zhipu').execute()
   expect(rows).toEqual(expect.arrayContaining([{ role: 'catalog', stale: 1 }, { role: 'pricing', stale: 0 }]))
   await db.destroy()
@@ -113,7 +113,7 @@ it('同一 URL 双角色(deepseek updates 页)存储形态统一：release 行�
   // deepseek updates 页同时注册 release(解析消费 raw)与 retirement(指纹档)——
   // 两角色存储形态不一会让按 URL 合并的影子快照随轮换角色翻转基准，零上游变化也翻指纹
   const html = '<html><head><script>bundle-v1</script></head><body><main><h2 id="date-2026-09-13">Date: 2026-09-13</h2><h3 id="a">DeepSeek-V4.2 发布</h3></main></body></html>'
-  const svc = new ModelTrackingService(db, { env: {}, fetchText: async () => html })
+  const svc = new ModelTrackingService(db, { fetchText: async () => html })
   await svc.pollProvider('deepseek')
   const row = (role: string) => db.selectFrom('model_fetch_status').select('pages')
     .where('provider', '=', 'deepseek').where('role', '=', role).executeTakeFirstOrThrow()
@@ -146,7 +146,7 @@ it('多页角色逐页容错：单页失败沿用旧快照稳指纹，全败才�
   const { db } = openDb(':memory:')
   // deepseek weights 两页：第二页(HF 仓库改名)持续 404
   const urls = DEEPSEEK_DEF.sources.weights.urls
-  const svc = new ModelTrackingService(db, { env: {}, fetchText: async (url) =>
+  const svc = new ModelTrackingService(db, { fetchText: async (url) =>
     url === urls[1] ? Promise.reject(new Error('HTTP 404')) : `权重页 ${url}`,
   })
   const weights = () => db.selectFrom('model_fetch_status').selectAll()
@@ -172,7 +172,7 @@ it('手动强制刷新不等同于在飞轮：cron 轮已按档位跳过 release
   const gate = { resolve: (_: string) => {} }
   const slow = new Promise<string>((r) => { gate.resolve = r })
   const zhipuMd = '# 智谱发布\n\n<Update label="2026-09-12" description="GLM-5.4 发布">[GLM-5.4](https://docs.zhipu.com/glm-5-4)</Update>\n'
-  const svc = new ModelTrackingService(db, { env: {}, fetchText: async (url) => {
+  const svc = new ModelTrackingService(db, { fetchText: async (url) => {
     if (url === ZHIPU_DEF.sources.release.urls[0]) {
       releaseFetches++
       if (releaseFetches === 1) return slow // 首轮 release 抓取挂起，让 cron 轮在飞
@@ -193,7 +193,7 @@ it('同 URL 多角色共注册一轮只抓一次(深求 updates 页 release+reti
   const updates = 'https://api-docs.deepseek.com/updates/'
   const html = '<html><body><main><h2 id="d">Date: 2026-09-13</h2><h3 id="a">DeepSeek-V4.2 发布</h3></main></body></html>'
   const fetchText = vi.fn(async (_url: string) => html)
-  await new ModelTrackingService(db, { env: {}, fetchText }).pollProvider('deepseek')
+  await new ModelTrackingService(db, { fetchText }).pollProvider('deepseek')
   expect(fetchText.mock.calls.filter((c) => c[0] === updates)).toHaveLength(1)
   await db.destroy()
 })
@@ -202,7 +202,7 @@ it('HTML 发布页正文全在框架层:规范化后为空不入库,release 标�
   const { db } = openDb(':memory:')
   // h2/h3 结构在(解析器命中)但正文全在 body 直接子级 nav 里——normalize 后为空
   const nav = '<html><body><nav><h2 id="d">Date: 2026-09-13</h2><h3 id="a">DeepSeek-V4.2 发布</h3></nav></body></html>'
-  const svc = new ModelTrackingService(db, { env: {}, fetchText: async () => nav })
+  const svc = new ModelTrackingService(db, { fetchText: async () => nav })
   await expect(svc.pollProvider('deepseek')).rejects.toThrow('信源页为空')
   const row = await db.selectFrom('model_fetch_status').select(['stale', 'pages'])
     .where('provider', '=', 'deepseek').where('role', '=', 'release').executeTakeFirstOrThrow()
@@ -215,7 +215,7 @@ it('单页角色有旧快照时瞬时全败:抛真实错误(非 undefined)且角
   vi.setSystemTime(new Date('2026-09-13T00:00:00Z'))
   const { db } = openDb(':memory:')
   let fail = false
-  const svc = new ModelTrackingService(db, { env: {}, fetchText: async () => {
+  const svc = new ModelTrackingService(db, { fetchText: async () => {
     if (fail) throw new Error('HTTP 503')
     return '官方资料'
   } })
@@ -244,7 +244,7 @@ it('在飞轮落定不误删排队轮登记:连续强制补轮串行,无并发�
   const zhipuMd = '# 智谱发布\n\n<Update label="2026-09-12" description="GLM-5.4 发布">[GLM-5.4](https://docs.zhipu.com/glm-5-4)</Update>\n'
   let releaseFetches = 0
   const gates: Array<(v: string) => void> = []
-  const svc = new ModelTrackingService(db, { env: {}, fetchText: async (url) => {
+  const svc = new ModelTrackingService(db, { fetchText: async (url) => {
     if (url === releaseUrl) {
       const n = releaseFetches++
       if (n < 2) return new Promise<string>((r) => { gates.push(r) }) // 前两轮抓取挂起
@@ -270,7 +270,7 @@ it('抓取有耗时且 cron 有毫秒抖动时，相邻 2h 轮不能误跳过', 
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-09-13T00:41:00.010Z'))
   const { db } = openDb(':memory:')
-  const svc = new ModelTrackingService(db, { env: {}, fetchText: async () => {
+  const svc = new ModelTrackingService(db, { fetchText: async () => {
     vi.setSystemTime(Date.now() + 1000)
     return '官方资料'
   } })
@@ -301,7 +301,6 @@ const KIMI_ONE_CARD_HTML = '<a href="/news/kimi-k3" aria-label="Kimi K3 发布" 
 /** 票 07 月暗服务测试共 harness:models.md 可控 + 文章页最小可解析,其余 URL 404。 */
 function moonshotDeps(modelsMd: string): ModelTrackingDeps {
   return {
-    env: {},
     fetchText: async (url) => {
       if (url === KIMI_MODELS_URL) return modelsMd
       if (url === KIMI_NEWS_URL || url === KIMI_BLOG_URL) return KIMI_ONE_CARD_HTML
@@ -643,7 +642,6 @@ describe('票 07:目录差集与退役监视服务接线(种子基线差集)', (
         '| [Vidu Q1](/cn/guide/models/video-generation/viduq1) | 视频生成 |',
       ].join('\n')
       const svc = new ModelTrackingService(db, {
-        env: {},
         fetchText: async (url) => {
           if (url === ZHIPU_OVERVIEW_URL) return overviewMd
           if (url === 'https://docs.bigmodel.cn/cn/update/new-releases.md') return releasesMd

@@ -4,10 +4,9 @@ import { makeClueLedger } from './clueLedger'
 import type { PendingClue } from './providers/def'
 
 /**
- * 线索账本策略直测(票 .scratch/线索账本/01):六态 × 摄入/活动两窗 × 冻结/重试/触人集,
- * 全部经账本 interface(ingest/recordVerification)播种——Kysely 只作**存储真值断言**(行数/
- * 列值,house style 同 modelVerify.test.ts),唯一例外是轴判别用例的单点 last_seen
- * 直写(旧轴形态经 interface 不可表达,判别性断言所必需)。
+ * 线索账本策略直测(票 .scratch/线索账本/01;issues/11 未决集/重开面随切换重塑):
+ * 六态 × 摄入窗 × 冻结/指纹重开,全部经账本 interface(ingest/recordVerification)播种
+ * ——Kysely 只作**存储真值断言**(行数/列值)。
  */
 
 const baseClue = (over: Partial<PendingClue> = {}): PendingClue => ({
@@ -81,8 +80,10 @@ describe('线索账本:ingest(30 天窗 + 幂等 upsert + 完结冻结)', () => 
   })
 })
 
-describe('线索账本:共同活动窗两集(dueClues 重试集 / visibleClues 触人集)', () => {
-  /** 五态同窗种子:02-03 各一条 + 一条 pending 但 occurred_on 出核验窗(01-20,ingest 窗内)。 */
+describe('线索账本:未决集与重开检查面(issues/11 核验链工作集)', () => {
+  const FP_A = 'a'.repeat(64)
+  const FP_B = 'b'.repeat(64)
+  /** 五态种子:02-03 各一条 + 一条 pending 但 occurred_on 出重开窗(01-20,ingest 窗内)。 */
   async function seedFiveStates() {
     const { db } = openDb(':memory:')
     const ledger = makeClueLedger(db)
@@ -95,7 +96,7 @@ describe('线索账本:共同活动窗两集(dueClues 重试集 / visibleClues �
       mk('noise'),
       mk('error'),
       mk('insufficient'),
-      mk('old-window', '2026-01-20'), // >7 天核验/徽标窗、<30 天 ingest 窗
+      mk('old-window', '2026-01-20'), // >30 天重开窗,但未决集不限窗
     ])
     await ledger.recordVerification('zhipu', 'accepted', 'accepted')
     await ledger.recordVerification('zhipu', 'rejected', 'rejected', 'r')
@@ -105,78 +106,69 @@ describe('线索账本:共同活动窗两集(dueClues 重试集 / visibleClues �
     return { db, ledger, mk }
   }
 
-  it('dueClues = 核验窗(7 天)× 重试集 {pending, error}:完结三触人态与已入档态不重试,出窗 pending 不重试', async () => {
+  it('unresolvedClues = {pending, error} 全集不限窗(存量线索自然进入,旧终态不入)', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
     try {
       const { ledger } = await seedFiveStates()
-      const due = await ledger.dueClues('zhipu')
-      expect(due.map((c) => c.modelKey).sort()).toEqual(['error', 'pending'])
+      const unresolved = await ledger.unresolvedClues()
+      // old-window(01-20,出 ingest 后所有窗)照常在未决集——35 条存量切换首轮自然消化
+      expect(unresolved.map((c) => c.modelKey).sort()).toEqual(['error', 'old-window', 'pending'])
+      expect(unresolved[0]).toMatchObject({ provider: 'zhipu' })
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('visibleClues = 徽标窗(7 天)× 触人集 {pending, rejected, insufficient}:noise/error 不触人,accepted 自然滚出,occurred_on 倒序', async () => {
+  it('reopenCandidates = 窗内 × 指纹非空终态行:指纹 NULL 存量与出窗行不在面', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
+    try {
+      const { db, ledger } = await seedFiveStates()
+      // 窗内按指纹终态行经 interface 播种;出窗行(occurred_on 早于 30 天 ingest 窗,
+      // interface 不可表达)直写——本文件唯一 interface 外播种,判别性断言所必需
+      await ledger.ingest('zhipu', [baseClue({ modelKey: 'fp-fresh', sourceUrl: 'https://docs.zhipu.com/fp-fresh', title: '新协议裁决' })])
+      await ledger.recordVerification('zhipu', 'fp-fresh', 'insufficient', '证据不足', FP_A)
+      await db.insertInto('model_pending_clues').values({
+        provider: 'zhipu', occurred_on: '2025-12-01', model_key: 'fp-old', title: '出窗裁决',
+        source_url: 'https://docs.zhipu.com/fp-old', verify_state: 'noise', verify_reason: null,
+        evidence_fingerprint: FP_B, first_seen_at: '2025-12-01T00:00:00Z', last_seen_at: '2025-12-01T00:00:00Z',
+      }).execute()
+      const candidates = await ledger.reopenCandidates(30)
+      expect(candidates.map((c) => c.modelKey)).toEqual(['fp-fresh'])
+      expect(candidates[0]!.fingerprint).toBe(FP_A)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clueRow 单行读:NULL 状态投影 pending,行不存在 null', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
     try {
       const { ledger } = await seedFiveStates()
-      // 再入一条最新线索验证倒序
-      await ledger.ingest('zhipu', [baseClue({ occurredOn: '2026-02-04', modelKey: 'newest', sourceUrl: 'https://docs.zhipu.com/newest', title: '线索 newest' })])
-      const visible = await ledger.visibleClues()
-      const titles = visible.map((c) => c.title)
-      expect(titles[0]).toBe('线索 newest') // 唯一新日期者居首
-      // 其余三条同 occurred_on:原比较器对相等键返回 -1(不一致比较器,生产行为原样),
-      // 并列序无保证——只断言集合
-      expect(titles.slice(1).sort()).toEqual(['线索 insufficient', '线索 pending', '线索 rejected'])
-      // 域形状:occurredOn 而非 wire 的 date(wire 投影归 archive())
-      expect(visible[0]).toMatchObject({ provider: 'zhipu', occurredOn: '2026-02-04', title: '线索 newest', sourceUrl: 'https://docs.zhipu.com/newest' })
+      expect(await ledger.clueRow('zhipu', 'pending')).toEqual({ state: 'pending', fingerprint: null })
+      expect(await ledger.clueRow('zhipu', 'insufficient')).toEqual({ state: 'insufficient', fingerprint: null })
+      expect(await ledger.clueRow('zhipu', 'recheck:42')).toBeNull()
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('occurred_on 活动窗:第 7 天仍有效,第 8 天滚出核验与触达两集', async () => {
+  it('forceReopen 无条件重置终态(重核通道);不存在行 no-op', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
     try {
-      const { db } = openDb(':memory:')
-      const ledger = makeClueLedger(db)
-      await ledger.ingest('zhipu', [baseClue()]) // 02-03
-      vi.setSystemTime(new Date('2026-02-10T02:41:00Z')) // 第 7 天仍在窗
-      expect(await ledger.dueClues('zhipu')).toHaveLength(1)
-      expect(await ledger.visibleClues()).toHaveLength(1)
-      vi.setSystemTime(new Date('2026-02-11T02:41:00Z')) // 第 8 天淡出
-      expect(await ledger.dueClues('zhipu')).toHaveLength(0)
-      expect(await ledger.visibleClues()).toHaveLength(0)
-      expect((await rows(db))).toHaveLength(1) // 行保留:滚出读侧 ≠ 删行
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('轴判别(自 modelTracking.test.ts 迁入):完结行 occurred_on 已老、last_seen 人为保新 → 不计入徽标', async () => {
-    // 生产首发痛点:35 条已完结死线索 last_seen 冻结在核验日,旧 last_seen_at 轴下 7 天内
-    // 恒占「N 待核验」徽标。本用例的 last_seen 直写是全文件唯一 interface 外播种:旧轴
-    // 形态(完结行 + 新鲜 last_seen)经账本 interface 不可表达——冻结规则使然,判别性
-    // 断言所必需。
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
-    try {
-      const { db } = openDb(':memory:')
-      const ledger = makeClueLedger(db)
-      await ledger.ingest('zhipu', [baseClue()]) // occurred_on 02-03,窗内可见
-      await ledger.recordVerification('zhipu', baseClue().modelKey, 'rejected') // 完结:reject 留表触人
-      // 时间到 03-01(occurred_on 已老 26 天),但 last_seen 人为保持新鲜——旧轴判活,新轴判出
-      vi.setSystemTime(new Date('2026-03-01T02:41:00Z'))
-      await db
-        .updateTable('model_pending_clues')
-        .set({ last_seen_at: new Date().toISOString() })
-        .where('model_key', '=', baseClue().modelKey)
-        .execute()
-      const visible = await ledger.visibleClues()
-      expect(visible.some((c) => c.title.includes('GLM-9.9'))).toBe(false)
+      const { db, ledger } = await seedFiveStates()
+      await ledger.recordVerification('zhipu', 'pending', 'noise', undefined, FP_A)
+      await ledger.forceReopen('zhipu', 'pending')
+      await ledger.forceReopen('zhipu', 'recheck:42')
+      const byKey = new Map((await rows(db)).map((r) => [r.model_key, r]))
+      expect(byKey.get('pending')!.verify_state).toBeNull()
+      expect(byKey.get('pending')!.verify_reason).toBeNull()
+      expect(byKey.get('pending')!.evidence_fingerprint).toBeNull()
+      // 重开后可再裁决
+      expect(await ledger.recordVerification('zhipu', 'pending', 'noise')).toBe(true)
     } finally {
       vi.useRealTimers()
     }
@@ -277,22 +269,4 @@ describe('线索账本:指纹重开(issues/05;影子期经接口交付,旧链调
     }
   })
 
-  it('cluesFirstSeenSince:first_seen_at 轴、任意状态、带 provider', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-02-05T02:41:00Z'))
-    try {
-      const { db } = openDb(':memory:')
-      const ledger = makeClueLedger(db)
-      await ledger.ingest('zhipu', [baseClue({ modelKey: 'fresh', sourceUrl: 'https://docs.zhipu.com/fresh', title: '新线索' })])
-      await ledger.recordVerification('zhipu', 'fresh', 'rejected', 'r') // 已裁决也摄入(旧链同轮即核验)
-      vi.setSystemTime(new Date('2026-02-06T02:41:00Z'))
-      await ledger.ingest('zhipu', [baseClue({ modelKey: 'newer', occurredOn: '2026-02-06', sourceUrl: 'https://docs.zhipu.com/newer', title: '更新线索' })])
-      const since = new Date('2026-02-05T12:00:00Z').toISOString()
-      const got = await ledger.cluesFirstSeenSince(since)
-      expect(got.map((c) => c.modelKey)).toEqual(['newer'])
-      expect(got[0]).toMatchObject({ provider: 'zhipu', title: '更新线索' })
-    } finally {
-      vi.useRealTimers()
-    }
-  })
 })
