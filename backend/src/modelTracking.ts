@@ -557,12 +557,15 @@ export class ModelTrackingService {
       .insertInto('model_fetch_status')
       .values({
         provider,
+        // 信源角色(issues/02 健康表主键升级):当前轮询只抓发布页,即 release 职责;
+        // 六类信源分档健康在票 05/06 接线后由各自路径写入。
+        role: 'release',
         stale: ok ? 0 : 1,
         last_success_at: ok ? now : null,
         last_attempt_at: now,
       })
       .onConflict((oc) =>
-        oc.column('provider').doUpdateSet({
+        oc.columns(['provider', 'role']).doUpdateSet({
           stale: ok ? 0 : 1,
           ...(ok ? { last_success_at: now } : {}),
           last_attempt_at: now,

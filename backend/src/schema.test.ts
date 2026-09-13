@@ -131,10 +131,24 @@ const MODEL_EVENTS: Col[] = [
   ['created_at', 'TEXT', 1, null, 0],
 ]
 const MODEL_FETCH_STATUS: Col[] = [
+  // 复合主键(issues/02):role 缺席 = 旧形态,migrate 重建升级
   ['provider', 'TEXT', 1, null, 1],
+  ['role', 'TEXT', 1, "'release'", 2],
   ['stale', 'INTEGER', 1, '0', 0],
   ['last_success_at', 'TEXT', 0, null, 0],
   ['last_attempt_at', 'TEXT', 0, null, 0],
+]
+const MODEL_FIELD_EVIDENCE: Col[] = [
+  ['id', 'INTEGER', 0, null, 1],
+  ['model_id', 'INTEGER', 1, null, 0],
+  ['field', 'TEXT', 1, null, 0],
+  ['source_url', 'TEXT', 1, null, 0],
+  ['observed_at', 'TEXT', 1, null, 0],
+  ['excerpt', 'TEXT', 1, null, 0],
+  ['content_fingerprint', 'TEXT', 1, null, 0],
+  ['rule_version', 'TEXT', 1, null, 0],
+  ['decided_model', 'TEXT', 1, null, 0],
+  ['decided_at', 'TEXT', 1, null, 0],
 ]
 
 // openDb(':memory:') 已含 migrate;每个 describe 用新库,互不串数据
@@ -169,6 +183,7 @@ describe('schema:表结构(research/03 骨架 + sessions + 视频更新三表 + 
     ['model_archive', MODEL_ARCHIVE],
     ['model_events', MODEL_EVENTS],
     ['model_fetch_status', MODEL_FETCH_STATUS],
+    ['model_field_evidence', MODEL_FIELD_EVIDENCE],
   ] as const)('%s', (table, expected) => {
     expect(cols(sqlite, table)).toEqual(expected)
   })
@@ -182,7 +197,7 @@ describe('schema:表结构(research/03 骨架 + sessions + 视频更新三表 + 
   })
 
   it('全库表数守护(加表时同步此数)', () => {
-    expect(tableCount(sqlite)).toBe(24) // +model_aa_mapping(ADR-0058)
+    expect(tableCount(sqlite)).toBe(25) // +model_aa_mapping(ADR-0058) +model_field_evidence(issues/02)
   })
 })
 
@@ -251,7 +266,7 @@ describe('schema:建表幂等', () => {
       migrate(sqlite)
       migrate(sqlite)
     }).not.toThrow()
-    expect(tableCount(sqlite)).toBe(24) // +model_aa_mapping(ADR-0058)
+    expect(tableCount(sqlite)).toBe(25) // +model_aa_mapping(ADR-0058) +model_field_evidence(issues/02)
   })
 
   it('增量加列:issues/01 时期的旧库(无 pricing/limits/training_params)migrate 后补齐且数据保留', () => {
@@ -317,5 +332,63 @@ describe('schema:建表幂等', () => {
     expect(cols(sqlite, 'layout_settings')).toEqual(LAYOUT_SETTINGS)
     const row = sqlite.prepare('SELECT grid_width, grid_gap FROM layout_settings WHERE user_id = 1').get() as Record<string, unknown>
     expect(row).toEqual({ grid_width: 1136, grid_gap: 24 })
+  })
+
+  it('健康表主键升级:issues/02 前 provider 单主键旧库 migrate 后 (provider, role) 生效,存量行归 release 且数据保留', () => {
+    // 复刻 issues/02 前线上形态:provider 单主键,带存量健康行
+    const sqlite = fresh()
+    sqlite.exec('DROP TABLE model_fetch_status')
+    sqlite.exec(`
+      CREATE TABLE model_fetch_status (
+          provider        TEXT PRIMARY KEY NOT NULL,
+          stale           INTEGER NOT NULL DEFAULT 0,
+          last_success_at TEXT,
+          last_attempt_at TEXT
+      );
+      INSERT INTO model_fetch_status (provider, stale, last_success_at, last_attempt_at)
+        VALUES ('zhipu', 0, '2026-09-12T00:00:00Z', '2026-09-12T00:00:00Z');
+    `)
+    migrate(sqlite)
+    expect(cols(sqlite, 'model_fetch_status')).toEqual(MODEL_FETCH_STATUS)
+    const row = sqlite.prepare(
+      "SELECT provider, role, stale, last_success_at FROM model_fetch_status WHERE provider = 'zhipu'",
+    ).get() as Record<string, unknown>
+    expect(row).toEqual({ provider: 'zhipu', role: 'release', stale: 0, last_success_at: '2026-09-12T00:00:00Z' })
+    // 复合主键:同 (provider, role) 拒重,同 provider 异 role 共存(六类信源各一行)
+    expect(() => sqlite.exec("INSERT INTO model_fetch_status (provider) VALUES ('zhipu')")).toThrow()
+    sqlite.exec("INSERT INTO model_fetch_status (provider, role) VALUES ('zhipu', 'pricing')")
+    expect(
+      (sqlite.prepare("SELECT count(*) c FROM model_fetch_status WHERE provider = 'zhipu'").get() as { c: number }).c,
+    ).toBe(2)
+    // 迁移幂等:再跑 migrate 不触发表重建(role 列已在)
+    migrate(sqlite)
+    expect((sqlite.prepare('SELECT count(*) c FROM model_fetch_status').get() as { c: number }).c).toBe(2)
+  })
+
+  it('增量加列:issues/02 前的旧线索表 migrate 后补 evidence_fingerprint 且存量行不破坏', () => {
+    // 复刻 issues/02 前形态:verify 两列已有、指纹列没有(线上当前库形状)
+    const sqlite = fresh()
+    sqlite.exec('DROP TABLE model_pending_clues')
+    sqlite.exec(`
+      CREATE TABLE model_pending_clues (
+          provider      TEXT NOT NULL,
+          occurred_on   TEXT NOT NULL,
+          model_key     TEXT NOT NULL,
+          title         TEXT NOT NULL,
+          source_url    TEXT NOT NULL,
+          verify_state  TEXT,
+          verify_reason TEXT,
+          first_seen_at TEXT NOT NULL,
+          last_seen_at  TEXT NOT NULL,
+          UNIQUE (provider, model_key)
+      );
+      INSERT INTO model_pending_clues (provider, occurred_on, model_key, title, source_url, first_seen_at, last_seen_at)
+        VALUES ('zhipu', '2026-09-10', 'glm-6', 'GLM-6 发布', 'https://zhipu.ai/news', '2026-09-10T00:00:00Z', '2026-09-10T00:00:00Z');
+    `)
+    migrate(sqlite)
+    const row = sqlite.prepare(
+      "SELECT verify_state, verify_reason, evidence_fingerprint FROM model_pending_clues WHERE model_key = 'glm-6'",
+    ).get() as Record<string, unknown>
+    expect(row).toEqual({ verify_state: null, verify_reason: null, evidence_fingerprint: null })
   })
 })

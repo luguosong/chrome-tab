@@ -10,6 +10,23 @@ import type { Generated } from 'kysely'
  * - TEXT 主键必须显式 NOT NULL(SQLite 历史怪癖:不写可插 NULL);
  * - IF NOT EXISTS:空库首启与重启重复执行幂等。
  */
+/**
+ * 信源健康表建表语句单源(CONTEXT.md「数据健康」;ADR-0062 决策二,issues/02):主键
+ * (provider, role)——六类信源角色(release/catalog/pricing/limits/weights/retirement)
+ * 各自标陈旧与恢复。SCHEMA_SQL(空库)与存量库主键升级重建(upgradeFetchStatusRole)
+ * 共用此串,列集演进只改这里,升级路径不与新库 DDL 分叉。
+ */
+const MODEL_FETCH_STATUS_SQL = `
+CREATE TABLE IF NOT EXISTS model_fetch_status (
+    provider        TEXT NOT NULL,
+    role            TEXT NOT NULL DEFAULT 'release',
+    stale           INTEGER NOT NULL DEFAULT 0,
+    last_success_at TEXT,
+    last_attempt_at TEXT,
+    PRIMARY KEY (provider, role)
+);
+`
+
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS users (
     id          INTEGER PRIMARY KEY,
@@ -174,12 +191,7 @@ CREATE TABLE IF NOT EXISTS model_events (
     FOREIGN KEY (model_id) REFERENCES model_archive(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_model_events_model ON model_events (model_id, occurred_on DESC);
-CREATE TABLE IF NOT EXISTS model_fetch_status (
-    provider        TEXT PRIMARY KEY NOT NULL,
-    stale           INTEGER NOT NULL DEFAULT 0,
-    last_success_at TEXT,
-    last_attempt_at TEXT
-);
+${MODEL_FETCH_STATUS_SQL}
 -- 评测结果快照(issues/08,CONTEXT.md「评测结果」):每 (模型,评测方,Benchmark) 一行,
 -- 每轮成功取数整表替换为最新快照(分数漂移只更新行,不产生动态);失败保留最后成功
 -- 快照并标记 model_evaluation_status 陈旧——与厂家信源失败(model_fetch_status)互不影响。
@@ -201,6 +213,25 @@ CREATE TABLE IF NOT EXISTS model_evaluation_status (
     last_success_at TEXT,
     last_attempt_at TEXT
 );
+-- 事实证据(CONTEXT.md「事实证据」;ADR-0062 决策三,issues/02):append-only,逐字段一行,
+-- 字段当前值 = 该字段最新一行,取代即追加、旧行永不抹除(被取代证据保留在历史)。无
+-- UPDATE/DELETE 路径——写入只有追加(evidence.ts 是本表唯一入口,不暴露改删方法)。
+-- 内容指纹 = 证据内容 SHA-256(相同证据不重复核验);观察时间 ≠ 裁决时刻(取证与裁决
+-- 分属调查/复核两段)。字段值域由裁决矩阵定(票 03)。
+CREATE TABLE IF NOT EXISTS model_field_evidence (
+    id                  INTEGER PRIMARY KEY,
+    model_id            INTEGER NOT NULL,
+    field               TEXT NOT NULL,
+    source_url          TEXT NOT NULL,
+    observed_at         TEXT NOT NULL,
+    excerpt             TEXT NOT NULL,
+    content_fingerprint TEXT NOT NULL,
+    rule_version        TEXT NOT NULL,
+    decided_model       TEXT NOT NULL,
+    decided_at          TEXT NOT NULL,
+    FOREIGN KEY (model_id) REFERENCES model_archive(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_model_field_evidence_model_field ON model_field_evidence (model_id, field, id DESC);
 -- 待核验线索(2026-08-27 千问/智谱漏检事故):轮询解析出但基线未认领的条目——ADR-0025
 -- 「跳过待人工核验」的落地形态,跳过不再静默。upsert-only:基线收录后条目不再被写入,
 -- occurred_on 停更,读侧(occurred_on 轴,同核验窗)出窗即滚出(滚动信源翻页周期内
@@ -301,7 +332,15 @@ export function migrate(sqlite: SqliteConnection) {
     verified: "TEXT NOT NULL DEFAULT 'manual'",
   })
   // ADR-0058 auto 核验:存量线索表补状态列(NULL = 未核验)。
-  addMissingColumns(sqlite, 'model_pending_clues', { verify_state: 'TEXT', verify_reason: 'TEXT' })
+  // ADR-0062 决策三(issues/02):补证据指纹列——同指纹守终态、指纹变化重置未核验
+  // (自动重开);指纹 = SHA-256(线索三元组 + 核验信源页内容),由核验链写入,存量行 NULL。
+  addMissingColumns(sqlite, 'model_pending_clues', {
+    verify_state: 'TEXT',
+    verify_reason: 'TEXT',
+    evidence_fingerprint: 'TEXT',
+  })
+  // 健康表主键升级 (provider) → (provider, role)(ADR-0062 决策二,issues/02)。
+  upgradeFetchStatusRole(sqlite)
   // 「重要日子」寄放布局设置(ADR-0026):存量行 NULL,读侧兜底 []。
   addMissingColumns(sqlite, 'layout_settings', { important_dates: 'TEXT' })
   // releaseTimes 落库(81888ea 曾以「迁移重」不动,2026-08-31 二次线上消失推翻):JSON
@@ -312,6 +351,24 @@ export function migrate(sqlite: SqliteConnection) {
   addMissingColumns(sqlite, 'changelog_snapshots', { stable_version: 'TEXT' })
   // iconScale 撤除用户调节(ADR-0033):存量列删除;新库 DDL 无此列,天然 no-op。
   dropLegacyColumns(sqlite, 'layout_settings', ['icon_scale'])
+}
+
+/**
+ * 健康表主键升级(issues/02,(provider) → (provider, role)):复合主键加不出列,
+ * 旧形态(无 role 列)整表重建。存量行归 'release'——升级前轮询只抓发布页,即 release
+ * 职责;SCHEMA_SQL 先行(空库直接新形态),检测在先故重复执行 no-op。
+ */
+function upgradeFetchStatusRole(sqlite: SqliteConnection) {
+  const have = new Set((sqlite.pragma(`table_info(model_fetch_status)`) as { name: string }[]).map((c) => c.name))
+  if (have.has('role')) return
+  // 建表走单源 DDL 换 _v2 名(首处 replace 即表名;列名不含表名串,不会误伤)
+  sqlite.exec(MODEL_FETCH_STATUS_SQL.replace('model_fetch_status', 'model_fetch_status_v2'))
+  sqlite.exec(`
+    INSERT INTO model_fetch_status_v2 (provider, role, stale, last_success_at, last_attempt_at)
+        SELECT provider, 'release', stale, last_success_at, last_attempt_at FROM model_fetch_status;
+    DROP TABLE model_fetch_status;
+    ALTER TABLE model_fetch_status_v2 RENAME TO model_fetch_status;
+  `)
 }
 
 /**
@@ -494,9 +551,27 @@ export interface ModelEventsTable {
 
 export interface ModelFetchStatusTable {
   provider: string
+  /** 信源角色(六类之一:release/catalog/pricing/limits/weights/retirement;旧路径默认 'release')。 */
+  role: string
   stale: number
   last_success_at: string | null
   last_attempt_at: string | null
+}
+
+export interface ModelFieldEvidenceTable {
+  id: Generated<number>
+  model_id: number
+  /** 档案字段名(pricing/limits/training_params…;值域由裁决矩阵定,票 03)。 */
+  field: string
+  source_url: string
+  /** 一手信源观察时间(≠ 裁决时刻 decided_at,取证与裁决分属两段)。 */
+  observed_at: string
+  excerpt: string
+  /** 证据内容 SHA-256(相同证据不重复核验)。 */
+  content_fingerprint: string
+  rule_version: string
+  decided_model: string
+  decided_at: string
 }
 
 export interface ModelEvaluationsTable {
@@ -598,6 +673,7 @@ export interface SchemaDatabase {
   model_archive: ModelArchiveTable
   model_events: ModelEventsTable
   model_fetch_status: ModelFetchStatusTable
+  model_field_evidence: ModelFieldEvidenceTable
   model_evaluations: ModelEvaluationsTable
   model_evaluation_status: ModelEvaluationStatusTable
   model_pending_clues: ModelPendingCluesTable
