@@ -79,8 +79,11 @@ export default function TrendingModal({ onClose }: { onClose: () => void }) {
         options={TRENDING_SPOKEN.map((l) => ({ key: l.slug, label: l.label }))} />
       <ChipRow ariaLabel="按编程语言筛选" label="语言" value={language} onChange={setLanguage}
         options={TRENDING_LANGUAGES.map((l) => ({ key: l.slug, label: l.label, color: l.color }))} />
+      {/* 周期是必选维度(GitHub Trending 无「不限周期」视图,since='' 是后端白名单
+          拒绝的形状)——allowAny={false} 砍掉「不限」胶囊,2026-09-13 事故根因 */}
       <ChipRow ariaLabel="按周期筛选" label="周期" value={since} onChange={(v) => setSince(v as TrendingSince)}
-        options={Object.entries(TRENDING_SINCE_LABELS).map(([key, label]) => ({ key, label, color: '' }))} />
+        options={Object.entries(TRENDING_SINCE_LABELS).map(([key, label]) => ({ key, label, color: '' }))}
+        allowAny={false} />
 
       <QueryPane
         state={paneState({
@@ -209,26 +212,33 @@ function TranslatingBadge() {
   )
 }
 
-/** 一行筛选胶囊(维度标签 + 「不限」+ 精选值;语言行带色点)。ModelModal 种类胶囊同款形态。 */
-function ChipRow({
+/** 一行筛选胶囊(维度标签 + 「不限」+ 精选值;语言行带色点)。ModelModal 种类胶囊同款形态。
+ *  allowAny={false} 用于必选维度(如周期):不渲染「不限」胶囊——空串对这类维度是
+ *  非法 wire 形状,契约测试见 TrendingModal.test.tsx。 */
+export function ChipRow({
   ariaLabel,
   label,
   value,
   onChange,
   options,
+  allowAny = true,
 }: {
   ariaLabel: string
   label: string
   value: string
   onChange: (v: string) => void
   options: { key: string; label: string; color?: string }[]
+  /** false = 该维度无可缺省值(GitHub Trending 周期必选),不提供「不限」。 */
+  allowAny?: boolean
 }) {
   return (
     <div role="group" aria-label={ariaLabel} className="flex items-center gap-1.5 overflow-x-auto modal-scroll -mt-1 mb-2 pb-1">
       <span className="shrink-0 text-meta text-white/35">{label}</span>
-      <Chip active={value === ''} onClick={() => onChange('')}>
-        不限
-      </Chip>
+      {allowAny && (
+        <Chip active={value === ''} onClick={() => onChange('')}>
+          不限
+        </Chip>
+      )}
       {options.map((o) => (
         <Chip key={o.key} active={value === o.key} dot={o.color} onClick={() => onChange(o.key)}>
           {o.label}

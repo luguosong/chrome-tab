@@ -72,6 +72,20 @@ describe('trendingRoutes(HTTP wire)', () => {
     expect(await res.json()).toEqual({ started: true })
   })
 
+  it('参数白名单:since 空串(前端周期「不限」胶囊发出的形状)拒绝——?since= 在 Hono 里是空串而非 undefined,?? daily 兜底不触发(2026-09-13 「不限时→刷新失败」事故形态)', async () => {
+    let fetched = false
+    const deps: TrendingDeps = {
+      fetchText: async () => {
+        fetched = true
+        return page(ARTICLE_EN)
+      },
+      translateDescriptions: async (texts) => texts.map((t) => `译(${t})`),
+    }
+    const app = trendingRoutes(new TrendingService(openDb(':memory:').db, deps))
+    expect((await app.request('/api/trending?since=')).status).toBeGreaterThanOrEqual(400)
+    expect(fetched).toBe(false)
+  })
+
   it('参数白名单:非法 since 拒绝且不出站抓取(BadRequest→400 由 app.ts 全局 onError 转换)', async () => {
     let fetched = false
     const deps: TrendingDeps = {
