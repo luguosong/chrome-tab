@@ -353,16 +353,31 @@ describe('核验图:复核节点(零工具,只看证据与提案)', () => {
   })
 })
 
-describe('核验图:模型配置自锁与预算', () => {
-  it('各一单值环境键、自锁不降级:不可用(404)→ 暂缓而非换模型', async () => {
+describe('核验图:模型配置(调查免费优先链)与预算', () => {
+  it('调查候选不可用即换下一候选:粘住命中位跨轮沿用,failover 不烧轮数预算,decidedModel 记实际命中', async () => {
+    const dead = () => Object.assign(new Error('model gone'), { status: 404 })
+    const { fn, calls } = seqCall([dead(), dead(), dead(), readBoth, finalProposal([STAGE_FIELD, AVAIL_REL, AVAIL_CAT]), reviewAgree])
+    const d = makeDeps({
+      call: fn,
+      env: { AIHUBMIX_API_KEY: 'k', VERIFY_INVESTIGATE_LLM_MODEL: 'w,x,y,z', VERIFY_REVIEW_LLM_MODEL: 'rev-model' },
+    })
+    const result = await makeVerificationGraph(d.deps).invoke({ task: TASK })
+    // 3 次 failover 后 z 以完整轮数(read+final 共 2 轮)完成——若 failover 烧轮,4−3=1 轮不够 → insufficient
+    expect(result.exit).toMatchObject({ kind: 'accept', target: 'insert' })
+    expect(calls.map((c) => c.model)).toEqual(['w', 'x', 'y', 'z', 'z', 'rev-model'])
+    const plan = d.commitPlans[0]!
+    expect(plan.fields.find((f) => f.field === 'stage')!.evidence!.decidedModel).toBe('z+rev-model')
+  })
+
+  it('调查链全候选不可用(含兜底)→ 暂缓;单值注入 = 单元素链,耗尽即暂缓', async () => {
     const { fn, calls } = seqCall([Object.assign(new Error('model gone'), { status: 404 })])
     const d = makeDeps({ call: fn })
     const result = await makeVerificationGraph(d.deps).invoke({ task: TASK })
-    expect(result.exit).toMatchObject({ kind: 'defer', cause: 'unavailable' })
-    expect(calls.map((c) => c.model)).toEqual(['inv-model']) // 单值即链长 1,无候选链回退
+    expect(result.exit).toMatchObject({ kind: 'defer', cause: 'unavailable', reason: expect.stringContaining('全不可用') })
+    expect(calls.map((c) => c.model)).toEqual(['inv-model'])
   })
 
-  it('复核模型不可用(429 限额)→ 暂缓(ADR:任一不可用即暂缓;free 渠道故障期暂缓堆积是取向成本)', async () => {
+  it('复核模型不可用(429 限额)→ 暂缓(复核自锁不降级;free 渠道故障期暂缓堆积是取向成本)', async () => {
     const { fn } = seqCall([readBoth, finalProposal([STAGE_FIELD, AVAIL_REL, AVAIL_CAT]), Object.assign(new Error('quota'), { status: 429 })])
     const d = makeDeps({ call: fn })
     const result = await makeVerificationGraph(d.deps).invoke({ task: TASK })
@@ -377,9 +392,20 @@ describe('核验图:模型配置自锁与预算', () => {
     expect(calls.every((c) => c.timeoutMs === 120_000)).toBe(true)
   })
 
-  it('缺省模型 = ADR 钉死家族(coding-glm-5.3-flash / gpt-5.5-free);纯空白键回退缺省、值去两端空白', () => {
-    expect(verificationModels({})).toEqual({ investigate: 'coding-glm-5.3-flash', review: 'gpt-5.5-free' })
-    expect(verificationModels({ VERIFY_INVESTIGATE_LLM_MODEL: ' ', VERIFY_REVIEW_LLM_MODEL: ' b ' })).toEqual({ investigate: 'coding-glm-5.3-flash', review: 'b' })
+  it('缺省模型 = 免费优先链(free 全非 gpt 家族 + 付费 flash 兜底;复核恒 gpt 家系 = 互异家族静态守门);调查键逗号列表覆盖整链', () => {
+    const def = verificationModels({})
+    expect(def.investigate).toEqual([
+      'coding-glm-5.3-flash-free',
+      'coding-glm-5.3-free',
+      'coding-kimi-k3-free',
+      'gemini-3.7-flash-free',
+      'coding-glm-5-free',
+      'coding-glm-5.3-flash',
+    ])
+    expect(def.investigate.every((m) => !m.startsWith('gpt-'))).toBe(true)
+    expect(def.review).toBe('gpt-5.5-free')
+    expect(verificationModels({ VERIFY_INVESTIGATE_LLM_MODEL: ' x , y,,', VERIFY_REVIEW_LLM_MODEL: ' b ' })).toEqual({ investigate: ['x', 'y'], review: 'b' })
+    expect(verificationModels({ VERIFY_INVESTIGATE_LLM_MODEL: ',,,' }).investigate).toEqual(def.investigate) // 纯分隔符回退默认
   })
 })
 

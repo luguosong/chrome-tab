@@ -145,20 +145,26 @@ export const VERIFICATION_BUDGET = {
 } as const
 
 /**
- * 双段模型配置(ADR-0062 决策一):调查 = coding-glm-5.3-flash、复核 = gpt-5.5-free(互异家族),
- * 各一单值环境键、**自锁不降级**——不回退候选链,任一不可用即暂缓;缺省 = ADR 钉死的家族。
+ * 双段模型配置(ADR-0062 决策一,2026-09-13 修订:免费优先):调查 = 免费优先链(free 候选
+ * 全部非 gpt 家族 + 付费 coding-glm-5.3-flash 兜底;复核恒 gpt 家系,「互异家族」静态守门),
+ * 键支持逗号列表覆盖整链(CHANGELOG_LLM_MODEL 同一通则);复核 = gpt-5.5-free 单值。
+ * 复核**自锁不降级**(不可用即暂缓);调查链耗尽(含兜底)才暂缓。
  */
-export function verificationModels(env: NodeJS.ProcessEnv): { investigate: string; review: string } {
+const DEFAULT_INVESTIGATE_CHAIN =
+  'coding-glm-5.3-flash-free,coding-glm-5.3-free,coding-kimi-k3-free,gemini-3.7-flash-free,coding-glm-5-free,coding-glm-5.3-flash'
+
+export function verificationModels(env: NodeJS.ProcessEnv): { investigate: string[]; review: string } {
+  const list = (env.VERIFY_INVESTIGATE_LLM_MODEL ?? '').split(',').map((m) => m.trim()).filter(Boolean)
   return {
-    investigate: env.VERIFY_INVESTIGATE_LLM_MODEL?.trim() || 'coding-glm-5.3-flash',
+    investigate: list.length ? list : DEFAULT_INVESTIGATE_CHAIN.split(','),
     review: env.VERIFY_REVIEW_LLM_MODEL?.trim() || 'gpt-5.5-free',
   }
 }
 
-/** 「模型家族不可用」判定:网关明确该模型服务不了(被禁/不存在 403/404、限额 429、无渠道)→
- *  暂缓(ADR:任一不可用即暂缓);网关自身故障(5xx)/超时/断网是瞬时系统错误 → error 退避重试。
- *  与 llm.ts isCandidateExhausted 字面共享子集但意图相反(「不可用换不了路」vs「可换路」),
- *  不提取共享谓词——两侧演化方向不同(自锁单值 vs 候选链)。 */
+/** 「模型家族不可用」判定:网关明确该模型服务不了(被禁/不存在 403/404、限额 429、无渠道);
+ *  网关自身故障(5xx)/超时/断网是瞬时系统错误 → error 退避重试。2026-09-13 链化后两侧
+ *  消费面分叉:调查 = 推进链游标换候选(链耗尽才暂缓),复核 = 自锁单值即暂缓。
+ *  与 llm.ts isCandidateExhausted 字面共享子集,不提取共享谓词(消费者语义各自演化)。 */
 const isModelUnavailable = (e: unknown): boolean => {
   const err = e as { status?: number; body?: string }
   return err?.status === 403 || err?.status === 404 || err?.status === 429 || /no_available_channel/.test(err?.body ?? '')
@@ -300,6 +306,8 @@ function investigateNode(deps: VerificationDeps) {
     const apiKey = deps.env.AIHUBMIX_API_KEY ?? ''
     if (apiKey === '') return { investigation: null, fingerprint: null, exit: { kind: 'error', reason: '未配置 AIHUBMIX_API_KEY(核验不可用)' } }
     const models = verificationModels(deps.env)
+    const chain = models.investigate
+    let cursor = 0
     const whitelist = new Map(task.sources.map((s) => [s.url, s]))
     const deadline = Date.now() + VERIFICATION_BUDGET.deadlineMs
     const reads = new Map<string, ReadRecord>()
@@ -313,7 +321,19 @@ function investigateNode(deps: VerificationDeps) {
           return { investigation: null, fingerprint: fingerprintOf(reads, failed), exit: { kind: 'defer', cause: 'insufficient', reason: `核验总时长超限(${VERIFICATION_BUDGET.deadlineMs / 60_000}min),等证据指纹变化重开` } }
         }
         const user = investigationUser(task, archive, evidence, reads, failed, notice)
-        const { content } = await deps.call(models.investigate, apiKey, INVESTIGATE_SYSTEM, user, VERIFICATION_BUDGET.llmTimeoutMs)
+        // 免费优先链(2026-09-13):候选不可用即推进游标换下一候选重试本轮;游标粘住最近命中
+        // (后续轮沿用,不回链头重撞死候选)。failover 不烧轮数——轮数 = 有效推理轮,游标单调
+        // 推进保证总 failover 次数 ≤ 链长-1,有界;链耗尽把最后错误抛给外层 defer。
+        let content: string | null = null
+        for (;;) {
+          try {
+            content = (await deps.call(chain[cursor], apiKey, INVESTIGATE_SYSTEM, user, VERIFICATION_BUDGET.llmTimeoutMs)).content
+            break
+          } catch (e) {
+            if (!isModelUnavailable(e) || cursor >= chain.length - 1) throw e
+            cursor++
+          }
+        }
         const parsed = content === null ? null : parseLlmJson(content)
         if (parsed === null || typeof parsed.action !== 'string') {
           notice = '上一轮输出无法解析,请只输出一个 JSON 对象(协议见系统提示)'
@@ -350,7 +370,7 @@ function investigateNode(deps: VerificationDeps) {
           const fingerprint = fingerprintOf(reads, failed)
           if (parsed.isNoise === true) {
             const reason = typeof parsed.reason === 'string' && parsed.reason.trim() !== '' ? parsed.reason : '调查判定非自家新独立型号'
-            return { investigation: { kind: 'noise', reason }, fingerprint, exit: null }
+            return { investigation: { kind: 'noise', reason }, investigateModel: chain[cursor], fingerprint, exit: null }
           }
           // 身份硬校验不过 = 判自家但证据不足(旧链 insufficient 语义):整单暂缓,复核无从复核
           const identity = validateIdentity(parsed)
@@ -373,14 +393,14 @@ function investigateNode(deps: VerificationDeps) {
               observation: { role: read.role, sourceUrl, observedAt: read.observedAt, excerpt, value: f2.value },
             }
           })
-          return { investigation: { kind: 'proposal', ...identity, citations }, fingerprint, exit: null }
+          return { investigation: { kind: 'proposal', ...identity, citations }, investigateModel: chain[cursor], fingerprint, exit: null }
         }
         notice = 'action 须为 read 或 final'
       }
       return { investigation: null, fingerprint: fingerprintOf(reads, failed), exit: { kind: 'defer', cause: 'insufficient', reason: `调查轮数达上限(${VERIFICATION_BUDGET.investigationRounds})未出最终结论,等证据指纹变化重开` } }
     } catch (e) {
       if (isModelUnavailable(e)) {
-        return { investigation: null, fingerprint: fingerprintOf(reads, failed), exit: { kind: 'defer', cause: 'unavailable', reason: `调查模型(${models.investigate})不可用,自锁不降级即暂缓:${errText(e)}` } }
+        return { investigation: null, fingerprint: fingerprintOf(reads, failed), exit: { kind: 'defer', cause: 'unavailable', reason: `调查链(${chain.length} 候选,终位 ${chain[cursor]})全不可用,暂缓:${errText(e)}` } }
       }
       return { investigation: null, fingerprint: fingerprintOf(reads, failed), exit: { kind: 'error', reason: `调查失败:${errText(e)}` } }
     }
@@ -483,7 +503,8 @@ function commitNode(deps: VerificationDeps) {
     }
     const { task } = state
     const models = verificationModels(deps.env)
-    const decidedModel = `${models.investigate}+${models.review}`
+    // 记账 = 实际命中组合(调查链 failover 后的终位 + 复核单值;走到本节点必已设置,?? 仅类型收窄)
+    const decidedModel = `${state.investigateModel ?? 'unknown'}+${models.review}`
     const decidedAt = new Date().toISOString()
     try {
       const archive = await deps.listModels(task.provider)
@@ -574,6 +595,9 @@ function commitNode(deps: VerificationDeps) {
 const VerificationStateAnnotation = Annotation.Root({
   task: Annotation<VerificationTask>,
   investigation: Annotation<InvestigationResult | null>,
+  /** 调查链实际命中的模型(免费优先链 failover 后的终位;decidedModel 记账用。调查成功
+   *  路径必设;暂缓/错误出口不写(与 investigation 通道同为「节点必写后才被下游消费」模式)。 */
+  investigateModel: Annotation<string | null>,
   /** 证据指纹(SHA-256;票 05 消费:thread_id 与账本同指纹守终态/变化重开)。 */
   fingerprint: Annotation<string | null>,
   review: Annotation<ReviewResult | null>,
