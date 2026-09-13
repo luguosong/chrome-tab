@@ -11,7 +11,7 @@ import type { Db } from './db'
 /** 一行字段级证据(append 的入参;latest 的返回形状)。 */
 export interface FieldEvidence {
   modelId: number
-  /** 档案字段名(pricing/limits/training_params…;值域由裁决矩阵定,票 03)。 */
+  /** 档案字段名(pricing/limits/training_params…;值域单源 = adjudication.ts 的矩阵键集)。 */
   field: string
   sourceUrl: string
   /** 一手信源观察时间(≠ 裁决时刻,取证与裁决分属调查/复核两段)。 */
