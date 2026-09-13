@@ -145,12 +145,12 @@ export const VERIFICATION_BUDGET = {
 } as const
 
 /**
- * 双段模型配置(ADR-0062 决策一):调查 = coding-glm-5.3、复核 = gpt-5.5-free(互异家族),
+ * 双段模型配置(ADR-0062 决策一):调查 = coding-glm-5.3-flash、复核 = gpt-5.5-free(互异家族),
  * 各一单值环境键、**自锁不降级**——不回退候选链,任一不可用即暂缓;缺省 = ADR 钉死的家族。
  */
 export function verificationModels(env: NodeJS.ProcessEnv): { investigate: string; review: string } {
   return {
-    investigate: env.VERIFY_INVESTIGATE_LLM_MODEL?.trim() || 'coding-glm-5.3',
+    investigate: env.VERIFY_INVESTIGATE_LLM_MODEL?.trim() || 'coding-glm-5.3-flash',
     review: env.VERIFY_REVIEW_LLM_MODEL?.trim() || 'gpt-5.5-free',
   }
 }

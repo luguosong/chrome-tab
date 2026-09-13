@@ -11,11 +11,11 @@ import { fetchText } from './common'
 export const LLM_BASE_URL = 'https://aihubmix.com/v1'
 
 /**
- * 译制模型候选链(2026-08-27):free 优先(coding-glm-5.3-flash-free 打头),free 全不可用落到付费 coding-glm-5.3。
+ * 译制模型候选链(2026-08-27):free 优先(coding-glm-5.3-flash-free 打头),free 全不可用落到付费 coding-glm-5.3-flash。
  * CHANGELOG_LLM_MODEL 支持逗号分隔列表覆盖;Key 沿用 AIHUBMIX_API_KEY。
  */
 const DEFAULT_LLM_MODELS =
-  'coding-glm-5.3-flash-free,coding-glm-5.3-free,coding-kimi-k3-free,gemini-3.7-flash-free,gpt-5.5-free,coding-glm-5-free,coding-glm-5.3'
+  'coding-glm-5.3-flash-free,coding-glm-5.3-free,coding-kimi-k3-free,gemini-3.7-flash-free,gpt-5.5-free,coding-glm-5-free,coding-glm-5.3-flash'
 
 export function modelCandidates(env: NodeJS.ProcessEnv = process.env): string[] {
   // 空串/纯分隔符(如 ",")回退默认:compose 引用行对 .env 缺省键注入的是 ''(非

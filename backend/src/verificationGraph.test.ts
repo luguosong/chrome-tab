@@ -377,9 +377,9 @@ describe('核验图:模型配置自锁与预算', () => {
     expect(calls.every((c) => c.timeoutMs === 120_000)).toBe(true)
   })
 
-  it('缺省模型 = ADR 钉死家族(coding-glm-5.3 / gpt-5.5-free);纯空白键回退缺省、值去两端空白', () => {
-    expect(verificationModels({})).toEqual({ investigate: 'coding-glm-5.3', review: 'gpt-5.5-free' })
-    expect(verificationModels({ VERIFY_INVESTIGATE_LLM_MODEL: ' ', VERIFY_REVIEW_LLM_MODEL: ' b ' })).toEqual({ investigate: 'coding-glm-5.3', review: 'b' })
+  it('缺省模型 = ADR 钉死家族(coding-glm-5.3-flash / gpt-5.5-free);纯空白键回退缺省、值去两端空白', () => {
+    expect(verificationModels({})).toEqual({ investigate: 'coding-glm-5.3-flash', review: 'gpt-5.5-free' })
+    expect(verificationModels({ VERIFY_INVESTIGATE_LLM_MODEL: ' ', VERIFY_REVIEW_LLM_MODEL: ' b ' })).toEqual({ investigate: 'coding-glm-5.3-flash', review: 'b' })
   })
 })
 

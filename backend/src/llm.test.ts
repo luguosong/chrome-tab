@@ -74,7 +74,7 @@ describe('LLM Gateway', () => {
       'gemini-3.7-flash-free',
       'gpt-5.5-free',
       'coding-glm-5-free',
-      'coding-glm-5.3',
+      'coding-glm-5.3-flash',
     ])
     expect(modelCandidates({ CHANGELOG_LLM_MODEL: ' a , b,,' } as NodeJS.ProcessEnv)).toEqual(['a', 'b'])
     expect(modelCandidates({ CHANGELOG_LLM_MODEL: ',,,' } as NodeJS.ProcessEnv)).toEqual(modelCandidates())
