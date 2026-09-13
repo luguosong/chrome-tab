@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BadRequest, cachedOrNull, jsonBody, optInt, optNullableInt, reqInt, reqName } from './common'
+import { BadRequest, cachedOrNull, fetchText, jsonBody, optInt, optNullableInt, reqInt, reqName } from './common'
 
 /**
  * cachedOrNull 原语的不变量直测(ADR-0042)——原 aihot/dida/trending 三域各自
@@ -157,6 +157,16 @@ describe('裸 fetch 契约:上游取数必经原语族(ADR-0045)', () => {
       })
     }
     expect(offenders).toEqual([])
+  })
+
+  it('fetchRes 墙钟兜底:fetch promise 孤儿化(abort 触发但不 reject 的 undici 代理边缘)时仍按墙钟拒绝', async () => {
+    try {
+      // 桩吞掉 signal:模拟 2026-09-13 线上事故形态——AbortSignal 计时耗尽、promise 永不 settle
+      vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
+      await expect(fetchText('https://orphan.example/', 20)).rejects.toThrow('墙钟超时')
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
 

@@ -201,9 +201,19 @@ export const chromeHeaders = (extra: Record<string, string> = {}): RequestInit =
 /** 匿名抓取默认超时(newnow myFetch 同款)。 */
 export const FETCH_TIMEOUT = 10_000
 
-/** Response 底形态:要看响应头/流式消费的调用方用(dida 判 content-type)。 */
+/**
+ * Response 底形态:要看响应头/流式消费的调用方用(dida 判 content-type)。
+ * 墙钟兜底(2026-09-13 线上事故,影子核验首轮停摆):undici 经代理建 CONNECT 隧道阶段
+ * 存在 AbortSignal 触发但 promise 不 reject 的边缘——promise 孤儿化后调用链永久挂起
+ * (实证:主进程 ep_poll 空等、零定时器唤醒 + 陈年代理隧道,30s abort 早已耗尽)。race
+ * 硬墙钟保证必 settle;宽限 1s 让 AbortSignal 的正称超时错误先赢,墙钟只兜孤儿。
+ */
 export async function fetchRes(url: string | URL, timeoutMs: number, init?: RequestInit): Promise<Response> {
-  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+  const wall = new Promise<never>((_, reject) => {
+    const timer: NodeJS.Timeout = setTimeout(() => reject(new Error(`fetch 墙钟超时(${timeoutMs}ms): ${url}`)), timeoutMs + 1_000)
+    timer.unref()
+  })
+  const res = await Promise.race([fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) }), wall])
   if (!res.ok) {
     throw Object.assign(new Error(`${init?.method ?? 'GET'} ${url} → HTTP ${res.status}`), {
       status: res.status,
