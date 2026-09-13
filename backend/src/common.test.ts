@@ -147,10 +147,10 @@ describe('请求体校验小件(ADR-0048)', () => {
  * 2026-08-31 补收),此断言把「grep 可断言」变成测试把关,防下一个域再漏。
  */
 describe('裸 fetch 契约:上游取数必经原语族(ADR-0045)', () => {
-  it('backend/src 非测试源码仅 common.ts(原语内部)与 ai/(LLM 族豁免)可触全局 fetch', () => {
+  it('backend/src 非测试源码仅 common.ts(原语内部)可触全局 fetch', () => {
     const offenders: string[] = []
     for (const { rel, lines } of srcFiles()) {
-      if (rel === 'common.ts' || rel.startsWith('ai/')) continue
+      if (rel === 'common.ts') continue
       lines.forEach((line, i) => {
         if (/\btypeof fetch\b|\?\?\s*fetch\b|(?<![.\w])fetch\s*\(/.test(line))
           offenders.push(`${rel}:${i + 1}: ${line.trim()}`)

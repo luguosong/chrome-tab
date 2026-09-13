@@ -4,8 +4,7 @@ import { fetchText } from './common'
  * LLM Gateway:简单补全机制单点(ADR-0061,自 translate.ts 网关地基深化而出):
  * 网关地址、模型候选、候选链循环、进程级请求闸门与 OpenAI 兼容响应解析住在这里;
  * prompt、输出校验、持久化与日志留各调用方。消费者:批量/分段译制(translate.ts)
- * 与模型核验(modelVerify.ts);ai/agent.ts 仅引网关地址——tool-call 多步循环与
- * 300s 超时语义不属简单补全链,保留在 agent。机制不反向依赖任何域模块。
+ * 与核验链(verificationGraph/verificationShadow,ADR-0062)。机制不反向依赖任何域模块。
  */
 
 export const LLM_BASE_URL = 'https://aihubmix.com/v1'

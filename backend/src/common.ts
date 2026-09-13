@@ -187,8 +187,7 @@ export const str = (m: Rec, k: string): string | null => {
  * 上游抓取原语族:超时防挂起(ADR-0017)+ 非 2xx 抛带 status/body 的错(供调用方
  * 分类),此两不变量全 backend 单点。changelog/videoUpdates/modelTracking 三处同形
  * 自第三处收归;2026-08-30 weather/dida/aihot/servermon 的裸 fetch(无超时,weather
- * 有线上事故前科)收编(ADR-0045)。不收:ai/agent——LLM 长读超时自成一族,且已有
- * AgentDeps 注入 seam。统一 Chrome UA 与默认超时(news 源 2026-08-26 起,「GitHub
+ * 有线上事故前科)收编(ADR-0045)。统一 Chrome UA 与默认超时(news 源 2026-08-26 起,「GitHub
  * 趋势」剥离成第二消费者后收归)。
  */
 export const CHROME_UA =
