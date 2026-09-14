@@ -146,7 +146,15 @@ export async function callModel(
     }),
   })
   try {
-    return { content: extractContent(JSON.parse(resp)), resp }
+    const parsed: unknown = JSON.parse(resp)
+    // 成本记账(2026-09-14,issues/14):usage 是网关层横切数据,唯一消费面是运维日志——在
+    // 原语内打一行,ADR-0032「原语不打印日志」的明示例外(记账格式不属任何单一外层的
+    // 运维 interface,消费方无人需要 usage 数据);网关缺 usage 字段则静默跳过。
+    const u = (parsed as { usage?: { prompt_tokens?: number; completion_tokens?: number } } | null)?.usage
+    if (u !== undefined && (u.prompt_tokens !== undefined || u.completion_tokens !== undefined)) {
+      console.log(`llm-usage model=${model} in=${u.prompt_tokens ?? '?'} out=${u.completion_tokens ?? '?'}`)
+    }
+    return { content: extractContent(parsed), resp }
   } catch {
     return { content: null, resp }
   }

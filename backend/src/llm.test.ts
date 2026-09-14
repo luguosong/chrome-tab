@@ -54,6 +54,20 @@ describe('LLM Gateway', () => {
     }
   })
 
+  it('callModel 记一行 usage 成本日志;网关缺 usage 字段静默(issues/14)', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    globalThis.fetch = vi.fn(async () => new Response(
+      JSON.stringify({ choices: [{ message: { content: 'a' } }], usage: { prompt_tokens: 120, completion_tokens: 30 } }),
+      { status: 200 },
+    )) as typeof fetch
+    await callModel('m1', 'key', 'sys', 'user')
+    expect(log).toHaveBeenCalledWith('llm-usage model=m1 in=120 out=30')
+    log.mockClear()
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'a' } }] }), { status: 200 })) as typeof fetch
+    await callModel('m1', 'key', 'sys', 'user')
+    expect(log).not.toHaveBeenCalled()
+  })
+
   it('候选链遇软失效哨兵换下一候选', async () => {
     const seen: string[] = []
     await expect(

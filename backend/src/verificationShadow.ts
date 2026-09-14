@@ -96,8 +96,9 @@ export function clueOwnedUrls(def: ProviderDef<unknown>, clue: PendingClue): Set
   return new Set([clue.sourceUrl, ...(def.verifyUrls?.(clue) ?? [])])
 }
 
-/** error 出口(系统错误)重投退避窗 = 三个轮次:网关 5xx/超时类瞬时故障按此节奏重试;
- *  无窗的每 2h 重投会让持续 error 的项无限烧 LLM(卡死模型 × 每轮 1-2 次真实调用)。 */
+/** error 与 defer(unavailable) 出口(系统失败,issues/14)重投退避窗 = 三个轮次:网关 5xx/
+ *  超时/渠道限额类故障按此节奏重试;无窗的每 2h 重投会让持续失败的项无限烧 LLM(卡死
+ *  模型 × 每轮 1-2 次真实调用)。429 日限额场景 6h 重试最晚第三投跨天,自愈足够。 */
 const ERROR_RETRY_MS = 6 * 3600_000
 
 /**
@@ -371,15 +372,18 @@ export function makeShadowVerification(db: Db, deps: ShadowDeps, config: ShadowC
       exit = (await graph.invoke({ task }, cfg)).exit
     }
     currentFingerprint = ''
-    const state = exit !== null && exit.kind !== 'error' ? 'terminal' : 'backoff'
+    // defer(unavailable) 与 error 同走退避(issues/14):模型/渠道不可用是系统失败非线索
+    // 裁决——终态行只能等指纹变化重开,渠道恢复等不来,free 复核撞日限的线索会永久漏核;
+    // 退避重扫让「系统失败按退避策略持续重试」落回生命周期词条语义。
+    const state = exit !== null && exit.kind !== 'error' && !(exit.kind === 'defer' && exit.cause === 'unavailable') ? 'terminal' : 'backoff'
     q.finish.run({ provider: clue.provider, modelKey: clue.modelKey, state, exitJson: JSON.stringify(exit), updatedAt: nowIso() })
-    // 出口记账(线索账本,带证据指纹):noise / defer(insufficient)为终态待指纹变化重开;
-    // accept 已在图内最终事务记账(commitAcceptPlan);error 不写——留 pending 由退避重扫
-    // 重试,不受展示窗口限制。写不进(旧链终态行等)由 recordVerification 返回 false
-    // 表达,不抛错;真 DB 异常照轮次口径上抛记日志(下轮自愈)。
+    // 出口记账(线索账本,带证据指纹):noise / defer(insufficient|disagreement)为终态待指纹
+    // 变化重开;accept 已在图内最终事务记账(commitAcceptPlan);error 与 defer(unavailable)
+    // 不写——留 pending 由退避重扫重试,不受展示窗口限制。写不进(旧链终态行等)由
+    // recordVerification 返回 false 表达,不抛错;真 DB 异常照轮次口径上抛记日志(下轮自愈)。
     if (exit !== null && exit.kind === 'noise') {
       await ledger.recordVerification(clue.provider, clue.modelKey, 'noise', exit.reason, fingerprint)
-    } else if (exit !== null && exit.kind === 'defer') {
+    } else if (exit !== null && exit.kind === 'defer' && exit.cause !== 'unavailable') {
       await ledger.recordVerification(clue.provider, clue.modelKey, 'insufficient', exit.reason, fingerprint)
     }
   }

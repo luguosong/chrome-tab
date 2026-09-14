@@ -227,6 +227,17 @@ describe('核验链:写库事务与出口记账(issues/11 切换)', () => {
     }
   })
 
+  it('defer(unavailable) 不写账本(留 pending 退避重扫):渠道不可用是系统失败非线索裁决(issues/14)', async () => {
+    const fx = fixture()
+    await fx.ledger.ingest('zhipu', [CLUE])
+    // 调查出提案、复核撞渠道限额:429 → defer(unavailable),不走 insufficient 终态
+    fx.replies.push(finalStage, Object.assign(new Error('rate limited'), { status: 429 }))
+    await fx.shadow.round()
+    expect(registryRow(fx)).toMatchObject({ state: 'backoff' })
+    expect(registryExit(fx)).toMatchObject({ kind: 'defer', cause: 'unavailable' })
+    expect(await clueState(fx)).toMatchObject({ state: 'pending', fingerprint: null })
+  })
+
   it('重核线索(recheck: 键)不在账本:accept 照常落档案面,记账落空不跳过', async () => {
     const fx = fixture()
     await seedArchiveRow(fx, 'ga')
